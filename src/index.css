@@ -1,0 +1,73 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, 'Cascadia Code', monospace;
+
+  /* Cloud provider accents — preserved */
+  --color-aws:   #FF9900;
+  --color-azure: #0078D4;
+  --color-gcp:   #4285F4;
+
+  /* Design system palette */
+  --color-primary:      #2563EB;
+  --color-primary-light:#EFF6FF;
+  --color-success:      #22C55E;
+  --color-error:        #EF4444;
+  --color-warning:      #F59E0B;
+  --color-muted:        #94A3B8;
+  --color-progress:     #9ACD32;
+
+  /* Light surfaces */
+  --color-bg:           #F5F7FA;
+  --color-card:         #FFFFFF;
+  --color-border:       #E5E9EF;
+  --color-text:         #0F172A;
+  --color-text-sub:     #64748B;
+
+  /* Dark surfaces */
+  --color-dark-bg:      #0B1220;
+  --color-dark-card:    #111B2E;
+  --color-dark-border:  #1E293B;
+}
+
+:root {
+  /* Auth / wizard gradient */
+  --auth-grad: linear-gradient(135deg, #1B6FC9 0%, #14A085 50%, #2EBD59 100%);
+
+  /* Button */
+  --btn-grad: linear-gradient(135deg, #2563EB, #22C55E);
+
+  /* Card */
+  --card-radius: 1.25rem;
+  --shadow-sm:   0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.06);
+  --shadow-md:   0 4px 6px rgba(0,0,0,.07), 0 2px 4px rgba(0,0,0,.06);
+  --shadow-lg:   0 10px 15px rgba(0,0,0,.07), 0 4px 6px rgba(0,0,0,.05);
+
+  /* Scrollbar */
+  scrollbar-width: thin;
+  scrollbar-color: #E5E9EF transparent;
+}
+
+html, body, #root {
+  height: 100%;
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button, input, optgroup, select, textarea {
+  font-family: inherit;
+}
+
+/* Dark mode scrollbar */
+.dark {
+  scrollbar-color: #1E293B transparent;
+}
+
+::-webkit-scrollbar            { width: 5px; height: 5px; }
+::-webkit-scrollbar-track      { background: transparent; }
+::-webkit-scrollbar-thumb      { background: #E5E9EF; border-radius: 99px; }
+.dark ::-webkit-scrollbar-thumb{ background: #1E293B; }
+::-webkit-scrollbar-thumb:hover{ background: #2563EB; }

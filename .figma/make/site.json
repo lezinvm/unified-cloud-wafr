@@ -1,0 +1,10 @@
+{
+  "description": "Streamlines cloud architecture reviews across AWS, Azure, and GCP with assessments, live scans, AI remediation, and interactive reports for cloud architects.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
