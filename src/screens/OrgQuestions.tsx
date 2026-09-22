@@ -312,26 +312,6 @@ export function OrgQuestions() {
           </div>
         </div>
 
-        {/* Informational Guidance Alert */}
-        <div
-          className="p-4 rounded-2xl border flex items-start gap-3.5"
-          style={{
-            backgroundColor: isDark ? 'rgba(59,130,246,0.08)' : '#EFF6FF',
-            borderColor: isDark ? 'rgba(59,130,246,0.25)' : '#DBEAFE',
-          }}
-        >
-          <div
-            className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0 mt-0.5 text-xs font-bold"
-            style={{ backgroundColor: T.primary, color: '#FFFFFF' }}
-          >
-            i
-          </div>
-          <div className="text-xs leading-relaxed" style={{ color: T.text }}>
-            <span className="font-bold block mb-0.5">Enterprise Baseline Verification</span>
-            Each question includes technical manual checks and an <span className="font-serif italic font-bold text-blue-600 dark:text-blue-400">i</span> (Info) button with step-by-step verification guidance, WAFR framework references, and required audit evidence.
-          </div>
-        </div>
-
         {/* ── QUESTION CARDS LIST ── */}
         <div className="flex flex-col gap-4">
           {orgQuestions.map((q, idx) => {
@@ -387,29 +367,6 @@ export function OrgQuestions() {
                         >
                           {q.cat}
                         </span>
-                        {isAnswered && (
-                          <span
-                            className="text-[10px] font-bold px-2 py-0.5 rounded-full"
-                            style={{
-                              backgroundColor: isDark ? 'rgba(52,211,153,0.15)' : '#ECFDF5',
-                              color: isDark ? '#6EE7B7' : '#059669',
-                            }}
-                          >
-                            Answered
-                          </span>
-                        )}
-                        {totalChecksCount > 0 && (
-                          <span
-                            className="text-[10px] font-semibold px-2 py-0.5 rounded-full border"
-                            style={{
-                              borderColor: verifiedCount === totalChecksCount ? (isDark ? 'rgba(52,211,153,0.3)' : '#A7F3D0') : T.border,
-                              backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : '#F8FAFC',
-                              color: verifiedCount === totalChecksCount ? (isDark ? '#6EE7B7' : '#059669') : T.textSub,
-                            }}
-                          >
-                            {verifiedCount}/{totalChecksCount} checks verified
-                          </span>
-                        )}
                       </div>
 
                       <h3 className="text-sm sm:text-base font-bold leading-snug" style={{ color: T.text }}>
@@ -422,23 +379,22 @@ export function OrgQuestions() {
                   </div>
 
                   <div className="flex items-center gap-2 shrink-0">
-                    {/* Info Button with 'i' */}
+                    {/* Info Button with 'i' only */}
                     <button
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
                         setSelectedInfoQuestion(q);
                       }}
-                      className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold border transition-colors cursor-pointer"
+                      className="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold border transition-all cursor-pointer hover:opacity-80 shadow-2xs"
                       style={{
                         backgroundColor: isDark ? 'rgba(59,130,246,0.15)' : '#EFF6FF',
                         borderColor: isDark ? 'rgba(59,130,246,0.3)' : '#BFDBFE',
                         color: isDark ? '#93C5FD' : '#2563EB',
                       }}
-                      title="View WAFR framework verification guidance and audit evidence"
+                      title="View verification guidance & audit evidence"
                     >
-                      <span className="font-serif italic font-bold">i</span>
-                      <span className="hidden sm:inline">Info</span>
+                      <span className="font-serif italic font-bold text-xs">i</span>
                     </button>
 
                     <span
