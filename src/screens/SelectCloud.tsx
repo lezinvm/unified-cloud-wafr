@@ -46,14 +46,14 @@ export function SelectCloud() {
         <div className="flex items-center gap-2 mr-4">
           <button
             type="button"
-            onClick={() => go('select-lens')}
+            onClick={() => go('org-questions')}
             className="flex items-center gap-1.5 text-white/90 hover:text-white text-xs font-semibold px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 transition-all cursor-pointer"
-            title="Choose a different Lens framework"
+            title="Return to Organisation-Specific Questions"
           >
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
               <polyline points="15 18 9 12 15 6" />
             </svg>
-            <span>Change Lens</span>
+            <span>Organisation Questions</span>
           </button>
 
           <button
@@ -78,12 +78,56 @@ export function SelectCloud() {
         </div>
       </header>
 
+      {/* ── STEP-BY-STEP BAR (Simple & Perfect) ── */}
+      <div
+        className="px-6 py-2.5 border-b relative z-10 flex items-center justify-between"
+        style={{
+          backgroundColor: 'rgba(0,0,0,0.15)',
+          borderColor: 'rgba(255,255,255,0.1)',
+        }}
+      >
+        <div className="max-w-3xl w-full mx-auto flex items-center justify-center gap-3 sm:gap-6 text-xs font-semibold">
+          {/* Step 1: Completed */}
+          <button
+            type="button"
+            onClick={() => go('org-questions')}
+            className="flex items-center gap-2 text-emerald-200 hover:text-white transition-colors cursor-pointer"
+            title="Click to review or edit Organisation Questions"
+          >
+            <span className="w-5 h-5 rounded-full bg-emerald-500 text-white flex items-center justify-center font-bold text-[10px]">
+              ✓
+            </span>
+            <span>1. Organisation Questions</span>
+          </button>
+
+          <div className="w-8 h-px bg-white/20 hidden sm:block" />
+
+          {/* Step 2: Active */}
+          <div className="flex items-center gap-2 text-white">
+            <span className="w-5 h-5 rounded-full bg-white text-blue-700 flex items-center justify-center font-bold text-[10px] shadow-xs">
+              2
+            </span>
+            <span className="font-bold underline decoration-2 underline-offset-4">2. Select Cloud Provider</span>
+          </div>
+
+          <div className="w-8 h-px bg-white/20 hidden sm:block" />
+
+          {/* Step 3: Upcoming */}
+          <div className="flex items-center gap-2 text-white/50">
+            <span className="w-5 h-5 rounded-full border border-white/30 flex items-center justify-center font-bold text-[10px]">
+              3
+            </span>
+            <span>3. Configure Assessment</span>
+          </div>
+        </div>
+      </div>
+
       <div className="flex-1 flex flex-col items-center justify-center p-8 relative z-10">
         <div className="max-w-3xl w-full">
           <div className="text-center mb-10">
             <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-medium mb-5 bg-white/15 text-white border border-white/25">
               <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-              Acme Corp workspace
+              Acme Corp workspace · Organisation Baseline Configured
             </div>
             <h1 className="text-4xl font-semibold tracking-tight text-white mb-3">Select cloud provider</h1>
             <p className="text-white/65 text-base">Choose a cloud to manage Well-Architected Framework reviews</p>

@@ -16,6 +16,7 @@ import { Settings } from './screens/Settings';
 import { Admin } from './screens/Admin';
 import { Onboarding } from './screens/Onboarding';
 import { SelectLens } from './screens/SelectLens';
+import { OrgQuestions } from './screens/OrgQuestions';
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -77,6 +78,7 @@ function ScreenRouter() {
   switch (screen) {
     case 'login':           return <Login />;
     case 'dashboard':       return <Dashboard />;
+    case 'org-questions':   return <OrgQuestions />;
     case 'select-cloud':    return <SelectCloud />;
     case 'assessment-list': return <AssessmentList />;
     case 'wizard':          return <Wizard />;

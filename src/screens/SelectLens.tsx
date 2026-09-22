@@ -87,7 +87,7 @@ export function SelectLens() {
   const handleProceed = () => {
     if (selectedLensId === 'wafr') {
       setSelectedLens('wafr');
-      go('select-cloud');
+      go('org-questions');
     } else {
       const activeOption = LENS_OPTIONS.find((l) => l.id === selectedLensId);
       setComingSoonModal({ open: true, lensTitle: activeOption?.title || 'Selected Lens' });
@@ -98,7 +98,7 @@ export function SelectLens() {
     setSelectedLens('wafr');
     setSelectedLensId('wafr');
     setComingSoonModal(null);
-    go('select-cloud');
+    go('org-questions');
   };
 
   return (

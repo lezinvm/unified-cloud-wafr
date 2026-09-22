@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useApp, Cloud } from '../context';
 import { AwsWordmark, AzureMark, GcpMark, CloudifyOpsSymbol } from '../components/CloudLogo';
+import { INITIAL_ORG_QUESTIONS } from '../data/questionnaireData';
 
 const STEPS = [
   { n: 1, label: 'Configure Cloud' },
@@ -359,79 +360,8 @@ const INITIAL_QUESTIONS: QuestionnaireItem[] = [
     ],
   },
 
-  // ── Organization-Specific Questions ──
-  {
-    id: 'ORG-01',
-    scope: 'organization',
-    cat: 'Security',
-    q: 'How does the organization enforce Service Control Policies (SCPs) and Landing Zone guardrails?',
-    desc: 'Preventive guardrails across multi-account organization hierarchy, region restrictions, and root lockouts.',
-    answered: true,
-    ans: 'AWS Organizations with AWS Control Tower enforces foundational SCPs denying unauthorized regions, root user usage, and public S3 bucket creation across all member accounts.',
-    info: {
-      frameworkRef: 'AWS WAFR: SEC-02 · AWS Organizations Best Practices',
-      whyItMatters: 'Centralized SCPs prevent member accounts from altering security baselines, enabling programmatic compliance at scale.',
-      howToVerify: [
-        'Open AWS Organizations > Policies > Service control policies.',
-        'Verify SCPs denying unapproved AWS regions and disabling AWS CloudTrail.',
-      ],
-      auditEvidence: 'AWS Organizations SCP JSON policy attachments list.',
-    },
-  },
-  {
-    id: 'ORG-02',
-    scope: 'organization',
-    cat: 'Security',
-    q: 'How is centralized audit logging and SIEM integration configured across accounts?',
-    desc: 'Aggregated CloudTrail logs, central Log Archive account, and real-time security alerts.',
-    answered: true,
-    ans: 'Organization-wide CloudTrail logs and VPC Flow Logs are replicated to a dedicated secure Log Archive account with SIEM ingestion.',
-    info: {
-      frameworkRef: 'AWS WAFR: SEC-04 · Centralized Audit Architecture',
-      whyItMatters: 'Centralizing audit telemetry in an immutable, restricted-access account prevents tampering during security incidents.',
-      howToVerify: [
-        'Verify organization trail in master account sending logs to dedicated Log Archive S3 bucket.',
-        'Confirm S3 bucket has MFA Delete and Object Lock enabled.',
-      ],
-      auditEvidence: 'Organization CloudTrail configuration and SIEM ingestion pipeline dashboard.',
-    },
-  },
-  {
-    id: 'ORG-03',
-    scope: 'organization',
-    cat: 'Cost Optimization',
-    q: 'How does the organization manage centralized budgets, cost allocation tags, and showback/chargeback?',
-    desc: 'Enterprise tagging policies, AWS Cost Categories, and centralized consolidated billing governance.',
-    answered: false,
-    ans: '',
-    info: {
-      frameworkRef: 'AWS WAFR: COST-01 & COST-02 · FinOps Foundation Standards',
-      whyItMatters: 'Standardized cost allocation tags and automated budget notifications foster engineering accountability and eliminate budget overruns.',
-      howToVerify: [
-        'Inspect Tag Policies in AWS Organizations for mandatory tags (Environment, Owner, CostCenter).',
-        'Verify AWS Budgets threshold alerts connected to finance and engineering Slack channels.',
-      ],
-      auditEvidence: 'AWS Tag Policy compliance report and AWS Budgets threshold notification settings.',
-    },
-  },
-  {
-    id: 'ORG-04',
-    scope: 'organization',
-    cat: 'Operational Excellence',
-    q: 'How are organization-wide disaster recovery and incident escalation runbooks standardized?',
-    desc: 'Cross-account disaster recovery SLAs, enterprise on-call rotations, and executive post-mortem reviews.',
-    answered: false,
-    ans: '',
-    info: {
-      frameworkRef: 'AWS WAFR: OPS-10 & REL-13 · Enterprise Incident Management',
-      whyItMatters: 'Well-rehearsed disaster recovery procedures and clear escalation hierarchies guarantee predictable operational response during major incidents.',
-      howToVerify: [
-        'Review the enterprise incident severity matrix (P1-P4) and on-call escalation policies.',
-        'Verify cross-account recovery testing logs and annual DR exercise results.',
-      ],
-      auditEvidence: 'Annual DR Exercise Signoff document and post-incident review (PIR) archive.',
-    },
-  },
+  // ── Organization-Specific Questions (Pre-configured prior to cloud selection) ──
+  ...INITIAL_ORG_QUESTIONS,
 ];
 
 const CAT_COLORS: Record<string, { bg: string; text: string }> = {
@@ -459,6 +389,7 @@ const Field = ({ label, required, ...props }: { label: string; required?: boolea
 
 /* ── Step progress strip ── */
 function StepProgress({ step }: { step: number }) {
+  const { go } = useApp();
   const pct = Math.round(((step - 1) / (STEPS.length - 1)) * 100);
   return (
     <div className="bg-white border-b border-gray-100 px-8 py-4">
@@ -472,7 +403,21 @@ function StepProgress({ step }: { step: number }) {
         <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, backgroundColor: '#34D399' }} />
       </div>
       {/* Step chips */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-3 flex-wrap">
+        <button
+          type="button"
+          onClick={() => go('org-questions')}
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition-colors cursor-pointer"
+          title="Review or edit Organisation-Specific Questions"
+        >
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+          <span>Organisation Questions (Done)</span>
+        </button>
+
+        <div className="w-4 h-px bg-slate-200 hidden sm:block" />
+
         {STEPS.map((s, i) => {
           const done = s.n < step;
           const active = s.n === step;
@@ -1079,7 +1024,18 @@ function Step1({
       </div>
 
       {/* Actions */}
-      <div className="flex justify-end">
+      <div className="flex justify-between items-center">
+        <button
+          type="button"
+          onClick={() => go('select-cloud')}
+          className="px-4 py-2.5 rounded-xl text-xs font-semibold border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors cursor-pointer flex items-center gap-1.5"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <polyline points="15 18 9 12 15 6" />
+          </svg>
+          <span>Back to Select Cloud</span>
+        </button>
+
         <button
           type="button"
           onClick={onNext}
@@ -1108,7 +1064,8 @@ function Step2({
   onNext: () => void;
   onBack: () => void;
 }) {
-  const [scopeFilter, setScopeFilter] = useState<'all' | 'account' | 'organization'>('all');
+  const { go } = useApp();
+  const [scopeFilter, setScopeFilter] = useState<'all' | 'account' | 'organization'>('account');
   const [activeQuestionId, setActiveQuestionId] = useState<string | null>('ACC-05');
   const [draftAnswers, setDraftAnswers] = useState<Record<string, string>>({});
   const [selectedInfoQuestion, setSelectedInfoQuestion] = useState<QuestionnaireItem | null>(null);
@@ -1252,6 +1209,25 @@ function Step2({
           <div className="h-full rounded-full transition-all duration-300" style={{ width: `${totalPct}%`, backgroundColor: '#34D399' }} />
         </div>
         <span className="text-xs font-semibold" style={{ color: '#10B981' }}>{totalPct}% Complete</span>
+      </div>
+
+      {/* ── Organisation Questions Status Banner ── */}
+      <div className="p-3.5 rounded-2xl bg-emerald-50/90 border border-emerald-200 text-emerald-950 flex items-center justify-between gap-3 text-xs flex-wrap">
+        <div className="flex items-center gap-2.5">
+          <span className="w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold text-[10px]">
+            ✓
+          </span>
+          <span className="font-semibold">
+            Organisation-Level Governance: {orgAnswered} of {orgQuestions.length} answered prior to cloud selection
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={() => go('org-questions')}
+          className="text-xs font-bold text-blue-700 hover:underline cursor-pointer"
+        >
+          Review / Edit Organisation Questions →
+        </button>
       </div>
 
       {/* ── 2 SCOPE SWITCHER TABS ── */}
@@ -1951,7 +1927,7 @@ function Step3({
 
 /* ── Main Wizard Component ── */
 export function Wizard() {
-  const { go, cloud, setWizardStep, wizardStep: globalStep } = useApp();
+  const { go, cloud, setWizardStep, wizardStep: globalStep, orgQuestions } = useApp();
   const [step, setStep] = useState<1 | 2 | 3>(globalStep <= 3 ? (globalStep as 1 | 2 | 3) : 1);
 
   // Form State
@@ -1960,7 +1936,24 @@ export function Wizard() {
   const [selectedAccount, setSelectedAccount] = useState('acc-aws-01');
   const [accountType, setAccountType] = useState<'prod' | 'pre-prod' | 'dev'>('prod');
   const [selectedRegion, setSelectedRegion] = useState('us-east-1');
-  const [questions, setQuestions] = useState<QuestionnaireItem[]>(INITIAL_QUESTIONS);
+  const [questions, setQuestions] = useState<QuestionnaireItem[]>(() => {
+    return INITIAL_QUESTIONS.map(q => {
+      const org = orgQuestions?.find(o => o.id === q.id);
+      return org ? { ...org } : q;
+    });
+  });
+
+  // Sync orgQuestions if they change in AppContext
+  useEffect(() => {
+    if (orgQuestions?.length) {
+      setQuestions(prev =>
+        prev.map(q => {
+          const org = orgQuestions.find(o => o.id === q.id);
+          return org ? { ...q, ans: org.ans, answered: org.answered, manualChecks: org.manualChecks } : q;
+        })
+      );
+    }
+  }, [orgQuestions]);
 
   // Synchronize when user selects a cloud in SelectCloud screen
   useEffect(() => {

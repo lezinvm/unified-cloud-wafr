@@ -206,7 +206,7 @@ export function Dashboard() {
 
             <button
               type="button"
-              onClick={() => { if (!isNewUser) go('select-cloud'); }}
+              onClick={() => { if (!isNewUser) go('org-questions'); }}
               disabled={isNewUser}
               className={`flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-semibold transition-all shadow-sm ${
                 isNewUser

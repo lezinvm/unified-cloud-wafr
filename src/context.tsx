@@ -5,6 +5,7 @@ import {
   INITIAL_ASSESSMENTS,
   INITIAL_MILESTONES,
 } from './data/assessmentData';
+import { QuestionnaireItem, INITIAL_ORG_QUESTIONS } from './data/questionnaireData';
 
 export type Cloud = 'aws' | 'azure' | 'gcp';
 export type Theme = 'light' | 'dark';
@@ -13,6 +14,7 @@ export type LensType = 'wafr' | 'genai' | 'finops';
 export type Screen =
   | 'login'
   | 'dashboard'
+  | 'org-questions'
   | 'select-cloud'
   | 'select-lens'
   | 'assessment-list'
@@ -81,6 +83,11 @@ interface AppState {
   solvedCheckIds: Record<string, boolean>;
   toggleCheckSolved: (id: string) => void;
   markCheckSolved: (id: string, solved?: boolean) => void;
+  orgQuestions: QuestionnaireItem[];
+  setOrgQuestions: React.Dispatch<React.SetStateAction<QuestionnaireItem[]>>;
+  updateOrgQuestion: (id: string, ans: string, answered?: boolean) => void;
+  toggleOrgCheck: (questionId: string, checkId: string) => void;
+  toggleAllOrgChecks: (questionId: string, verified: boolean) => void;
   wizardStep: 1 | 2 | 3;
   theme: Theme;
   isNewUser: boolean;
@@ -117,11 +124,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [selectedPillarId, setSelectedPillarId] = useState<string>('reliability');
   const [remediationFindingId, setRemediationFindingId] = useState<string | null>(null);
   const [solvedCheckIds, setSolvedCheckIds] = useState<Record<string, boolean>>({});
+  const [orgQuestions, setOrgQuestions] = useState<QuestionnaireItem[]>(INITIAL_ORG_QUESTIONS);
   const [wizardStep, setWizardStep] = useState<1 | 2 | 3>(1);
   const [theme, setTheme] = useState<Theme>('light');
   const [isNewUser, setIsNewUser] = useState<boolean>(false);
   const [userRole, setUserRole] = useState<'user' | 'admin'>('user');
   const [adminTab, setAdminTab] = useState<'users' | 'tokens'>('users');
+
+  const updateOrgQuestion = (id: string, ans: string, answered = true) => {
+    setOrgQuestions(prev => prev.map(q => q.id === id ? { ...q, ans, answered: ans.trim().length > 0 ? answered : false } : q));
+  };
+
+  const toggleOrgCheck = (questionId: string, checkId: string) => {
+    setOrgQuestions(prev => prev.map(q => {
+      if (q.id !== questionId || !q.manualChecks) return q;
+      return {
+        ...q,
+        manualChecks: q.manualChecks.map(c => c.id === checkId ? { ...c, verified: !c.verified } : c),
+      };
+    }));
+  };
+
+  const toggleAllOrgChecks = (questionId: string, verified: boolean) => {
+    setOrgQuestions(prev => prev.map(q => {
+      if (q.id !== questionId || !q.manualChecks) return q;
+      return {
+        ...q,
+        manualChecks: q.manualChecks.map(c => ({ ...c, verified })),
+      };
+    }));
+  };
 
   const toggleCheckSolved = (id: string) => {
     setSolvedCheckIds(prev => ({
@@ -294,6 +326,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         solvedCheckIds,
         toggleCheckSolved,
         markCheckSolved,
+        orgQuestions,
+        setOrgQuestions,
+        updateOrgQuestion,
+        toggleOrgCheck,
+        toggleAllOrgChecks,
         wizardStep,
         theme,
         isNewUser,

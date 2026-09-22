@@ -79,7 +79,7 @@ export function AssessmentList() {
             </div>
             <button
               type="button"
-              onClick={() => { go('select-cloud'); }}
+              onClick={() => { go('org-questions'); }}
               className="flex items-center gap-2 px-4 py-2.5 rounded-full text-sm font-bold transition-opacity hover:opacity-90 cursor-pointer shadow-sm"
               style={{ background: 'linear-gradient(135deg,#2563EB,#22C55E)', color: '#FFFFFF', boxShadow: T.shadow }}
             >
