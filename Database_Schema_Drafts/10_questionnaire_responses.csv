@@ -1,0 +1,2 @@
+id,org_id,assessment_id,question_id,answered,answer_text,manual_checks,updated_by,updated_at
+qr_01,org_01,ass_01,ORG-01,true,We enforce MFA via Okta.,[],usr_01,2026-10-01

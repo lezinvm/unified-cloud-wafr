@@ -1,10 +1,25 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useApp, LIGHT, DARK, Tokens } from '../context';
 import { AppLayout } from '../components/AppLayout';
 import { StatusPill } from '../components/StatusPill';
 import { SeverityPill } from '../components/FindingUI';
 import { PILLARS_DATA, PillarData } from '../data/wafrData';
+import {
+  ComplianceFramework,
+  CloudProvider,
+  INITIAL_COMPLIANCE_FRAMEWORKS,
+} from '../data/complianceData';
 import { ArchitectureDiagramModal } from '../components/ArchitectureDiagramModal';
+import { ScheduleAssessmentModal } from '../components/ScheduleAssessmentModal';
+import { JiraTicketModal } from '../components/JiraTicketModal';
+import { SlackAlertModal } from '../components/SlackAlertModal';
+import { SlackLogo, JiraLogo } from '../components/IntegrationLogos';
+import { REMEDIATION_DATABASE } from './AIRemediation';
+import {
+  fetchRemediationsFromDb,
+  getFallbackRemediations,
+  type CheckRemediationData,
+} from '../data/remediationData';
 
 /* ── Info Tooltip Component ──────────────────────────────────────────────── */
 
@@ -148,7 +163,9 @@ interface FixSegment {
   severity?: string;
 }
 
-function FixStatusGraph({
+/* ── Graph 1: Assessment Findings Breakdown Component ──────────────────────── */
+
+function FindingsBreakdownGraph({
   totalChecks,
   passingChecksCount,
   failingChecksCount,
@@ -159,7 +176,6 @@ function FixStatusGraph({
   T,
   isDark,
   onViewChecks,
-  onGoToRemediation,
 }: {
   totalChecks: number;
   passingChecksCount: number;
@@ -171,7 +187,6 @@ function FixStatusGraph({
   T: Tokens;
   isDark: boolean;
   onViewChecks: (status: 'all' | 'fail' | 'pass', severity?: string) => void;
-  onGoToRemediation?: () => void;
 }) {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
 
@@ -224,16 +239,13 @@ function FixStatusGraph({
 
   const activeSegments = segments.filter(s => s.count > 0);
   const passRate = totalChecks > 0 ? Math.round((passingChecksCount / totalChecks) * 100) : 0;
-  const fixRate = totalChecks > 0 ? Math.round((failingChecksCount / totalChecks) * 100) : 0;
 
-  // Donut SVG parameters
-  const size = 180;
+  const size = 170;
   const center = size / 2;
-  const radius = 64;
-  const strokeWidth = 20;
+  const radius = 60;
+  const strokeWidth = 18;
   const circ = 2 * Math.PI * radius;
 
-  // Calculate segment arcs
   let accumulatedLength = 0;
   const segmentArcs = activeSegments.map(seg => {
     const ratio = seg.count / (totalChecks || 1);
@@ -254,7 +266,7 @@ function FixStatusGraph({
 
   return (
     <div
-      className="p-5 sm:p-6"
+      className="p-5 flex flex-col justify-between"
       style={{
         background: T.card,
         border: `1px solid ${T.border}`,
@@ -262,50 +274,38 @@ function FixStatusGraph({
         borderRadius: '1.25rem',
       }}
     >
-      {/* Header with Title and info */}
-      <div className="flex items-center justify-between flex-wrap gap-2 pb-4 mb-4 border-b" style={{ borderColor: T.border }}>
+      <div className="flex items-center justify-between flex-wrap gap-2 pb-3.5 mb-3 border-b" style={{ borderColor: T.border }}>
         <div className="flex items-center gap-2">
           <span
-            className="w-8 h-8 rounded-xl flex items-center justify-center"
+            className="w-7 h-7 rounded-lg flex items-center justify-center"
             style={{ backgroundColor: isDark ? 'rgba(59,130,246,0.15)' : '#EFF6FF', color: T.primary }}
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21.21 15.89A10 10 0 1 1 8 2.83"/>
               <path d="M22 12A10 10 0 0 0 12 2v10z"/>
             </svg>
           </span>
           <div>
             <div className="flex items-center gap-1.5">
-              <h2 className="font-semibold text-sm" style={{ color: T.text }}>Checks & Fix Status Breakdown</h2>
+              <h2 className="font-semibold text-sm" style={{ color: T.text }}>Assessment Findings Breakdown</h2>
               <InfoTooltip
-                title="Checks & Fix Status"
-                content="Aggregated breakdown of all technical WAFR checks across pillars, distinguishing compliant checks from items requiring architectural fixes."
+                title="Assessment Findings Breakdown"
+                content="Evaluated findings from scan: Passed checks vs Critical, High, Medium, and Low severity failures."
                 isDark={isDark}
                 T={T}
               />
             </div>
             <p className="text-[11px]" style={{ color: T.textSub }}>
-              {totalChecks} total checks evaluated · {passingChecksCount} passed ({passRate}%) · {failingChecksCount} require fixing ({fixRate}%)
+              {totalChecks} checks evaluated · <span className="text-emerald-600 dark:text-emerald-400 font-semibold">{passingChecksCount} Passed</span> · <span className="text-rose-500 font-semibold">{failingChecksCount} Failed</span>
             </p>
           </div>
         </div>
       </div>
 
-      {/* Pie / Donut Chart with Legend */}
-      <div className="flex flex-col sm:flex-row items-center justify-center gap-8 lg:gap-14 py-2">
-        {/* Donut / Pie Chart & Interactive Center */}
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-6 py-1">
         <div className="relative flex items-center justify-center shrink-0">
           <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="transform -rotate-90">
-            {/* Background ring */}
-            <circle
-              cx={center}
-              cy={center}
-              r={radius}
-              fill="none"
-              stroke={isDark ? 'rgba(255,255,255,0.06)' : '#E2E8F0'}
-              strokeWidth={strokeWidth}
-            />
-            {/* Segment arcs */}
+            <circle cx={center} cy={center} r={radius} fill="none" stroke={isDark ? 'rgba(255,255,255,0.06)' : '#E2E8F0'} strokeWidth={strokeWidth} />
             {segmentArcs.map(seg => {
               const isHovered = hoveredId === seg.id;
               return (
@@ -332,40 +332,34 @@ function FixStatusGraph({
               );
             })}
           </svg>
-
-          {/* Center Summary Label */}
-          <div className="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none px-4">
+          <div className="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none px-2">
             {activeHovered ? (
               <div>
-                <div className="text-2xl font-bold tabular-nums" style={{ color: activeHovered.color }}>
+                <div className="text-xl font-bold tabular-nums" style={{ color: activeHovered.color }}>
                   {activeHovered.count}
                 </div>
                 <div className="text-[10px] font-semibold uppercase tracking-wider line-clamp-1" style={{ color: T.text }}>
                   {activeHovered.label}
                 </div>
-                <div className="text-[10px]" style={{ color: T.textSub }}>
-                  {Math.round((activeHovered.count / (totalChecks || 1)) * 100)}% of total
-                </div>
               </div>
             ) : (
               <div>
-                <div className="text-2xl font-bold tabular-nums" style={{ color: passRate >= 70 ? T.success : passRate >= 50 ? T.warning : T.error }}>
+                <div className="text-xl font-bold tabular-nums" style={{ color: passRate >= 70 ? T.success : passRate >= 50 ? T.warning : T.error }}>
                   {passRate}%
                 </div>
                 <div className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: T.textSub }}>
                   Pass Rate
                 </div>
-                <div className="text-[10px] mt-0.5" style={{ color: T.textSub }}>
-                  {passingChecksCount}/{totalChecks} Checks
+                <div className="text-[10px]" style={{ color: T.textSub }}>
+                  {passingChecksCount}/{totalChecks} Passed
                 </div>
               </div>
             )}
           </div>
         </div>
 
-        {/* Legend beside the Pie Chart */}
-        <div className="flex flex-col gap-2 w-full max-w-sm">
-          {activeSegments.map(seg => {
+        <div className="flex flex-col gap-1.5 w-full">
+          {segments.map(seg => {
             const isHovered = hoveredId === seg.id;
             return (
               <div
@@ -373,25 +367,249 @@ function FixStatusGraph({
                 onMouseEnter={() => setHoveredId(seg.id)}
                 onMouseLeave={() => setHoveredId(null)}
                 onClick={() => onViewChecks(seg.status, seg.severity)}
-                className="flex items-center justify-between gap-4 px-3.5 py-2 rounded-xl border transition-all cursor-pointer"
+                className="flex items-center justify-between gap-3 px-3 py-1.5 rounded-xl border transition-all cursor-pointer"
                 style={{
-                  backgroundColor: isHovered
-                    ? (isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)')
-                    : (isDark ? 'rgba(255,255,255,0.02)' : '#F8FAFC'),
+                  backgroundColor: isHovered ? (isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)') : (isDark ? 'rgba(255,255,255,0.02)' : '#F8FAFC'),
                   borderColor: isHovered ? seg.color : (isDark ? 'rgba(255,255,255,0.06)' : '#E2E8F0'),
                 }}
               >
-                <div className="flex items-center gap-2.5">
+                <div className="flex items-center gap-2 min-w-0">
                   <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: seg.color }} />
-                  <span className="text-xs font-medium" style={{ color: isHovered ? T.text : T.textSub }}>
+                  <span className="text-xs font-medium truncate" style={{ color: isHovered ? T.text : T.textSub }}>
                     {seg.label}
                   </span>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5 shrink-0">
                   <span className="text-xs font-bold tabular-nums" style={{ color: T.text }}>
                     {seg.count}
                   </span>
-                  <span className="text-[11px] tabular-nums" style={{ color: T.textSub }}>
+                  <span className="text-[10px] tabular-nums" style={{ color: T.textSub }}>
+                    ({Math.round((seg.count / (totalChecks || 1)) * 100)}%)
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Graph 2: Live Remediation Sync Status Component ──────────────────────── */
+
+function RemediationSyncGraph({
+  totalChecks,
+  fixedCount,
+  inProgressCount,
+  cantFixCount,
+  pendingCount,
+  T,
+  isDark,
+  onViewChecks,
+  onOpenCantFixModal,
+}: {
+  totalChecks: number;
+  fixedCount: number;
+  inProgressCount: number;
+  cantFixCount: number;
+  pendingCount: number;
+  T: Tokens;
+  isDark: boolean;
+  onViewChecks: (status: 'all' | 'fail' | 'pass', severity?: string) => void;
+  onOpenCantFixModal?: () => void;
+}) {
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+
+  const segments: FixSegment[] = [
+    {
+      id: 'fixed',
+      label: 'Fixed / Solved',
+      count: fixedCount,
+      color: '#10B981',
+      sublabel: 'All impacted resources remediated',
+      status: 'pass',
+    },
+    {
+      id: 'in_progress',
+      label: 'In Progress',
+      count: inProgressCount,
+      color: '#3B82F6',
+      sublabel: 'Partial fixes underway across resources',
+      status: 'fail',
+    },
+    {
+      id: 'cant_fix',
+      label: "Ignored",
+      count: cantFixCount,
+      color: '#F59E0B',
+      sublabel: 'Waivered / Code dependency constraints',
+      status: 'fail',
+    },
+    {
+      id: 'pending',
+      label: 'Pending Fixes',
+      count: pendingCount,
+      color: '#E11D48',
+      sublabel: 'Requires architectural remediation',
+      status: 'fail',
+    },
+  ];
+
+  const activeSegments = segments.filter(s => s.count > 0);
+  const syncRate = totalChecks > 0 ? Math.round(((fixedCount + cantFixCount) / totalChecks) * 100) : 0;
+
+  const size = 170;
+  const center = size / 2;
+  const radius = 60;
+  const strokeWidth = 18;
+  const circ = 2 * Math.PI * radius;
+
+  let accumulatedLength = 0;
+  const segmentArcs = activeSegments.map(seg => {
+    const ratio = seg.count / (totalChecks || 1);
+    const strokeDash = ratio * circ;
+    const gap = activeSegments.length > 1 ? 2.5 : 0;
+    const effectiveDash = Math.max(0, strokeDash - gap);
+    const offset = -accumulatedLength;
+    accumulatedLength += strokeDash;
+    return {
+      ...seg,
+      strokeDash: effectiveDash,
+      dashOffset: offset,
+      percentage: Math.round(ratio * 100),
+    };
+  });
+
+  const activeHovered = segments.find(s => s.id === hoveredId);
+
+  const handleSegmentClick = (seg: FixSegment) => {
+    if (seg.id === 'cant_fix' && onOpenCantFixModal) {
+      onOpenCantFixModal();
+    } else {
+      onViewChecks(seg.status);
+    }
+  };
+
+  return (
+    <div
+      className="p-5 flex flex-col justify-between"
+      style={{
+        background: T.card,
+        border: `1px solid ${T.border}`,
+        boxShadow: T.shadow,
+        borderRadius: '1.25rem',
+      }}
+    >
+      <div className="flex items-center justify-between flex-wrap gap-2 pb-3.5 mb-3 border-b" style={{ borderColor: T.border }}>
+        <div className="flex items-center gap-2">
+          <span
+            className="w-7 h-7 rounded-lg flex items-center justify-center"
+            style={{ backgroundColor: isDark ? 'rgba(16,185,129,0.15)' : '#ECFDF5', color: '#10B981' }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
+          </span>
+          <div>
+            <div className="flex items-center gap-1.5">
+              <h2 className="font-semibold text-sm" style={{ color: T.text }}>Live Remediation Sync Status</h2>
+              <InfoTooltip
+                title="Live Remediation Sync Status"
+                content="Real-time remediation progress synced from resource-level actions: Fixed (all resources done), In Progress (partial fixes), Ignored (notes saved), and Pending."
+                isDark={isDark}
+                T={T}
+              />
+            </div>
+            <p className="text-[11px]" style={{ color: T.textSub }}>
+              Synced live · <span className="text-emerald-600 dark:text-emerald-400 font-semibold">{fixedCount} Fixed</span> · <span className="text-blue-600 dark:text-blue-400 font-semibold">{inProgressCount} In Progress</span> · <span onClick={() => onOpenCantFixModal?.()} className="text-amber-600 dark:text-amber-400 font-semibold cursor-pointer hover:underline">{cantFixCount} Ignored</span> · <span className="text-red-500 font-semibold">{pendingCount} Pending</span>
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-6 py-1">
+        <div className="relative flex items-center justify-center shrink-0">
+          <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="transform -rotate-90">
+            <circle cx={center} cy={center} r={radius} fill="none" stroke={isDark ? 'rgba(255,255,255,0.06)' : '#E2E8F0'} strokeWidth={strokeWidth} />
+            {segmentArcs.map(seg => {
+              const isHovered = hoveredId === seg.id;
+              return (
+                <circle
+                  key={seg.id}
+                  cx={center}
+                  cy={center}
+                  r={radius}
+                  fill="none"
+                  stroke={seg.color}
+                  strokeWidth={isHovered ? strokeWidth + 4 : strokeWidth}
+                  strokeDasharray={`${seg.strokeDash} ${circ - seg.strokeDash}`}
+                  strokeDashoffset={seg.dashOffset}
+                  strokeLinecap="round"
+                  className="transition-all duration-200 cursor-pointer"
+                  style={{
+                    opacity: hoveredId && !isHovered ? 0.45 : 1,
+                    filter: isHovered ? `drop-shadow(0 0 6px ${seg.color}80)` : 'none',
+                  }}
+                  onMouseEnter={() => setHoveredId(seg.id)}
+                  onMouseLeave={() => setHoveredId(null)}
+                  onClick={() => handleSegmentClick(seg)}
+                />
+              );
+            })}
+          </svg>
+          <div className="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none px-2">
+            {activeHovered ? (
+              <div>
+                <div className="text-xl font-bold tabular-nums" style={{ color: activeHovered.color }}>
+                  {activeHovered.count}
+                </div>
+                <div className="text-[10px] font-semibold uppercase tracking-wider line-clamp-1" style={{ color: T.text }}>
+                  {activeHovered.label}
+                </div>
+              </div>
+            ) : (
+              <div>
+                <div className="text-xl font-bold tabular-nums" style={{ color: syncRate >= 70 ? T.success : syncRate >= 40 ? T.warning : T.error }}>
+                  {syncRate}%
+                </div>
+                <div className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: T.textSub }}>
+                  Remediated
+                </div>
+                <div className="text-[10px]" style={{ color: T.textSub }}>
+                  {fixedCount + cantFixCount}/{totalChecks} Resolved
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-1.5 w-full">
+          {segments.map(seg => {
+            const isHovered = hoveredId === seg.id;
+            return (
+              <div
+                key={seg.id}
+                onMouseEnter={() => setHoveredId(seg.id)}
+                onMouseLeave={() => setHoveredId(null)}
+                onClick={() => handleSegmentClick(seg)}
+                className="flex items-center justify-between gap-3 px-3 py-1.5 rounded-xl border transition-all cursor-pointer"
+                style={{
+                  backgroundColor: isHovered ? (isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)') : (isDark ? 'rgba(255,255,255,0.02)' : '#F8FAFC'),
+                  borderColor: isHovered ? seg.color : (isDark ? 'rgba(255,255,255,0.06)' : '#E2E8F0'),
+                }}
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: seg.color }} />
+                  <span className="text-xs font-medium truncate" style={{ color: isHovered ? T.text : T.textSub }}>
+                    {seg.label}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <span className="text-xs font-bold tabular-nums" style={{ color: T.text }}>
+                    {seg.count}
+                  </span>
+                  <span className="text-[10px] tabular-nums" style={{ color: T.textSub }}>
                     ({Math.round((seg.count / (totalChecks || 1)) * 100)}%)
                   </span>
                 </div>
@@ -421,10 +639,12 @@ function PillarCard({
   const [animatedPassedBps, setAnimatedPassedBps] = useState(0);
   const [animatedFailedBps, setAnimatedFailedBps] = useState(0);
 
-  const totalBps = p.bestPractices.length;
-  const failedBps = p.bestPractices.filter(bp => bp.status === 'fail').length;
+  const fallbackP = PILLARS_DATA.find(sp => sp.id === p.id);
+  const bps = Array.isArray(p.bestPractices) && p.bestPractices.length > 0 ? p.bestPractices : (fallbackP?.bestPractices || []);
+  const totalBps = bps.length;
+  const failedBps = bps.filter(bp => bp?.status === 'fail').length;
   const passedBps = totalBps - failedBps;
-  const totalChecks = p.bestPractices.reduce((acc, bp) => acc + bp.checks.length, 0);
+  const totalChecks = bps.reduce((acc, bp) => acc + (bp?.checks?.length || 0), 0);
 
   useEffect(() => {
     let startTimestamp: number | null = null;
@@ -539,15 +759,442 @@ function PillarCard({
   );
 }
 
+/* ── Provider Chip Component ────────────────────────────────────────────── */
+function ProviderChip({ provider }: { provider: CloudProvider }) {
+  if (provider === 'aws') {
+    return (
+      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#FF9900]/15 text-[#FF9900] border border-[#FF9900]/30" title="Amazon Web Services">
+        AWS
+      </span>
+    );
+  }
+  if (provider === 'azure') {
+    return (
+      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#0078D4]/15 text-[#0078D4] border border-[#0078D4]/30" title="Microsoft Azure">
+        AZ
+      </span>
+    );
+  }
+  if (provider === 'gcp') {
+    return (
+      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#4285F4]/15 text-[#4285F4] border border-[#4285F4]/30" title="Google Cloud">
+        GCP
+      </span>
+    );
+  }
+  if (provider === 'github') {
+    return (
+      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-500/15 text-purple-400 border border-purple-500/30" title="GitHub Actions">
+        GH
+      </span>
+    );
+  }
+  if (provider === 'k8s') {
+    return (
+      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-sky-500/15 text-sky-400 border border-sky-500/30" title="Kubernetes">
+        K8s
+      </span>
+    );
+  }
+  return null;
+}
+
+/* ── Compliance Framework Card in FinOps Lens ────────────────────────────── */
+function ComplianceFrameworkReportCard({
+  fw,
+  T,
+  isDark,
+  isPinned,
+  onTogglePin,
+  onSelect,
+}: {
+  fw: ComplianceFramework;
+  T: Tokens;
+  isDark: boolean;
+  isPinned: boolean;
+  onTogglePin: () => void;
+  onSelect: () => void;
+}) {
+  const scoreColor = fw.score >= 80 ? '#10B981' : fw.score >= 30 ? '#F59E0B' : '#E11D48';
+
+  return (
+    <div
+      onClick={onSelect}
+      className="p-4 rounded-2xl border transition-all duration-200 cursor-pointer flex flex-col justify-between gap-3 group relative hover:shadow-lg hover:-translate-y-0.5"
+      style={{
+        backgroundColor: T.card,
+        borderColor: isPinned ? (isDark ? 'rgba(16,185,129,0.35)' : '#A7F3D0') : T.border,
+        boxShadow: T.shadow,
+      }}
+    >
+      <div>
+        {/* Card Header with Badge, Title, and Bookmark Pin */}
+        <div className="flex items-start justify-between gap-2 mb-2">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div
+              className="w-8 h-8 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 border"
+              style={{
+                backgroundColor: fw.badgeBg + '25',
+                color: fw.badgeColor,
+                borderColor: fw.badgeBg + '40',
+              }}
+            >
+              {fw.badge}
+            </div>
+            <div className="min-w-0">
+              <h3 className="text-xs sm:text-sm font-bold truncate group-hover:text-emerald-500 transition-colors" style={{ color: T.text }}>
+                {fw.name}
+              </h3>
+              <span className="text-[11px] font-semibold" style={{ color: T.textSub }}>
+                {fw.passingRequirements} / {fw.totalRequirements} Passing Requirements
+              </span>
+            </div>
+          </div>
+
+          {/* Bookmark / Pin Toggle */}
+          <button
+            type="button"
+            onClick={e => {
+              e.stopPropagation();
+              onTogglePin();
+            }}
+            className="p-1.5 rounded-lg transition-colors cursor-pointer shrink-0"
+            style={{
+              color: isPinned ? '#10B981' : (isDark ? '#64748B' : '#94A3B8'),
+              backgroundColor: isPinned ? (isDark ? 'rgba(16,185,129,0.15)' : '#ECFDF5') : 'transparent',
+            }}
+            title={isPinned ? 'Remove from watchlist' : 'Pin to watchlist'}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill={isPinned ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Score Bar */}
+        <div className="flex flex-col gap-1 my-2">
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-[11px] font-semibold" style={{ color: T.textSub }}>Score:</span>
+            <span className="text-xs font-bold font-mono" style={{ color: scoreColor }}>
+              {fw.score}%
+            </span>
+          </div>
+          <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : '#E2E8F0' }}>
+            <div
+              className="h-full rounded-full transition-all duration-500"
+              style={{ width: `${fw.score}%`, backgroundColor: scoreColor }}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Bottom: Provider Badges & Stats */}
+      <div className="pt-2 border-t flex flex-col gap-2" style={{ borderColor: T.border }}>
+        <div className="flex items-center justify-between gap-2">
+          {/* Provider Icons */}
+          <div className="flex items-center gap-1">
+            {fw.providers.map(p => (
+              <ProviderChip key={p} provider={p} />
+            ))}
+          </div>
+
+          {/* Breakdown Stats */}
+          <div className="text-[10px] font-medium" style={{ color: T.textSub }}>
+            {fw.failingRequirements > 0 ? (
+              <span className="text-rose-500 font-bold">{fw.failingRequirements} failed · </span>
+            ) : (
+              <span className="text-slate-400">0 failed · </span>
+            )}
+            <span>{fw.manualRequirements} manual</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Compliance Framework Detail Modal ───────────────────────────────────── */
+function ComplianceFrameworkDetailModal({
+  fw,
+  isOpen,
+  onClose,
+  T,
+  isDark,
+  onTriggerSlack,
+  onTriggerJira,
+  onGoToAIFix,
+}: {
+  fw: ComplianceFramework;
+  isOpen: boolean;
+  onClose: () => void;
+  T: Tokens;
+  isDark: boolean;
+  onTriggerSlack: (target: { title: string; message: string; severity: 'critical' | 'high' | 'info'; checkId?: string }) => void;
+  onTriggerJira: (target: { checkId: string; title: string; severity?: string; description?: string }) => void;
+  onGoToAIFix: (checkId: string) => void;
+}) {
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({ 'sec-8': true, 'sec-3': true, 'sec-1': true });
+  const [reqFilter, setReqFilter] = useState<'all' | 'fail' | 'pass'>('all');
+  const [search, setSearch] = useState('');
+
+  if (!isOpen) return null;
+
+  const toggleSection = (id: string) => {
+    setExpandedSections(prev => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/70 backdrop-blur-xs animate-fadeIn">
+      <div
+        className="w-full max-w-5xl max-h-[92vh] rounded-2xl flex flex-col overflow-hidden shadow-2xl border"
+        style={{ backgroundColor: T.card, borderColor: T.border, color: T.text }}
+      >
+        {/* Header */}
+        <div className="px-6 py-4 border-b flex items-center justify-between shrink-0" style={{ borderColor: T.border, backgroundColor: isDark ? '#111B2E' : '#F8FAFC' }}>
+          <div className="flex items-center gap-3">
+            <div
+              className="w-10 h-10 rounded-xl flex items-center justify-center font-bold text-sm shrink-0 border"
+              style={{ backgroundColor: fw.badgeBg + '25', color: fw.badgeColor, borderColor: fw.badgeBg + '40' }}
+            >
+              {fw.badge}
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-bold" style={{ color: T.text }}>{fw.name}</h2>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-500/10 text-blue-500 border border-blue-500/20 font-bold">
+                  {fw.version}
+                </span>
+              </div>
+              <p className="text-xs" style={{ color: T.textSub }}>{fw.description}</p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold border transition-colors cursor-pointer"
+            style={{ borderColor: T.border, color: T.textSub }}
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Scrollable Content */}
+        <div className="p-6 overflow-y-auto flex flex-col gap-6">
+          {/* Quick Metrics */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="p-4 rounded-xl border flex flex-col justify-between" style={{ backgroundColor: isDark ? 'rgba(255,255,255,0.02)' : '#F8FAFC', borderColor: T.border }}>
+              <span className="text-xs font-semibold" style={{ color: T.textSub }}>Compliance Score</span>
+              <div className="text-2xl font-bold font-mono mt-1" style={{ color: fw.score >= 80 ? '#10B981' : fw.score >= 30 ? '#F59E0B' : '#E11D48' }}>
+                {fw.score}%
+              </div>
+              <span className="text-[10px]" style={{ color: T.textSub }}>{fw.passingRequirements} / {fw.totalRequirements} Passing Requirements</span>
+            </div>
+
+            <div className="p-4 rounded-xl border flex flex-col justify-between" style={{ backgroundColor: isDark ? 'rgba(255,255,255,0.02)' : '#F8FAFC', borderColor: T.border }}>
+              <span className="text-xs font-semibold" style={{ color: T.textSub }}>Failed Requirements</span>
+              <div className="text-2xl font-bold font-mono mt-1 text-rose-500">
+                {fw.failingRequirements}
+              </div>
+              <span className="text-[10px]" style={{ color: T.textSub }}>Immediate security remediation needed</span>
+            </div>
+
+            <div className="p-4 rounded-xl border flex flex-col justify-between" style={{ backgroundColor: isDark ? 'rgba(255,255,255,0.02)' : '#F8FAFC', borderColor: T.border }}>
+              <span className="text-xs font-semibold" style={{ color: T.textSub }}>Manual Audit Requirements</span>
+              <div className="text-2xl font-bold font-mono mt-1 text-slate-400">
+                {fw.manualRequirements}
+              </div>
+              <span className="text-[10px]" style={{ color: T.textSub }}>Periodic policy review required</span>
+            </div>
+          </div>
+
+          {/* Section Requirements Accordion */}
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <h3 className="text-sm font-bold" style={{ color: T.text }}>Framework Requirement Sections</h3>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  placeholder="Filter controls..."
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  className="px-2.5 py-1 text-xs rounded-lg border outline-none w-44"
+                  style={{ backgroundColor: isDark ? '#0B1220' : '#FFFFFF', borderColor: T.border, color: T.text }}
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              {fw.sections.map(sec => {
+                const isExpanded = !!expandedSections[sec.id];
+                const failedCount = (sec.requirements || []).filter(r => r?.status === 'fail').length;
+                const filteredReqs = (sec.requirements || []).filter(r => {
+                  if (reqFilter === 'fail' && r?.status !== 'fail') return false;
+                  if (reqFilter === 'pass' && r?.status !== 'pass') return false;
+                  if (search.trim()) {
+                    const q = search.toLowerCase().trim();
+                    return r.code.toLowerCase().includes(q) || r.title.toLowerCase().includes(q) || r.description.toLowerCase().includes(q);
+                  }
+                  return true;
+                });
+
+                if (filteredReqs.length === 0 && search.trim()) return null;
+
+                return (
+                  <div key={sec.id} className="rounded-xl border overflow-hidden" style={{ borderColor: T.border, backgroundColor: isDark ? '#111B2E' : '#FFFFFF' }}>
+                    <div
+                      onClick={() => toggleSection(sec.id)}
+                      className="p-3.5 flex items-center justify-between gap-3 cursor-pointer select-none"
+                      style={{ backgroundColor: isExpanded ? (isDark ? 'rgba(255,255,255,0.02)' : '#F8FAFC') : 'transparent' }}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <span className="text-xs transition-transform" style={{ transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}>▶</span>
+                        <span className="text-xs font-bold" style={{ color: T.text }}>{sec.title}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs">
+                        <span className="text-[11px] font-semibold" style={{ color: T.textSub }}>{sec.requirements.length} Requirements</span>
+                        {failedCount > 0 && (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-500/15 text-rose-500">
+                            {failedCount} Fail
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {isExpanded && (
+                      <div className="p-3.5 border-t flex flex-col gap-2.5" style={{ borderColor: T.border, backgroundColor: isDark ? 'rgba(0,0,0,0.15)' : '#FAFBFD' }}>
+                        {filteredReqs.map(req => (
+                          <div key={req.id} className="p-3 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3" style={{ backgroundColor: T.card, borderColor: req.status === 'fail' ? (isDark ? 'rgba(244,63,94,0.3)' : '#FECDD3') : T.border }}>
+                            <div className="flex items-start gap-2.5 min-w-0 flex-1">
+                              <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5 ${req.status === 'pass' ? 'bg-emerald-500/15 text-emerald-500' : req.status === 'fail' ? 'bg-rose-500/15 text-rose-500' : 'bg-slate-500/15 text-slate-400'}`}>
+                                {req.status === 'pass' ? '✓' : req.status === 'fail' ? '✕' : 'M'}
+                              </span>
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                                  <span className="font-mono text-[10px] font-bold text-blue-500">{req.code}</span>
+                                  <SeverityPill severity={req.severity} dark={isDark} />
+                                  <span className="text-xs font-bold" style={{ color: T.text }}>{req.title}</span>
+                                </div>
+                                <p className="text-[11px] leading-relaxed" style={{ color: T.textSub }}>{req.description}</p>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-center">
+                              <button
+                                type="button"
+                                onClick={() => onTriggerSlack({
+                                  title: `Compliance Alert [${fw.name}]: ${req.code} - ${req.title}`,
+                                  message: `Control ${req.code} required under ${fw.name}.\n\n${req.description}`,
+                                  severity: req.severity === 'critical' ? 'critical' : req.severity === 'high' ? 'high' : 'info',
+                                  checkId: req.checkId,
+                                })}
+                                className="px-2 py-1 text-[10px] font-bold rounded-lg border text-[#E01E5A] dark:text-[#ECB22E] cursor-pointer"
+                                style={{ borderColor: isDark ? 'rgba(236,178,46,0.3)' : 'rgba(224,30,90,0.2)' }}
+                              >
+                                # Slack
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => onTriggerJira({
+                                  checkId: req.checkId || req.id,
+                                  title: `[${fw.shortName}] ${req.code}: ${req.title}`,
+                                  severity: req.severity,
+                                  description: req.description,
+                                })}
+                                className="px-2 py-1 text-[10px] font-bold rounded-lg border text-[#0052CC] dark:text-[#388BFF] cursor-pointer"
+                                style={{ borderColor: isDark ? 'rgba(56,139,255,0.3)' : 'rgba(0,82,204,0.2)' }}
+                              >
+                                + Jira
+                              </button>
+
+                              {req.status === 'fail' && req.checkId && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    onClose();
+                                    onGoToAIFix(req.checkId!);
+                                  }}
+                                  className="px-2.5 py-1 text-[10px] font-bold rounded-full text-white cursor-pointer shadow-xs"
+                                  style={{ background: 'linear-gradient(135deg,#1B6FC9,#14A085,#10B981)' }}
+                                >
+                                  AI Fix
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 py-3 border-t flex items-center justify-between shrink-0" style={{ borderColor: T.border, backgroundColor: isDark ? '#111B2E' : '#F8FAFC' }}>
+          <span className="text-xs" style={{ color: T.textSub }}>Showing full control checklist for <strong>{fw.name}</strong></span>
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-1.5 rounded-xl text-xs font-semibold text-white cursor-pointer"
+            style={{ backgroundColor: T.primary }}
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ── Main Assessment Report Component ────────────────────────────────────── */
 
 export function AssessmentReport() {
-  const { go, selectPillar, goToAIFix, theme, currentAssessment, currentMilestones } = useApp();
+  const {
+    go,
+    selectPillar,
+    goToAIFix,
+    theme,
+    currentAssessment,
+    currentMilestones,
+    resourceRemediations,
+    getCheckRemediationStatus,
+    runOrUpdateAssessment,
+    jiraTickets,
+    bulkCreateJiraTickets,
+    selectedLens,
+    setSelectedLens,
+    complianceFrameworks,
+    pinnedComplianceIds,
+    togglePinComplianceFramework,
+    pillars,
+  } = useApp();
   const isDark = theme === 'dark';
   const T = isDark ? DARK : LIGHT;
 
   const [tab, setTab] = useState<'pillar' | 'check' | 'questionnaire'>('pillar');
   const [showArchitectureModal, setShowArchitectureModal] = useState(false);
+  const [showCantFixModal, setShowCantFixModal] = useState(false);
+  const [showScheduleModal, setShowScheduleModal] = useState(false);
+  const [activeComplianceModal, setActiveComplianceModal] = useState<ComplianceFramework | null>(null);
+
+  // Jira and Slack Modal states
+  const [jiraModalTarget, setJiraModalTarget] = useState<{
+    checkId: string;
+    title: string;
+    severity?: string;
+    description?: string;
+  } | null>(null);
+
+  const [slackModalTarget, setSlackModalTarget] = useState<{
+    title: string;
+    message?: string;
+    severity?: 'critical' | 'high' | 'info';
+    checkId?: string;
+  } | null>(null);
 
   // Filter state for "By Check" tab
   const [checkSearch, setCheckSearch] = useState('');
@@ -555,33 +1202,102 @@ export function AssessmentReport() {
   const [checkSeverity, setCheckSeverity] = useState('all');
   const [checkStatus, setCheckStatus] = useState('all');
 
-  // Calculate totals across all pillars
-  const allBps = PILLARS_DATA.flatMap(p => p.bestPractices);
-  const totalBps = allBps.length;
-  const failedBps = allBps.filter(bp => bp.status === 'fail').length;
-  const passedBps = totalBps - failedBps;
-  const allChecks = allBps.flatMap(bp => bp.checks);
-  const passingChecks = allChecks.filter(c => c.status === 'pass');
-  const passingChecksCount = passingChecks.length;
-  const failingChecks = allChecks.filter(c => c.status === 'fail');
-  const failingChecksCount = failingChecks.length;
-  const criticalFailsCount = failingChecks.filter(c => c.severity === 'critical').length;
-  const highFailsCount = failingChecks.filter(c => c.severity === 'high').length;
-  const mediumFailsCount = failingChecks.filter(c => c.severity === 'medium').length;
-  const lowFailsCount = failingChecks.filter(c => c.severity === 'low').length;
-  const overallScore = Math.round(PILLARS_DATA.reduce((s, p) => s + p.score, 0) / PILLARS_DATA.length);
+  const activeCloud = (((currentAssessment?.cloud || 'aws') as string).toLowerCase()) as 'aws' | 'azure' | 'gcp';
+  const [remediationsDb, setRemediationsDb] = useState<Record<string, CheckRemediationData>>(() => getFallbackRemediations(activeCloud));
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchRemediationsFromDb(activeCloud).then(data => {
+      if (!cancelled && data && Object.keys(data).length > 0) {
+        setRemediationsDb(data);
+      }
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [activeCloud]);
+
+  const remediationCheckStats = useMemo(() => {
+    let fixed = 0;
+    let inProgress = 0;
+    let cantFix = 0;
+    let pending = 0;
+
+    const allDbChecks = Object.values(remediationsDb);
+    allDbChecks.forEach(c => {
+      const st = getCheckRemediationStatus(c.id, c.resources || []);
+      if (st === 'fixed') fixed++;
+      else if (st === 'in_progress') inProgress++;
+      else if (st === 'cant_fix') cantFix++;
+      else pending++;
+    });
+
+    return { fixed, inProgress, cantFix, pending, total: allDbChecks.length };
+  }, [remediationsDb, resourceRemediations, getCheckRemediationStatus]);
+
+  const excludedResourcesList = useMemo(() => {
+    const list: Array<{ checkId: string; checkTitle: string; resource: string; note: string; severity: string }> = [];
+    if (!resourceRemediations) return list;
+    Object.entries(resourceRemediations).forEach(([key, val]) => {
+      if (val.status === 'cant_fix') {
+        const [checkId, ...resParts] = key.split('::');
+        const resource = resParts.join('::');
+        const checkData = remediationsDb[checkId] || REMEDIATION_DATABASE[checkId];
+        list.push({
+          checkId,
+          checkTitle: checkData?.title || checkId,
+          resource,
+          note: val.note || 'Code dependency constraint',
+          severity: checkData?.severity || 'medium',
+        });
+      }
+    });
+    return list;
+  }, [remediationsDb, resourceRemediations]);
+
+  const activePillars = useMemo(() => {
+    const raw = Array.isArray(pillars) && pillars.length > 0 ? pillars : PILLARS_DATA;
+    return raw.map(p => {
+      const fallbackP = PILLARS_DATA.find(sp => sp.id === p.id) || PILLARS_DATA[0];
+      return {
+        ...fallbackP,
+        ...p,
+        bestPractices: Array.isArray(p.bestPractices) && p.bestPractices.length > 0 ? p.bestPractices : fallbackP.bestPractices,
+      };
+    });
+  }, [pillars]);
+
+  // Calculate totals across active pillars
+  const allBps = activePillars.flatMap(p => p.bestPractices || []);
+  const staticTotalBps = allBps.length;
+  const staticFailedBps = allBps.filter(bp => bp?.status === 'fail').length;
+  const staticPassedBps = staticTotalBps - staticFailedBps;
+  const allChecks = allBps.flatMap(bp => bp?.checks || []);
+  const staticPassingChecks = allChecks.filter(c => c?.status === 'pass');
+  const staticFailingChecks = allChecks.filter(c => c?.status === 'fail');
+
+  // Pull metrics dynamically directly from currentAssessment (MongoDB document)
+  const overallScore = currentAssessment?.score ?? Math.round(activePillars.reduce((s, p) => s + ((currentAssessment?.pillars as Record<string, number> | undefined)?.[p.id] ?? p.score), 0) / activePillars.length);
+  const totalBps = currentAssessment?.totalBestPractices ?? staticTotalBps;
+  const passedBps = currentAssessment?.passedBps ?? staticPassedBps;
+  const failedBps = currentAssessment?.failedBps ?? staticFailedBps;
+  const totalChecksCount = currentAssessment?.totalChecks ?? allChecks.length;
+  const passingChecksCount = currentAssessment?.passedChecks ?? staticPassingChecks.length;
+  const failingChecksCount = currentAssessment?.failedChecks ?? staticFailingChecks.length;
+  const criticalFailsCount = staticFailingChecks.filter(c => c?.severity === 'critical').length;
+  const highFailsCount = currentAssessment?.highRisks ?? staticFailingChecks.filter(c => c?.severity === 'high').length;
+  const mediumFailsCount = currentAssessment?.mediumRisks ?? staticFailingChecks.filter(c => c?.severity === 'medium').length;
+  const lowFailsCount = currentAssessment?.lowRisks ?? staticFailingChecks.filter(c => c?.severity === 'low').length;
 
   // Flatten checks with pillar and best-practice metadata for the "By Check" tab
-  const flattenedChecks = PILLARS_DATA.flatMap(pillar =>
-    pillar.bestPractices.flatMap(bp =>
-      bp.checks.map(check => ({
+  const flattenedChecks = activePillars.flatMap(pillar =>
+    (pillar.bestPractices || []).flatMap(bp =>
+      (bp?.checks || []).map(check => ({
         ...check,
         pillarId: pillar.id,
         pillarLabel: pillar.label,
         pillarShort: pillar.short,
         pillarColor: pillar.color,
-        bpId: bp.id,
-        bpTitle: bp.title,
+        bpId: bp?.id || '',
+        bpTitle: bp?.title || '',
       }))
     )
   );
@@ -589,8 +1305,8 @@ export function AssessmentReport() {
   // Apply filters to checks
   const filteredChecks = flattenedChecks.filter(c => {
     if (checkPillar !== 'all' && c.pillarId !== checkPillar) return false;
-    if (checkSeverity !== 'all' && c.severity.toLowerCase() !== checkSeverity.toLowerCase()) return false;
-    if (checkStatus !== 'all' && c.status.toLowerCase() !== checkStatus.toLowerCase()) return false;
+    if (checkSeverity !== 'all' && (c.severity || '').toLowerCase() !== checkSeverity.toLowerCase()) return false;
+    if (checkStatus !== 'all' && (c.status || '').toLowerCase() !== checkStatus.toLowerCase()) return false;
     if (checkSearch.trim()) {
       const q = checkSearch.toLowerCase().trim();
       const matchId = c.id.toLowerCase().includes(q);
@@ -669,6 +1385,119 @@ export function AssessmentReport() {
             </div>
 
             <div className="flex items-center gap-2 flex-wrap">
+              {/* Lens Selector */}
+              <div
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs shadow-xs"
+                style={{
+                  backgroundColor: isDark ? '#111B2E' : '#F1F5F9',
+                  borderColor: isDark ? 'rgba(59,130,246,0.3)' : '#CBD5E1',
+                }}
+              >
+                <span className="text-[11px] font-semibold" style={{ color: T.textSub }}>Lens:</span>
+                <select
+                  value={selectedLens}
+                  onChange={e => setSelectedLens(e.target.value as any)}
+                  aria-label="Select Architecture Lens"
+                  className="bg-transparent text-xs font-bold outline-none cursor-pointer pr-1"
+                  style={{ color: T.text }}
+                >
+                  <option value="wafr" className="text-slate-900 bg-white dark:text-white dark:bg-slate-900">WAFR Lens (Well-Architected)</option>
+                  <option value="finops" className="text-slate-900 bg-white dark:text-white dark:bg-slate-900">FinOps Lens (Compliance & Cost)</option>
+                  <option value="genai" className="text-slate-900 bg-white dark:text-white dark:bg-slate-900">GenAI Lens (Generative AI)</option>
+                </select>
+              </div>
+
+              {/* Instant Rerun Assessment Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  if (currentAssessment) {
+                    runOrUpdateAssessment({
+                      cloud: currentAssessment.cloud,
+                      accountId: currentAssessment.accountId,
+                      accountName: currentAssessment.accountName,
+                      region: currentAssessment.region,
+                      name: currentAssessment.name,
+                    });
+                    go('live-scan');
+                  }
+                }}
+                className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-full transition-all cursor-pointer text-white shadow-xs hover:opacity-90 active:scale-98"
+                style={{ background: 'linear-gradient(135deg, #2563EB, #10B981)' }}
+                title="Immediately trigger a fresh live scan of this assessment"
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+                </svg>
+                <span>Rerun Assessment</span>
+              </button>
+
+              {/* Schedule Recurring Assessment Button */}
+              <button
+                type="button"
+                onClick={() => setShowScheduleModal(true)}
+                className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium rounded-full transition-colors cursor-pointer"
+                style={{ border: `1px solid ${T.border}`, color: T.textSub }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.color = '#2563EB';
+                  e.currentTarget.style.borderColor = '#2563EB';
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.color = T.textSub;
+                  e.currentTarget.style.borderColor = T.border;
+                }}
+                title="Schedule automated recurring reruns for this assessment"
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-blue-500">
+                  <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                  <line x1="16" y1="2" x2="16" y2="6"/>
+                  <line x1="8" y1="2" x2="8" y2="6"/>
+                  <line x1="3" y1="10" x2="21" y2="10"/>
+                </svg>
+                <span>Schedule Recurring Rerun</span>
+              </button>
+
+              {/* Send Slack Alert Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  setSlackModalTarget({
+                    title: `WAFR Assessment Alert: ${currentAssessment?.name || 'Production Review'}`,
+                    message: `Assessment score is ${overallScore}%. ${failingChecksCount} failing checks evaluated (${criticalFailsCount} Critical, ${highFailsCount} High HRIs).`,
+                    severity: criticalFailsCount > 0 ? 'critical' : highFailsCount > 0 ? 'high' : 'info',
+                  });
+                }}
+                className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium rounded-full transition-colors cursor-pointer text-[#4A154B] dark:text-[#ECB22E]"
+                style={{
+                  border: `1px solid ${isDark ? 'rgba(236,178,46,0.3)' : 'rgba(74,21,75,0.2)'}`,
+                  backgroundColor: isDark ? 'rgba(74,21,75,0.2)' : '#FDF4FF',
+                }}
+                title="Broadcast assessment status and critical HRIs to Slack"
+              >
+                <SlackLogo size={13} />
+                <span>Notify Slack</span>
+              </button>
+
+              {/* Bulk Jira Sync Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  const failingChecksToSync = flattenedChecks
+                    .filter(c => c?.status === 'fail')
+                    .map(c => ({ id: c.id, title: c.title, severity: c.severity }));
+                  bulkCreateJiraTickets(failingChecksToSync);
+                }}
+                className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium rounded-full transition-colors cursor-pointer text-[#0052CC] dark:text-[#388BFF]"
+                style={{
+                  border: `1px solid ${isDark ? 'rgba(56,139,255,0.3)' : 'rgba(0,82,204,0.2)'}`,
+                  backgroundColor: isDark ? 'rgba(0,82,204,0.15)' : '#EFF6FF',
+                }}
+                title="Automatically create and sync Jira tickets for all failing findings"
+              >
+                <JiraLogo size={13} />
+                <span>Sync to Jira</span>
+              </button>
+
               <button
                 type="button"
                 onClick={() => go('milestones')}
@@ -813,25 +1642,44 @@ export function AssessmentReport() {
             </div>
           </div>
 
-          {/* Fix Status Donut / Pie Chart & Comprehensive Health Breakdown */}
-          <FixStatusGraph
-            totalChecks={allChecks.length}
-            passingChecksCount={passingChecksCount}
-            failingChecksCount={failingChecksCount}
-            criticalFailsCount={criticalFailsCount}
-            highFailsCount={highFailsCount}
-            mediumFailsCount={mediumFailsCount}
-            lowFailsCount={lowFailsCount}
-            T={T}
-            isDark={isDark}
-            onViewChecks={handleViewChecksWithFilter}
-            onGoToRemediation={handleLaunchAIFixes}
-          />
+          {/* ── 2 GRAPHS: ASSESSMENT FINDINGS vs REMEDIATION SYNC STATUS ── */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Graph 1: Assessment Scan Findings Breakdown */}
+            <FindingsBreakdownGraph
+              totalChecks={allChecks.length}
+              passingChecksCount={passingChecksCount}
+              failingChecksCount={failingChecksCount}
+              criticalFailsCount={criticalFailsCount}
+              highFailsCount={highFailsCount}
+              mediumFailsCount={mediumFailsCount}
+              lowFailsCount={lowFailsCount}
+              T={T}
+              isDark={isDark}
+              onViewChecks={handleViewChecksWithFilter}
+            />
+
+            {/* Graph 2: Live Remediation Sync Status */}
+            <RemediationSyncGraph
+              totalChecks={remediationCheckStats.total}
+              fixedCount={remediationCheckStats.fixed}
+              inProgressCount={remediationCheckStats.inProgress}
+              cantFixCount={remediationCheckStats.cantFix}
+              pendingCount={remediationCheckStats.pending}
+              T={T}
+              isDark={isDark}
+              onViewChecks={handleViewChecksWithFilter}
+              onOpenCantFixModal={() => setShowCantFixModal(true)}
+            />
+          </div>
 
           {/* Navigation Tabs */}
           <div className="flex items-center justify-between border-b pb-0 flex-wrap gap-2" style={{ borderColor: T.border }}>
             <div className="flex items-center gap-2">
-              {([['pillar', 'By Pillar'], ['check', 'By Check'], ['questionnaire', 'Questionnaire Responses']] as const).map(([id, label]) => (
+              {([
+                ['pillar', selectedLens === 'finops' ? 'Compliance Frameworks' : 'By Pillar'],
+                ['check', 'By Check'],
+                ['questionnaire', 'Questionnaire Responses']
+              ] as const).map(([id, label]) => (
                 <button
                   key={id}
                   type="button"
@@ -868,18 +1716,51 @@ export function AssessmentReport() {
             </button>
           </div>
 
-          {/* ── TAB 1: BY PILLAR (Cards linking to dedicated Pillar Detail pages) ── */}
-          {tab === 'pillar' && (
+          {/* ── TAB 1: BY PILLAR OR COMPLIANCE FRAMEWORKS (FINOPS LENS) ── */}
+          {tab === 'pillar' && selectedLens === 'finops' && (
+            <div className="flex flex-col gap-4">
+              <div className="flex items-center justify-between flex-wrap gap-2 px-1">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-sm font-bold" style={{ color: T.text }}>Compliance Frameworks & Standards</h2>
+                  <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500 font-bold border border-emerald-500/20">
+                    {complianceFrameworks.length} Frameworks Active
+                  </span>
+                </div>
+                <p className="text-xs" style={{ color: T.textSub }}>
+                  FinOps Lens maps Well-Architected controls to regulatory standards across multi-cloud infrastructure. Click any card for detailed audit checklists.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                {complianceFrameworks.map(fw => (
+                  <ComplianceFrameworkReportCard
+                    key={fw.id}
+                    fw={fw}
+                    T={T}
+                    isDark={isDark}
+                    isPinned={Boolean(pinnedComplianceIds?.[fw.id])}
+                    onTogglePin={() => togglePinComplianceFramework(fw.id)}
+                    onSelect={() => setActiveComplianceModal(fw)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {tab === 'pillar' && selectedLens !== 'finops' && (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {PILLARS_DATA.map(p => (
-                <PillarCard
-                  key={p.id}
-                  p={p}
-                  T={T}
-                  isDark={isDark}
-                  onSelect={(id) => selectPillar(id)}
-                />
-              ))}
+              {activePillars.map(p => {
+                const pScore = (currentAssessment?.pillars as Record<string, number> | undefined)?.[p.id] ?? p.score;
+                return (
+                  <PillarCard
+                    key={p.id}
+                    p={{ ...p, score: pScore }}
+                    T={T}
+                    isDark={isDark}
+                    onSelect={(id) => selectPillar(id)}
+                  />
+                );
+              })}
             </div>
           )}
 
@@ -1021,10 +1902,10 @@ export function AssessmentReport() {
                     </span>
                     <div className="hidden sm:flex items-center gap-1 text-[10px] font-semibold">
                       <span className="px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-500 border border-rose-500/20">
-                        {filteredChecks.filter(c => c.status === 'fail').length} Failed
+                        {filteredChecks.filter(c => c?.status === 'fail').length} Failed
                       </span>
                       <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
-                        {filteredChecks.filter(c => c.status === 'pass').length} Passed
+                        {filteredChecks.filter(c => c?.status === 'pass').length} Passed
                       </span>
                     </div>
                   </div>
@@ -1101,7 +1982,7 @@ export function AssessmentReport() {
                   <div
                     className="grid px-4 py-3 text-[11px] font-semibold uppercase tracking-wide"
                     style={{
-                      gridTemplateColumns: '90px 140px 90px 1fr 90px 90px 110px',
+                      gridTemplateColumns: '80px 130px 80px 1fr 85px 85px 230px',
                       backgroundColor: isDark ? 'rgba(0,0,0,.15)' : '#F8FAFC',
                       borderBottom: `1px solid ${T.border}`,
                       color: T.textSub,
@@ -1113,18 +1994,18 @@ export function AssessmentReport() {
                     <span>Title & Rule</span>
                     <span>Severity</span>
                     <span>Status</span>
-                    <span className="text-right">Action</span>
+                    <span className="text-right">Actions & Integrations</span>
                   </div>
 
                   {filteredChecks.map((c) => {
-                    const isFail = c.status === 'fail';
+                    const isFail = c?.status === 'fail';
 
                     return (
                       <div
                         key={c.id}
                         className="grid items-center px-4 py-3 transition-colors"
                         style={{
-                          gridTemplateColumns: '90px 140px 90px 1fr 90px 90px 110px',
+                          gridTemplateColumns: '80px 130px 80px 1fr 85px 85px 230px',
                           borderBottom: `1px solid ${T.border}`,
                         }}
                         onMouseEnter={e => (e.currentTarget.style.backgroundColor = isDark ? 'rgba(255,255,255,.02)' : '#F8FAFC')}
@@ -1175,19 +2056,93 @@ export function AssessmentReport() {
                             </span>
                           )}
                         </div>
-                        <div className="flex justify-end">
+                        <div className="flex items-center justify-end gap-1.5 flex-wrap">
                           {isFail ? (
-                            <button
-                              type="button"
-                              onClick={() => goToAIFix(c.id)}
-                              className="flex items-center gap-1.5 px-3 py-1 text-[11px] font-semibold rounded-full hover:opacity-90 transition-opacity cursor-pointer text-white shadow-sm"
-                              style={{ background: 'linear-gradient(135deg,#1B6FC9,#14A085,#10B981)' }}
-                            >
-                              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/>
-                              </svg>
-                              <span>AI Fix</span>
-                            </button>
+                            <>
+                              {/* Slack Alert button */}
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setSlackModalTarget({
+                                    title: `[${c.severity.toUpperCase()} HRI] ${c.title}`,
+                                    message: `${c.description}. Pillar: ${c.pillarLabel}, Check ID: ${c.id}. Requires immediate architectural review.`,
+                                    severity: c.severity === 'critical' ? 'critical' : 'high',
+                                    checkId: c.id,
+                                  })
+                                }
+                                className="flex items-center gap-1 px-2 py-1 text-[10px] font-bold rounded-lg border transition-colors cursor-pointer text-[#4A154B] dark:text-[#ECB22E]"
+                                style={{
+                                  borderColor: isDark ? 'rgba(236,178,46,0.3)' : 'rgba(74,21,75,0.2)',
+                                  backgroundColor: isDark ? 'rgba(74,21,75,0.2)' : '#FDF4FF',
+                                }}
+                                title="Post alert to Slack channel"
+                              >
+                                <SlackLogo size={11} />
+                                <span>Slack</span>
+                              </button>
+
+                              {/* Jira Ticket button / Linked badge */}
+                              {jiraTickets[c.id] ? (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setJiraModalTarget({
+                                      checkId: c.id,
+                                      title: c.title,
+                                      severity: c.severity,
+                                      description: c.description,
+                                    })
+                                  }
+                                  className="flex items-center gap-1 px-2 py-1 text-[10px] font-bold rounded-lg transition-colors cursor-pointer text-[#0052CC] dark:text-[#388BFF]"
+                                  style={{
+                                    borderColor: isDark ? 'rgba(56,139,255,0.3)' : 'rgba(0,82,204,0.2)',
+                                    backgroundColor: isDark ? 'rgba(0,82,204,0.15)' : '#EFF6FF',
+                                    border: '1px solid',
+                                  }}
+                                  title={`Jira ticket ${jiraTickets[c.id].key} is ${jiraTickets[c.id].status}. Click to view/edit.`}
+                                >
+                                  <JiraLogo size={11} />
+                                  <span>{jiraTickets[c.id].key}</span>
+                                  <span className="text-[9px] px-1 py-0.2 rounded font-semibold bg-blue-500/20">
+                                    {jiraTickets[c.id].status}
+                                  </span>
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setJiraModalTarget({
+                                      checkId: c.id,
+                                      title: c.title,
+                                      severity: c.severity,
+                                      description: c.description,
+                                    })
+                                  }
+                                  className="flex items-center gap-1 px-2 py-1 text-[10px] font-bold rounded-lg border transition-colors cursor-pointer text-[#0052CC] dark:text-[#388BFF]"
+                                  style={{
+                                    borderColor: isDark ? 'rgba(56,139,255,0.3)' : 'rgba(0,82,204,0.2)',
+                                    backgroundColor: isDark ? 'rgba(0,82,204,0.15)' : '#EFF6FF',
+                                  }}
+                                  title="Create and link Jira ticket for this finding"
+                                >
+                                  <JiraLogo size={11} />
+                                  <span>+ Jira</span>
+                                </button>
+                              )}
+
+                              {/* AI Fix button */}
+                              <button
+                                type="button"
+                                onClick={() => goToAIFix(c.id)}
+                                className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-bold rounded-full hover:opacity-90 transition-opacity cursor-pointer text-white shadow-xs"
+                                style={{ background: 'linear-gradient(135deg,#1B6FC9,#14A085,#10B981)' }}
+                              >
+                                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                  <path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/>
+                                </svg>
+                                <span>Fix</span>
+                              </button>
+                            </>
                           ) : (
                             <span className="text-[11px]" style={{ color: T.muted }}>—</span>
                           )}
@@ -1301,6 +2256,154 @@ export function AssessmentReport() {
         onClose={() => setShowArchitectureModal(false)}
         onGoToRemediation={handleLaunchAIFixes}
       />
+
+      {/* Ignored Excluded Findings Popup Modal */}
+      {showCantFixModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div
+            className="w-full max-w-2xl rounded-2xl border p-6 shadow-2xl flex flex-col gap-4 max-h-[85vh] overflow-hidden"
+            style={{
+              backgroundColor: isDark ? '#0F172A' : '#FFFFFF',
+              borderColor: isDark ? '#334155' : '#E2E8F0',
+              color: T.text,
+            }}
+          >
+            <div className="flex items-center justify-between border-b pb-4" style={{ borderColor: T.border }}>
+              <div className="flex items-center gap-2.5">
+                <span className="w-8 h-8 rounded-xl bg-amber-500/15 text-amber-500 flex items-center justify-center font-bold text-sm">
+                  !
+                </span>
+                <div>
+                  <h3 className="font-bold text-base" style={{ color: T.text }}>
+                    Excluded Findings (Ignored)
+                  </h3>
+                  <p className="text-xs" style={{ color: T.textSub }}>
+                    Waivered checks and resources with documented code/architecture dependency notes
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCantFixModal(false)}
+                className="w-8 h-8 rounded-xl flex items-center justify-center text-sm font-bold border transition-colors cursor-pointer"
+                style={{ borderColor: T.border, color: T.textSub }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="overflow-y-auto flex flex-col gap-3 pr-1">
+              {excludedResourcesList.length === 0 ? (
+                <div className="p-8 text-center flex flex-col items-center justify-center gap-2" style={{ color: T.textSub }}>
+                  <div className="w-10 h-10 rounded-full bg-slate-500/10 flex items-center justify-center text-slate-400">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="11" cy="11" r="8" />
+                      <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                    </svg>
+                  </div>
+                  <p className="text-xs font-medium">No resources have been marked as "Ignored" yet.</p>
+                  <p className="text-[11px] opacity-70">Mark resources as "Ignored" in AI Remediation with a reason note to view them here.</p>
+                </div>
+              ) : (
+                excludedResourcesList.map((item, idx) => (
+                  <div
+                    key={idx}
+                    className="p-4 rounded-xl border flex flex-col gap-2"
+                    style={{
+                      backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : '#F8FAFC',
+                      borderColor: isDark ? 'rgba(245,158,11,0.25)' : '#FCD34D',
+                    }}
+                  >
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-xs font-bold text-amber-600 dark:text-amber-400">{item.checkId}</span>
+                        <SeverityPill severity={item.severity as any} dark={isDark} />
+                        <span className="text-xs font-semibold" style={{ color: T.text }}>{item.checkTitle}</span>
+                      </div>
+                      <span className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                        Excluded on Rerun
+                      </span>
+                    </div>
+                    <div className="font-mono text-[11px] px-2.5 py-1.5 rounded-lg border bg-black/20 text-slate-400 truncate" style={{ borderColor: T.border }}>
+                      Resource: {item.resource}
+                    </div>
+                    <div className="text-xs font-medium text-amber-800 dark:text-amber-200 bg-amber-500/10 p-2.5 rounded-lg border border-amber-500/20">
+                      <span className="font-bold">Reason / Constraint Note:</span> {item.note}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="pt-3 border-t flex items-center justify-between text-xs" style={{ borderColor: T.border }}>
+              <span style={{ color: T.textSub }}>Total Excluded: <strong>{excludedResourcesList.length}</strong> resources</span>
+              <button
+                type="button"
+                onClick={() => setShowCantFixModal(false)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-white cursor-pointer"
+                style={{ backgroundColor: T.primary }}
+              >
+                Close Modal
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Schedule Assessment Modal */}
+      <ScheduleAssessmentModal
+        isOpen={showScheduleModal}
+        onClose={() => setShowScheduleModal(false)}
+        isAssessmentRerun={true}
+        assessmentId={currentAssessment?.id}
+        initialCloud={currentAssessment?.cloud}
+        initialAccountId={currentAssessment?.accountId}
+        initialAccountName={currentAssessment?.accountName}
+        initialRegion={currentAssessment?.region}
+        initialName={currentAssessment?.name || 'Production Architecture Review'}
+        onSuccess={() => {
+          setShowScheduleModal(false);
+        }}
+      />
+
+      {/* Linked Jira Ticket Modal */}
+      {jiraModalTarget && (
+        <JiraTicketModal
+          isOpen={true}
+          onClose={() => setJiraModalTarget(null)}
+          checkId={jiraModalTarget.checkId}
+          checkTitle={jiraModalTarget.title}
+          severity={jiraModalTarget.severity}
+          checkDescription={jiraModalTarget.description}
+          existingTicket={jiraTickets[jiraModalTarget.checkId]}
+        />
+      )}
+
+      {/* Slack Alert Modal */}
+      {slackModalTarget && (
+        <SlackAlertModal
+          isOpen={true}
+          onClose={() => setSlackModalTarget(null)}
+          initialTitle={slackModalTarget.title}
+          initialMessage={slackModalTarget.message}
+          initialSeverity={slackModalTarget.severity}
+          checkId={slackModalTarget.checkId}
+        />
+      )}
+
+      {/* Compliance Framework Detail Modal */}
+      {activeComplianceModal && (
+        <ComplianceFrameworkDetailModal
+          fw={activeComplianceModal}
+          isOpen={true}
+          onClose={() => setActiveComplianceModal(null)}
+          T={T}
+          isDark={isDark}
+          onTriggerSlack={(target) => setSlackModalTarget(target)}
+          onTriggerJira={(target) => setJiraModalTarget(target)}
+          onGoToAIFix={(checkId) => goToAIFix(checkId)}
+        />
+      )}
     </AppLayout>
   );
 }

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useApp, Cloud } from '../context';
 import { AwsWordmark, AzureMark, GcpMark, CloudifyOpsSymbol } from '../components/CloudLogo';
+import { AccountCredentialsModal } from '../components/AccountCredentialsModal';
 
 const CLOUDS: {
   id: Cloud; name: string; desc: string;
@@ -25,11 +26,29 @@ const CloudMark = ({ id }: { id: Cloud }) => {
 };
 
 export function SelectCloud() {
-  const { selectCloud, go } = useApp();
+  const { selectCloud, go, isCloudConfigured, getConfiguredAccount, setConfiguredAccount, currentUser, theme } = useApp();
   const [selected, setSelected] = useState<Cloud | null>(null);
+  const [showCredsModal, setShowCredsModal] = useState(false);
+  const [targetCloudToConfig, setTargetCloudToConfig] = useState<Cloud>('aws');
+
+  const handleCloudClick = (cloudId: Cloud) => {
+    setSelected(cloudId);
+    if (isCloudConfigured(cloudId)) {
+      selectCloud(cloudId);
+    } else {
+      setTargetCloudToConfig(cloudId);
+      setShowCredsModal(true);
+    }
+  };
+
+  const handleSaveCredentials = (account: { cloud: Cloud; name: string; id: string; authType?: string; roleArn?: string; tenantId?: string; projectId?: string }) => {
+    setConfiguredAccount(account);
+    setShowCredsModal(false);
+    selectCloud(account.cloud);
+  };
 
   return (
-    <div className="min-h-screen flex flex-col relative overflow-hidden"
+    <div className="min-h-screen flex flex-col relative overflow-y-auto"
       style={{ background: 'linear-gradient(135deg, #1B6FC9 0%, #14A085 50%, #2EBD59 100%)' }}>
 
       {/* Background blobs */}
@@ -73,12 +92,14 @@ export function SelectCloud() {
           </span>
         </div>
         <div className="ml-auto flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold text-white bg-white/20">LV</div>
-          <span className="text-xs text-white/70">lezin.menath@cloudifyops.com</span>
+          <div className="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold text-white bg-white/20 uppercase">
+            {currentUser.name ? currentUser.name.split(' ').map(n => n[0]).join('').slice(0, 2) : 'US'}
+          </div>
+          <span className="text-xs text-white/80 font-medium">{currentUser.email || 'user@cloudifyops.com'}</span>
         </div>
       </header>
 
-      {/* ── STEP-BY-STEP BAR (Simple & Perfect) ── */}
+      {/* ── STEP-BY-STEP BAR ── */}
       <div
         className="px-6 py-2.5 border-b relative z-10 flex items-center justify-between"
         style={{
@@ -122,28 +143,32 @@ export function SelectCloud() {
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col items-center justify-center p-8 relative z-10">
+      <div className="flex-1 flex flex-col items-center justify-start sm:justify-center p-8 relative z-10 overflow-y-auto">
         <div className="max-w-3xl w-full">
           <div className="text-center mb-10">
             <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-medium mb-5 bg-white/15 text-white border border-white/25">
               <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-              Acme Corp workspace · Organisation Baseline Configured
+              {currentUser.company || 'Enterprise'} workspace · Architecture Evaluation
             </div>
             <h1 className="text-4xl font-semibold tracking-tight text-white mb-3">Select cloud provider</h1>
-            <p className="text-white/65 text-base">Choose a cloud to manage Well-Architected Framework reviews</p>
+            <p className="text-white/75 text-base">Choose a cloud to manage Well-Architected Framework reviews</p>
           </div>
 
           <div className="grid grid-cols-3 gap-5">
             {CLOUDS.map(cloud => {
               const isSelected = selected === cloud.id;
+              const isConfigured = isCloudConfigured(cloud.id);
+              const confAcc = getConfiguredAccount(cloud.id);
+
               return (
                 <button key={cloud.id}
-                  onClick={() => { setSelected(cloud.id); selectCloud(cloud.id); }}
-                  className="text-left flex flex-col gap-5 p-6 rounded-3xl transition-all duration-200 cursor-pointer"
+                  type="button"
+                  onClick={() => handleCloudClick(cloud.id)}
+                  className="text-left flex flex-col justify-between gap-5 p-6 rounded-3xl transition-all duration-200 cursor-pointer"
                   style={{
-                    background: isSelected ? 'rgba(255,255,255,.96)' : 'rgba(255,255,255,.85)',
+                    background: isSelected ? 'rgba(255,255,255,.98)' : 'rgba(255,255,255,.88)',
                     backdropFilter: 'blur(16px)',
-                    border: isSelected ? `2px solid ${cloud.accent}` : '2px solid transparent',
+                    border: isSelected ? `2px solid ${cloud.accent}` : isConfigured ? '2px solid rgba(16, 185, 129, 0.4)' : '2px solid transparent',
                     boxShadow: isSelected
                       ? `0 0 0 4px ${cloud.accentBorder}, 0 8px 24px rgba(0,0,0,.12)`
                       : '0 4px 16px rgba(0,0,0,.1)',
@@ -156,42 +181,40 @@ export function SelectCloud() {
                     <div className="w-14 h-14 rounded-2xl bg-white flex items-center justify-center shadow-xs border border-gray-100 p-2">
                       <CloudMark id={cloud.id} />
                     </div>
-                    <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full"
-                      style={{ background: cloud.accentBg, color: cloud.accent, border: `1px solid ${cloud.accentBorder}` }}>
-                      {cloud.assessments} reviews
-                    </span>
+
+                    {isConfigured ? (
+                      <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                        Connected
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200 flex items-center gap-1">
+                        Setup Required
+                      </span>
+                    )}
                   </div>
 
                   <div>
-                    <div className="font-semibold text-gray-900 text-sm">{cloud.name}</div>
+                    <div className="font-semibold text-gray-900 text-sm flex items-center justify-between">
+                      <span>{cloud.name}</span>
+                    </div>
                     <div className="text-[11px] mt-1 text-gray-500">{cloud.desc}</div>
-                  </div>
-
-                  {/* 2-column stats: Accounts and Regions (Passing removed) */}
-                  <div className="grid grid-cols-2 gap-2.5">
-                    {[
-                      { label: 'Accounts', value: cloud.accounts },
-                      { label: 'Regions',  value: cloud.regions  },
-                    ].map(s => (
-                      <div key={s.label} className="rounded-xl p-2.5 text-center bg-gray-50 border border-gray-100">
-                        <div className="font-bold text-base text-gray-900">{s.value}</div>
-                        <div className="text-[10px] mt-0.5 text-gray-400">{s.label}</div>
+                    {confAcc && (
+                      <div className="text-[10px] font-mono text-emerald-700 bg-emerald-50/80 px-2 py-1 rounded-md mt-2 truncate border border-emerald-100">
+                        {confAcc.name} ({confAcc.id})
                       </div>
-                    ))}
+                    )}
                   </div>
 
-                  <div className="flex items-center justify-between pt-1 border-t border-gray-100">
-                    <span className="text-[11px] text-gray-400">Last run: {cloud.lastRun}</span>
+                  <div className="flex items-center justify-between pt-2 border-t border-gray-100">
+                    <span className="text-[11px] text-gray-400">
+                      {isConfigured ? 'Ready to scan' : 'Creds required'}
+                    </span>
                     <span className="flex items-center gap-1 text-xs font-semibold" style={{ color: cloud.accent }}>
-                      {isSelected ? (
-                        <>
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                            <polyline points="20 6 9 17 4 12"/>
-                          </svg>
-                          <span>Selected</span>
-                        </>
+                      {isConfigured ? (
+                        'Select Cloud →'
                       ) : (
-                        'Select →'
+                        '+ Connect Creds'
                       )}
                     </span>
                   </div>
@@ -200,11 +223,21 @@ export function SelectCloud() {
             })}
           </div>
 
-          <p className="text-center text-[11px] mt-8 text-white/45">
-            3 cloud providers connected · Manage integrations in Settings
+          <p className="text-center text-xs mt-8 text-white/70">
+            Manage your connected cloud credentials and multi-cloud accounts in Settings
           </p>
         </div>
       </div>
+
+      {/* Cloud Credentials Modal when clicking an unconfigured cloud */}
+      <AccountCredentialsModal
+        isOpen={showCredsModal}
+        onClose={() => setShowCredsModal(false)}
+        onSave={handleSaveCredentials}
+        isDark={theme === 'dark'}
+        canDismiss={true}
+        initialCloud={targetCloudToConfig}
+      />
     </div>
   );
 }

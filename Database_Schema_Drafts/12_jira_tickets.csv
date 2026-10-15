@@ -1,0 +1,2 @@
+id,finding_id,jira_key,jira_url,summary,status,priority,assignee,created_at,updated_at
+jt_01,fnd_01,SEC-104,https://jira.acme.com/SEC-104,Fix S3 Encryption,To Do,Medium,usr_01,2026-10-01,2026-10-01

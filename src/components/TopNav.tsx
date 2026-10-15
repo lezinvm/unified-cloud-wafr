@@ -4,7 +4,7 @@
  */
 import { useState, useRef, useEffect } from 'react';
 import { useApp } from '../context';
-import { CloudifyOpsSymbol } from './CloudLogo';
+import { LensLogo } from './CloudLogo';
 
 const NAV_BG   = '#0F172A';
 const NAV_TEXT = 'rgba(255,255,255,.75)';
@@ -37,8 +37,7 @@ export function TopNav() {
         onClick={() => go('dashboard')}
         className="flex items-center gap-2.5 shrink-0 cursor-pointer"
       >
-        <CloudifyOpsSymbol height={24} />
-        <span className="font-semibold text-sm text-white tracking-tight">CloudifyOps</span>
+        <LensLogo height={26} />
       </button>
 
       {/* Spacer */}
@@ -128,6 +127,20 @@ export function TopNav() {
 
               {/* Menu items */}
               <div className="py-1 flex flex-col gap-0.5">
+                <button
+                  onClick={() => {
+                    setProfileOpen(false);
+                    go('integrations');
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-white/85 hover:text-white hover:bg-white/10 transition-colors text-left cursor-pointer"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-white/60">
+                    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+                    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+                  </svg>
+                  <span>Integrations & Alerts</span>
+                </button>
+
                 <button
                   onClick={() => {
                     setProfileOpen(false);

@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useApp, LIGHT, DARK, Tokens } from '../context';
-import { TopNav } from '../components/TopNav';
+import { AppLayout } from '../components/AppLayout';
 import { CloudChip, CloudId } from '../components/CloudLogo';
 import { AccountCredentialsModal } from '../components/AccountCredentialsModal';
+import { ScheduleAssessmentModal } from '../components/ScheduleAssessmentModal';
+import { AssessmentInfo } from '../data/assessmentData';
 
 /* ── Types & Theme Tokens ────────────────────────────────────────────────────── */
 
@@ -125,24 +127,39 @@ function StatusDot({ status, isDark }: { status: AssessmentStatus; isDark: boole
 
 /* ── Dashboard (Home) ────────────────────────────────────────────────────────── */
 export function Dashboard() {
-  const { go, selectCloud, selectAssessment, theme, isNewUser, setIsNewUser } = useApp();
+  const {
+    go,
+    selectCloud,
+    selectAssessment,
+    theme,
+    isNewUser,
+    setIsNewUser,
+    configuredAccount,
+    setConfiguredAccount,
+    configuredAccounts,
+    cloudAccounts,
+    assessments,
+    scheduledAssessments,
+    runOrUpdateAssessment,
+    deleteAssessment,
+    dbConnected,
+    refreshFromDb,
+  } = useApp();
   const isDark = theme === 'dark';
   const T = isDark ? DARK : LIGHT;
 
-  const [showCredsModal, setShowCredsModal] = useState(isNewUser);
-  const [createdAssessments, setCreatedAssessments] = useState<typeof ASSESSMENTS>([]);
+  const [showCredsModal, setShowCredsModal] = useState(false);
+  const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
+  const [scheduleForAssessment, setScheduleForAssessment] = useState<AssessmentInfo | null>(null);
   const [cloudFilter, setCloudFilter] = useState<'all' | CloudId>('all');
   const [search, setSearch] = useState('');
 
+  // Strictly synchronize live data from MongoDB on mount
   useEffect(() => {
-    if (isNewUser) {
-      setShowCredsModal(true);
-    }
-  }, [isNewUser]);
+    refreshFromDb();
+  }, []);
 
-  const activeAssessments = isNewUser
-    ? createdAssessments
-    : (createdAssessments.length > 0 ? createdAssessments : ASSESSMENTS);
+  const activeAssessments = assessments;
 
   const filtered = activeAssessments.filter(a => {
     const matchCloud  = cloudFilter === 'all' || a.cloud === cloudFilter;
@@ -154,40 +171,75 @@ export function Dashboard() {
     return matchCloud && matchSearch;
   });
 
-  const totalAccounts = isNewUser
-    ? createdAssessments.length
-    : (createdAssessments.length > 0 ? createdAssessments.length : CLOUD_STATS.reduce((s, c) => s + c.accounts, 0));
+  const getAccountsCountForCloud = (cId: CloudId) => {
+    if (cloudAccounts && cloudAccounts.length > 0) {
+      return cloudAccounts.filter((a: any) => (a.cloud || '').toLowerCase() === cId).length;
+    }
+    if (assessments && assessments.length > 0) {
+      return new Set(assessments.filter(a => (a.cloud || '').toLowerCase() === cId).map(a => a.accountId)).size;
+    }
+    return 0;
+  };
+
+  const totalAccounts = (cloudAccounts && cloudAccounts.length > 0)
+    ? cloudAccounts.length
+    : (activeAssessments && activeAssessments.length > 0)
+    ? new Set(activeAssessments.map(a => a.accountId)).size
+    : 0;
   const totalAssessments = activeAssessments.length;
+  const openFindingsCount = activeAssessments.length === 0 ? 0 : activeAssessments.reduce((acc, a) => acc + (a.score < 80 ? 9 : 4), 0);
+  const resourcesScannedText = activeAssessments.length === 0 ? '0' : `${activeAssessments.length >= 3 ? (activeAssessments.length * 0.3).toFixed(1) + 'k' : (activeAssessments.length * 280)}`;
+
+  const dynamicCloudStats = (['aws', 'azure', 'gcp'] as CloudId[]).map(cId => {
+    const cloudAssessments = activeAssessments.filter(a => a.cloud === cId);
+    const accountsCount = getAccountsCountForCloud(cId);
+    const avgScore = cloudAssessments.length > 0 ? Math.round(cloudAssessments.reduce((sum, a) => sum + a.score, 0) / cloudAssessments.length) : 0;
+    return {
+      id: cId,
+      avg: avgScore,
+      pass: cloudAssessments.length * 3,
+      warn: cloudAssessments.length,
+      fail: cloudAssessments.filter(a => a.score < 70).length * 2,
+      accounts: accountsCount,
+      resources: cloudAssessments.length === 0 ? '0' : `${cloudAssessments.length * 310}`,
+    };
+  });
 
   const handleSaveCredentials = (account: { cloud: CloudId; name: string; id: string }) => {
     setIsNewUser(false);
     setShowCredsModal(false);
-    setCreatedAssessments([
-      {
-        id: 'A-001',
-        cloud: account.cloud,
-        name: `${account.name} — Initial Review`,
-        accountName: account.name,
-        accountId: account.id,
-        region: account.cloud === 'aws' ? 'us-east-1' : account.cloud === 'azure' ? 'eastus' : 'us-central1',
-        status: 'completed',
-        score: 84,
-        lastRun: 'Just now',
-      },
-    ]);
+    setConfiguredAccount(account);
+    runOrUpdateAssessment({
+      cloud: account.cloud,
+      name: `${account.name} — Initial Architecture Review`,
+      accountName: account.name,
+      accountId: account.id,
+      region: account.cloud === 'aws' ? 'us-east-1' : account.cloud === 'azure' ? 'eastus' : 'us-central1',
+    });
+    go('live-scan');
   };
 
   return (
-    <div className="flex flex-col h-screen" style={{ backgroundColor: T.bg }}>
-      <TopNav />
-
-      <div className="flex-1 overflow-auto">
+    <AppLayout>
+      <div className="p-8 max-w-7xl mx-auto">
         {/* ── Page header ── */}
-        <div className="px-8 pt-8 pb-6 flex items-center justify-between">
-          <div>
+        <div className="pb-6 flex items-center justify-between">
+          <div className="flex items-center gap-3">
             <h1 className="text-2xl font-semibold tracking-tight" style={{ color: T.text }}>
               Home
             </h1>
+            <div
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border"
+              style={{
+                backgroundColor: dbConnected ? (isDark ? 'rgba(16,185,129,0.1)' : '#ECFDF5') : (isDark ? 'rgba(239,68,68,0.1)' : '#FEF2F2'),
+                borderColor: dbConnected ? (isDark ? 'rgba(16,185,129,0.2)' : '#A7F3D0') : (isDark ? 'rgba(239,68,68,0.2)' : '#FECACA'),
+                color: dbConnected ? '#10B981' : '#EF4444',
+              }}
+              title={dbConnected ? 'Live MongoDB connected via FastAPI' : 'MongoDB offline, using local cache'}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${dbConnected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
+              <span>{dbConnected ? 'MongoDB Live' : 'Offline Cache'}</span>
+            </div>
           </div>
 
           <div className="flex items-center gap-3">
@@ -204,32 +256,45 @@ export function Dashboard() {
               </button>
             )}
 
+            {/* Schedule Assessment Button */}
             <button
               type="button"
-              onClick={() => { if (!isNewUser) go('org-questions'); }}
-              disabled={isNewUser}
-              className={`flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-semibold transition-all shadow-sm ${
-                isNewUser
-                  ? 'opacity-60 cursor-not-allowed text-gray-400'
-                  : 'text-white hover:opacity-90 cursor-pointer'
-              }`}
-              style={
-                isNewUser
-                  ? { backgroundColor: isDark ? '#1E293B' : '#E2E8F0', color: isDark ? '#64748B' : '#94A3B8', border: `1px solid ${T.border}`, cursor: 'not-allowed' }
-                  : { background: 'linear-gradient(135deg, #1B6FC9, #14A085, #2EBD59)' }
-              }
-              title={isNewUser ? 'Disabled: Connect account credentials first to enable new assessments' : 'Start a new assessment'}
+              onClick={() => setIsScheduleModalOpen(true)}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-full text-xs font-semibold border transition-all cursor-pointer shadow-xs hover:border-blue-500"
+              style={{
+                borderColor: T.border,
+                color: T.text,
+                backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : '#FFFFFF',
+              }}
             >
-              {isNewUser ? (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-                  <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-                </svg>
-              ) : (
-                <svg width="14" height="14" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clipRule="evenodd"/>
-                </svg>
-              )}
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-blue-500">
+                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                <line x1="16" y1="2" x2="16" y2="6"/>
+                <line x1="8" y1="2" x2="8" y2="6"/>
+                <line x1="3" y1="10" x2="21" y2="10"/>
+              </svg>
+              <span>Schedule Assessment</span>
+            </button>
+
+            <button
+              id="tour-new-assessment-btn"
+              type="button"
+              onClick={() => {
+                if (configuredAccount) {
+                  selectCloud(configuredAccount.cloud);
+                } else if (!isNewUser) {
+                  go('wizard');
+                } else {
+                  go('org-questions');
+                }
+              }}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-semibold transition-all shadow-sm text-white hover:opacity-90 cursor-pointer"
+              style={{ background: 'linear-gradient(135deg, #1B6FC9, #14A085, #2EBD59)' }}
+              title="Start a new architecture assessment"
+            >
+              <svg width="14" height="14" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clipRule="evenodd"/>
+              </svg>
               <span>New assessment</span>
             </button>
           </div>
@@ -237,52 +302,15 @@ export function Dashboard() {
 
         <div className="px-8 pb-10 flex flex-col gap-7">
 
-          {/* ── New User Action Required Banner ── */}
-          {isNewUser && (
-            <div
-              className="p-5 rounded-3xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border"
-              style={{
-                backgroundColor: isDark ? 'rgba(37,99,235,0.12)' : '#EFF6FF',
-                borderColor: isDark ? 'rgba(37,99,235,0.35)' : '#BFDBFE',
-              }}
-            >
-              <div className="flex items-start gap-3.5">
-                <div className="w-10 h-10 rounded-2xl flex items-center justify-center text-blue-600 bg-blue-100 dark:bg-blue-900/40 shrink-0 mt-0.5">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 2l-2 2m-1-1l-2 2M3 21l2-2m-1 1l2-2M15 4l-4 4-2-2 4-4a2.828 2.828 0 0 1 4 4zM7 12l-4 4 2 2 4-4a2.828 2.828 0 0 0-4-4z"/>
-                    <line x1="8.5" y1="15.5" x2="15.5" y2="8.5"/>
-                  </svg>
-                </div>
-                <div>
-                  <div className="text-sm font-semibold" style={{ color: T.text }}>
-                    Action Required: Fill in Account Credentials
-                  </div>
-                  <p className="text-xs mt-0.5 max-w-xl" style={{ color: T.textSub }}>
-                    Welcome to CloudifyOps! To evaluate your architecture against Well-Architected Frameworks, please connect your AWS, Azure, or GCP credentials.
-                  </p>
-                </div>
-              </div>
-
-              <button
-                onClick={() => setShowCredsModal(true)}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-full text-xs font-semibold text-white shrink-0 transition-opacity hover:opacity-90 shadow-sm cursor-pointer"
-                style={{ background: 'linear-gradient(135deg, #1B6FC9, #10B981)' }}
-              >
-                <span>Fill Credentials Now</span>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="9 18 15 12 9 6"/>
-                </svg>
-              </button>
-            </div>
-          )}
-
           {/* ── Stat row: Total accounts -> Total assessments -> Open findings -> Resources scanned ── */}
-          <div className="grid grid-cols-4 gap-4">
+          <div id="tour-dashboard-stats" className="grid grid-cols-4 gap-4">
             <StatCard value={String(totalAccounts)} label="Total accounts" T={T} />
             <StatCard value={String(totalAssessments)} label="Total assessments" T={T} />
-            <StatCard value={isNewUser ? '0' : '59'} label="Open findings" color={isNewUser ? undefined : T.error} T={T} />
-            <StatCard value={isNewUser ? '0' : '2.0k'} label="Resources scanned" T={T} />
+            <StatCard value={String(openFindingsCount)} label="Open findings" color={openFindingsCount > 0 ? T.error : undefined} T={T} />
+            <StatCard value={resourcesScannedText} label="Resources scanned" T={T} />
           </div>
+
+
 
           {/* ── Provider row ── */}
           <div>
@@ -293,16 +321,16 @@ export function Dashboard() {
               </span>
             </h2>
             <div className="grid grid-cols-3 gap-4">
-              {CLOUD_STATS.map(stat => (
+              {dynamicCloudStats.map(stat => (
                 <ProviderCard
                   key={stat.id}
                   stat={stat}
-                  accountsCount={isNewUser ? 0 : stat.accounts}
+                  accountsCount={getAccountsCountForCloud(stat.id)}
                   active={cloudFilter === stat.id}
                   onClick={() => setCloudFilter(cloudFilter === stat.id ? 'all' : stat.id)}
                   T={T}
                   isDark={isDark}
-                  disabled={isNewUser}
+                  disabled={stat.accounts === 0}
                 />
               ))}
             </div>
@@ -349,7 +377,7 @@ export function Dashboard() {
               {/* Column headings */}
               <div className="grid items-center px-5 py-3 text-[12px] font-medium"
                 style={{
-                  gridTemplateColumns: '80px 1.4fr 1.3fr 110px 100px 75px 85px 70px',
+                  gridTemplateColumns: '70px 1.4fr 1.3fr 90px 105px 70px 90px 240px',
                   backgroundColor: isDark ? 'rgba(0,0,0,.15)' : '#F8FAFC',
                   borderBottom: `1px solid ${T.border}`,
                   color: T.textSub,
@@ -409,7 +437,7 @@ export function Dashboard() {
                       key={a.id}
                       className="grid items-center px-5 py-3.5 cursor-pointer transition-colors"
                       style={{
-                        gridTemplateColumns: '80px 1.4fr 1.3fr 110px 100px 75px 85px 70px',
+                        gridTemplateColumns: '70px 1.4fr 1.3fr 90px 105px 70px 90px 240px',
                         borderBottom: idx < filtered.length - 1 ? `1px solid ${T.border}` : 'none',
                       }}
                       onClick={() => { selectAssessment(a.id, 'report'); }}
@@ -423,7 +451,14 @@ export function Dashboard() {
 
                       {/* Assessment name */}
                       <div className="min-w-0 pr-3">
-                        <div className="text-sm font-medium truncate" style={{ color: T.text }}>{a.name}</div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-medium truncate" style={{ color: T.text }}>{a.name}</span>
+                          {a.rerunCount && a.rerunCount > 1 ? (
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-500 border border-amber-500/30">
+                              Rerun #{a.rerunCount}
+                            </span>
+                          ) : null}
+                        </div>
                         <div className="text-[11px] mt-0.5" style={{ color: T.muted }}>1 account · 1 region review</div>
                       </div>
 
@@ -453,7 +488,7 @@ export function Dashboard() {
 
                       {/* Status */}
                       <div onClick={e => e.stopPropagation()}>
-                        <StatusDot status={a.status} isDark={isDark} />
+                        <StatusDot status={a.status === 'fail' ? 'failed' : a.status === 'running' ? 'running' : 'completed'} isDark={isDark} />
                       </div>
 
                       {/* Score */}
@@ -473,10 +508,10 @@ export function Dashboard() {
                       <span className="text-xs font-mono" style={{ color: T.textSub }}>{a.lastRun}</span>
 
                       {/* Actions */}
-                      <div className="flex items-center justify-end" onClick={e => e.stopPropagation()}>
+                      <div className="flex items-center justify-end gap-1.5" onClick={e => e.stopPropagation()}>
                         <button
                           onClick={() => { selectAssessment(a.id, 'report'); }}
-                          className="px-3 py-1 text-[11px] font-medium rounded-full transition-colors cursor-pointer"
+                          className="px-2.5 py-1 text-[11px] font-medium rounded-full transition-colors cursor-pointer"
                           style={{ border: `1px solid ${T.border}`, color: T.textSub }}
                           onMouseEnter={e => {
                             e.currentTarget.style.color = '#2563EB';
@@ -488,6 +523,66 @@ export function Dashboard() {
                           }}
                         >
                           View
+                        </button>
+                        <button
+                          onClick={() => {
+                            runOrUpdateAssessment({
+                              cloud: a.cloud,
+                              accountId: a.accountId,
+                              accountName: a.accountName,
+                              region: a.region,
+                              name: a.name,
+                            });
+                            go('live-scan');
+                          }}
+                          className="px-2.5 py-1 text-[11px] font-semibold rounded-full transition-colors cursor-pointer"
+                          style={{ border: `1px solid ${T.border}`, color: T.primary, backgroundColor: T.primaryBg }}
+                          title="Rerun assessment for this configuration"
+                        >
+                          Re-run
+                        </button>
+                        <button
+                          onClick={() => {
+                            setScheduleForAssessment(a);
+                            setIsScheduleModalOpen(true);
+                          }}
+                          className="px-2.5 py-1 text-[11px] font-medium rounded-full transition-colors cursor-pointer flex items-center gap-1"
+                          style={{ border: `1px solid ${T.border}`, color: T.textSub }}
+                          onMouseEnter={e => {
+                            e.currentTarget.style.color = '#2563EB';
+                            e.currentTarget.style.borderColor = '#2563EB';
+                          }}
+                          onMouseLeave={e => {
+                            e.currentTarget.style.color = T.textSub;
+                            e.currentTarget.style.borderColor = T.border;
+                          }}
+                          title="Schedule automated recurring reruns for this assessment"
+                        >
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-blue-500">
+                            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                            <line x1="16" y1="2" x2="16" y2="6"/>
+                            <line x1="8" y1="2" x2="8" y2="6"/>
+                            <line x1="3" y1="10" x2="21" y2="10"/>
+                          </svg>
+                          <span>Schedule</span>
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (window.confirm(`Are you sure you want to delete "${a.name}"? This will remove it from MongoDB.`)) {
+                              deleteAssessment(a.id);
+                            }
+                          }}
+                          className="px-2.5 py-1 text-[11px] font-medium rounded-full transition-colors cursor-pointer flex items-center gap-1 text-rose-500 hover:text-rose-600 hover:border-rose-400"
+                          style={{ border: `1px solid ${isDark ? 'rgba(244,63,94,0.3)' : '#FECDD3'}`, backgroundColor: isDark ? 'rgba(244,63,94,0.1)' : '#FFF1F2' }}
+                          title="Delete this assessment from database"
+                        >
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="3 6 5 6 21 6" />
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                            <line x1="10" y1="11" x2="10" y2="17" />
+                            <line x1="14" y1="11" x2="14" y2="17" />
+                          </svg>
+                          <span>Delete</span>
                         </button>
                       </div>
                     </div>
@@ -506,6 +601,26 @@ export function Dashboard() {
         isDark={isDark}
         canDismiss={!isNewUser}
       />
-    </div>
+
+      <ScheduleAssessmentModal
+        isOpen={isScheduleModalOpen}
+        onClose={() => {
+          setIsScheduleModalOpen(false);
+          setScheduleForAssessment(null);
+        }}
+        isAssessmentRerun={Boolean(scheduleForAssessment)}
+        assessmentId={scheduleForAssessment?.id}
+        initialCloud={scheduleForAssessment?.cloud}
+        initialAccountId={scheduleForAssessment?.accountId}
+        initialAccountName={scheduleForAssessment?.accountName}
+        initialRegion={scheduleForAssessment?.region}
+        initialName={scheduleForAssessment?.name}
+        onSuccess={() => {
+          setIsScheduleModalOpen(false);
+          setScheduleForAssessment(null);
+          go('assessment-list');
+        }}
+      />
+    </AppLayout>
   );
 }

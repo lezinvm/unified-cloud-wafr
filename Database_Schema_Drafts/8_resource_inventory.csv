@@ -1,0 +1,2 @@
+id,org_id,cloud_account_id,assessment_id,resource_arn_or_id,resource_name,cloud,service,resource_type,region,normalized_attributes,mongo_document_id,discovered_at
+res_01,org_01,acc_01,ass_01,arn:aws:s3:::acme-logs,acme-logs,aws,s3,bucket,us-east-1,{},mongo_doc_8899aabb,2026-10-01

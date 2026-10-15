@@ -1,0 +1,2 @@
+id,org_id,service,title,message,status,error_detail,created_at
+alt_01,org_01,slack,Assessment Complete,Score is 85,Sent,,2026-10-01

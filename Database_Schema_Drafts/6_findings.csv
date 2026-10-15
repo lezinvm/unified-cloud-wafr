@@ -1,0 +1,2 @@
+id,assessment_id,rule_id,raw_identifier,resource_arn_or_id,resource_name,resource_type,service,region,check_type,evidence,resolution_note,status,severity,resolution_status,remediation_status,resolved_at,created_at,updated_at
+fnd_01,ass_01,rule_s3_encryption,s3-bucket-logs,arn:aws:s3:::acme-logs,acme-logs,bucket,s3,us-east-1,config,Bucket missing SSE,,OPEN,HIGH,UNRESOLVED,PENDING,,2026-10-01,2026-10-01

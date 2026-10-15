@@ -13,22 +13,22 @@ const STAGES = [
 ];
 
 export function LiveScan() {
-  const { go, theme } = useApp();
+  const { go, theme, currentAssessment, completeAssessment } = useApp();
   const isDark = theme === 'dark';
   const T = isDark ? DARK : LIGHT;
   const [progress, setProgress] = useState(56);
   const [stageIndex, setStageIndex] = useState(1);
   const [stats, setStats] = useState({ pass: 167, fail: 31, warn: 16 });
+  const [isCompleted, setIsCompleted] = useState(false);
 
   useEffect(() => {
     const interval = setInterval(() => {
       setProgress(p => {
         if (p >= 100) {
           clearInterval(interval);
-          setTimeout(() => go('report'), 600);
           return 100;
         }
-        return p + 0.4;
+        return Math.min(p + 0.5, 100);
       });
       setStats(s => ({
         pass: Math.min(s.pass + 1, 214),
@@ -40,13 +40,32 @@ export function LiveScan() {
   }, []);
 
   useEffect(() => {
-    if (progress > 25 && stageIndex === 0) setStageIndex(1);
-    if (progress > 75 && stageIndex === 1) setStageIndex(2);
-    if (progress > 90 && stageIndex === 2) setStageIndex(3);
-  }, [progress]);
+    if (progress >= 100) {
+      setStageIndex(4);
+      if (!isCompleted) {
+        setIsCompleted(true);
+        if (currentAssessment) {
+          completeAssessment(currentAssessment.id, 84);
+        }
+        const timer = setTimeout(() => {
+          go('report');
+        }, 1000);
+        return () => clearTimeout(timer);
+      }
+    } else if (progress > 90) {
+      setStageIndex(3);
+    } else if (progress > 75) {
+      setStageIndex(2);
+    } else if (progress > 25) {
+      setStageIndex(1);
+    }
+  }, [progress, isCompleted, currentAssessment, completeAssessment, go]);
 
   const checksTotal = 272;
   const checksDone = Math.floor((progress / 100) * checksTotal);
+
+  const assessmentName = currentAssessment?.name || 'Production — Q3 2026 WAF Review';
+  const accountInfo = `${currentAssessment?.accountName || 'acme-production'} (${currentAssessment?.accountId || '124890123456'}) · ${currentAssessment?.region || 'us-east-1'}`;
 
   return (
     <AppLayout>
@@ -72,21 +91,39 @@ export function LiveScan() {
                   <span>/</span><span style={{ color: T.text }}>Live Scan</span>
                 </nav>
                 <div className="flex items-center gap-2 mb-1">
-                  <div className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: T.primary }} />
-                  <span className="text-xs font-medium uppercase tracking-wider" style={{ color: T.primary }}>Live Scan Running</span>
+                  <div
+                    className={`w-2 h-2 rounded-full ${progress >= 100 ? '' : 'animate-pulse'}`}
+                    style={{ backgroundColor: progress >= 100 ? T.success : T.primary }}
+                  />
+                  <span
+                    className="text-xs font-semibold uppercase tracking-wider"
+                    style={{ color: progress >= 100 ? T.success : T.primary }}
+                  >
+                    {progress >= 100 ? 'Scan Complete' : 'Live Scan Running'}
+                  </span>
                 </div>
-                <h1 className="font-semibold text-xl" style={{ color: T.text }}>Production — Q3 2026 WAF Review</h1>
-                <p className="text-sm mt-0.5" style={{ color: T.textSub }}>Started 14:03:22 · acme-production (124890123456) · us-east-1 · 272 checks</p>
+                <h1 className="font-semibold text-xl" style={{ color: T.text }}>{assessmentName}</h1>
+                <p className="text-sm mt-0.5" style={{ color: T.textSub }}>Started just now · {accountInfo} · 272 checks</p>
               </div>
             </div>
-            <button
-              onClick={() => go('assessment-list')}
-              className="px-4 py-2 text-sm rounded-full transition-colors cursor-pointer"
-              style={{ border: `1px solid ${T.border}`, color: T.textSub }}
-              onMouseEnter={e => { e.currentTarget.style.color = T.error; e.currentTarget.style.borderColor = T.error; }}
-              onMouseLeave={e => { e.currentTarget.style.color = T.textSub; e.currentTarget.style.borderColor = T.border; }}>
-              Cancel Scan
-            </button>
+            {progress >= 100 ? (
+              <button
+                onClick={() => go('report')}
+                className="px-5 py-2 text-xs font-bold rounded-full text-white cursor-pointer transition-opacity hover:opacity-90 shadow-sm"
+                style={{ background: 'linear-gradient(135deg,#2563EB,#22C55E)' }}
+              >
+                View Report →
+              </button>
+            ) : (
+              <button
+                onClick={() => go('assessment-list')}
+                className="px-4 py-2 text-sm rounded-full transition-colors cursor-pointer"
+                style={{ border: `1px solid ${T.border}`, color: T.textSub }}
+                onMouseEnter={e => { e.currentTarget.style.color = T.error; e.currentTarget.style.borderColor = T.error; }}
+                onMouseLeave={e => { e.currentTarget.style.color = T.textSub; e.currentTarget.style.borderColor = T.border; }}>
+                Cancel Scan
+              </button>
+            )}
           </div>
 
           {/* Overall progress */}

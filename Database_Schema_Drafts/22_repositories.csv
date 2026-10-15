@@ -1,0 +1,2 @@
+id,org_id,provider,repo_url,branch,pat_encrypted,is_active,created_at,updated_at
+repo_01,org_01,github,https://github.com/acmecorp/infrastructure,main,enc_token_xyz123,true,2026-10-01,2026-10-01

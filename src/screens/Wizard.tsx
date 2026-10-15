@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { useApp, Cloud } from '../context';
 import { AwsWordmark, AzureMark, GcpMark, CloudifyOpsSymbol } from '../components/CloudLogo';
 import { INITIAL_ORG_QUESTIONS } from '../data/questionnaireData';
+import { AccountCredentialsModal } from '../components/AccountCredentialsModal';
+import { ScheduleAssessmentModal } from '../components/ScheduleAssessmentModal';
 
 const STEPS = [
   { n: 1, label: 'Configure Cloud' },
@@ -483,7 +485,7 @@ function Step1({
   setAssessmentName: (name: string) => void;
   onNext: () => void;
 }) {
-  const { go } = useApp();
+  const { go, theme, isCloudConfigured, getConfiguredAccount, setConfiguredAccount } = useApp();
   const [credType, setCredType] = useState<'api' | 'collector'>('api');
   const [awsAuthType, setAwsAuthType] = useState<'role' | 'keys'>('role');
   const [azureAuthType, setAzureAuthType] = useState<'sp' | 'mi'>('sp');
@@ -491,11 +493,31 @@ function Step1({
   const [testState, setTestState] = useState<'idle' | 'testing' | 'ok'>('idle');
   const [accountDropdownOpen, setAccountDropdownOpen] = useState(false);
   const [regionDropdownOpen, setRegionDropdownOpen] = useState(false);
+  const [showCredsModal, setShowCredsModal] = useState(false);
 
   const cloudObj = CLOUD_OPTIONS.find(c => c.id === selectedCloud) || CLOUD_OPTIONS[0];
-  const accounts = CLOUD_ACCOUNTS[selectedCloud] || CLOUD_ACCOUNTS.aws;
+  const isConfigured = isCloudConfigured(selectedCloud);
+  const cloudAccount = getConfiguredAccount(selectedCloud);
+
+  const accounts = isConfigured && cloudAccount ? [
+    {
+      id: 'acc-configured',
+      name: cloudAccount.name,
+      num: cloudAccount.id,
+      env: 'Production',
+      resources: 'Connected Account',
+    }
+  ] : [];
+
+  const rawAccounts = CLOUD_ACCOUNTS[selectedCloud] || CLOUD_ACCOUNTS.aws;
   const regions = CLOUD_REGIONS[selectedCloud] || CLOUD_REGIONS.aws;
-  const activeAccount = accounts.find(a => a.id === selectedAccount) || accounts[0];
+  const activeAccount = accounts.find(a => a.id === selectedAccount) || accounts[0] || {
+    id: 'acc-none',
+    name: `No ${cloudObj.short} Account Configured`,
+    num: '—',
+    env: 'prod',
+    resources: '0 resources',
+  };
   const activeRegion = regions.find(r => r.id === selectedRegion) || regions[0];
 
   const handleTest = () => {
@@ -551,6 +573,36 @@ function Step1({
           Change Cloud
         </button>
       </div>
+
+      {/* ── UNCONFIGURED CLOUD WARNING BANNER ── */}
+      {!isConfigured && (
+        <div className="rounded-2xl p-5 border border-amber-300 bg-amber-50/90 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-xs">
+          <div className="flex items-start gap-3">
+            <div className="w-9 h-9 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                <line x1="12" y1="9" x2="12" y2="13"/>
+                <line x1="12" y1="17" x2="12.01" y2="17"/>
+              </svg>
+            </div>
+            <div>
+              <h4 className="text-sm font-bold text-amber-900">
+                {cloudObj.label} Credentials Required
+              </h4>
+              <p className="text-xs text-amber-700 mt-0.5">
+                You haven't configured {cloudObj.short} credentials for your user account yet. Add your read-only credentials to proceed with this review.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowCredsModal(true)}
+            className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 shadow-sm transition-all cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1.5"
+          >
+            <span>+ Connect {cloudObj.short}</span>
+          </button>
+        </div>
+      )}
 
       {/* ── 1. ASSESSMENT NAME ── */}
       <div className="bg-white rounded-2xl p-5 flex flex-col gap-4 border border-gray-100 shadow-sm">
@@ -944,55 +996,70 @@ function Step1({
             </span>
           </div>
 
-          {/* Credentials Display (Disabled / View-only) */}
-          {selectedCloud === 'aws' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-              <div>
-                <label className="block text-[11px] font-medium text-gray-500 mb-1">Account ID</label>
-                <div className="px-3 py-2 rounded-lg bg-white border border-gray-200 font-mono text-gray-700 select-all">
-                  124890123456
+          {/* Credentials Display */}
+          {isConfigured && cloudAccount ? (
+            <>
+              {selectedCloud === 'aws' && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <label className="block text-[11px] font-medium text-gray-500 mb-1">Account ID</label>
+                    <div className="px-3 py-2 rounded-lg bg-white border border-gray-200 font-mono text-gray-700 select-all">
+                      {cloudAccount.id}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-medium text-gray-500 mb-1">IAM Role ARN</label>
+                    <div className="px-3 py-2 rounded-lg bg-white border border-gray-200 font-mono text-gray-700 truncate select-all" title={cloudAccount.roleArn || `arn:aws:iam::${cloudAccount.id}:role/CloudifyOpsWAFRReadOnlyRole`}>
+                      {cloudAccount.roleArn || `arn:aws:iam::${cloudAccount.id}:role/CloudifyOpsWAFRReadOnlyRole`}
+                    </div>
+                  </div>
                 </div>
-              </div>
-              <div>
-                <label className="block text-[11px] font-medium text-gray-500 mb-1">IAM Role ARN</label>
-                <div className="px-3 py-2 rounded-lg bg-white border border-gray-200 font-mono text-gray-700 truncate select-all" title="arn:aws:iam::124890123456:role/CloudifyOpsWAFRReadOnlyRole">
-                  arn:aws:iam::124890123456:role/CloudifyOpsWAFRReadOnlyRole
-                </div>
-              </div>
-            </div>
-          )}
+              )}
 
-          {selectedCloud === 'azure' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-              <div>
-                <label className="block text-[11px] font-medium text-gray-500 mb-1">Directory (Tenant) ID</label>
-                <div className="px-3 py-2 rounded-lg bg-white border border-gray-200 font-mono text-gray-700 truncate select-all">
-                  72f988bf-86f1-41af-91ab-2d7cd011db47
+              {selectedCloud === 'azure' && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <label className="block text-[11px] font-medium text-gray-500 mb-1">Directory (Tenant) ID</label>
+                    <div className="px-3 py-2 rounded-lg bg-white border border-gray-200 font-mono text-gray-700 truncate select-all">
+                      {cloudAccount.tenantId || '72f988bf-86f1-41af-91ab-2d7cd011db47'}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-medium text-gray-500 mb-1">Subscription / Client ID</label>
+                    <div className="px-3 py-2 rounded-lg bg-white border border-gray-200 font-mono text-gray-700 truncate select-all">
+                      {cloudAccount.id}
+                    </div>
+                  </div>
                 </div>
-              </div>
-              <div>
-                <label className="block text-[11px] font-medium text-gray-500 mb-1">Application (Client) ID</label>
-                <div className="px-3 py-2 rounded-lg bg-white border border-gray-200 font-mono text-gray-700 truncate select-all">
-                  e892c901-44bb-4e31-8902-124890123456
-                </div>
-              </div>
-            </div>
-          )}
+              )}
 
-          {selectedCloud === 'gcp' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-              <div>
-                <label className="block text-[11px] font-medium text-gray-500 mb-1">Project ID</label>
-                <div className="px-3 py-2 rounded-lg bg-white border border-gray-200 font-mono text-gray-700 select-all">
-                  acme-gcp-prod-9941
+              {selectedCloud === 'gcp' && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <label className="block text-[11px] font-medium text-gray-500 mb-1">Project ID</label>
+                    <div className="px-3 py-2 rounded-lg bg-white border border-gray-200 font-mono text-gray-700 select-all">
+                      {cloudAccount.projectId || cloudAccount.id}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-medium text-gray-500 mb-1">Service Account Email</label>
+                    <div className="px-3 py-2 rounded-lg bg-white border border-gray-200 font-mono text-gray-700 truncate select-all" title={cloudAccount.roleArn || `wafr-scanner@${cloudAccount.projectId || cloudAccount.id}.iam.gserviceaccount.com`}>
+                      {cloudAccount.roleArn || `wafr-scanner@${cloudAccount.projectId || cloudAccount.id}.iam.gserviceaccount.com`}
+                    </div>
+                  </div>
                 </div>
-              </div>
-              <div>
-                <label className="block text-[11px] font-medium text-gray-500 mb-1">Service Account Email</label>
-                <div className="px-3 py-2 rounded-lg bg-white border border-gray-200 font-mono text-gray-700 truncate select-all" title="wafr-scanner@acme-gcp-prod.iam.gserviceaccount.com">
-                  wafr-scanner@acme-gcp-prod.iam.gserviceaccount.com
-                </div>
-              </div>
+              )}
+            </>
+          ) : (
+            <div className="p-4 rounded-xl bg-amber-50/60 border border-dashed border-amber-300 text-center flex flex-col items-center justify-center gap-2">
+              <span className="text-xs text-amber-800 font-medium">No credentials configured for {cloudObj.label} yet.</span>
+              <button
+                type="button"
+                onClick={() => setShowCredsModal(true)}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-600 hover:bg-amber-700 text-white cursor-pointer transition-colors shadow-2xs"
+              >
+                + Configure {cloudObj.short} Credentials
+              </button>
             </div>
           )}
         </div>
@@ -1002,8 +1069,12 @@ function Step1({
           <button
             type="button"
             onClick={handleTest}
-            disabled={testState === 'testing'}
-            className="flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-semibold border-2 border-blue-600 text-blue-600 hover:bg-blue-50 transition-colors cursor-pointer"
+            disabled={testState === 'testing' || !isConfigured}
+            className={`flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-semibold border-2 transition-colors ${
+              isConfigured
+                ? 'border-blue-600 text-blue-600 hover:bg-blue-50 cursor-pointer'
+                : 'border-gray-200 text-gray-400 cursor-not-allowed'
+            }`}
           >
             {testState === 'testing' && (
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="animate-spin">
@@ -1036,18 +1107,44 @@ function Step1({
           <span>Back to Select Cloud</span>
         </button>
 
-        <button
-          type="button"
-          onClick={onNext}
-          className="px-6 py-2.5 rounded-full text-sm font-semibold text-white transition-all hover:opacity-90 cursor-pointer shadow-sm flex items-center gap-2"
-          style={{ background: 'linear-gradient(135deg, #2563EB, #10B981)' }}
-        >
-          <span>Continue to Client Questionnaire</span>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-            <polyline points="9 18 15 12 9 6" />
-          </svg>
-        </button>
+        {isConfigured ? (
+          <button
+            type="button"
+            onClick={onNext}
+            className="px-6 py-2.5 rounded-full text-sm font-semibold text-white transition-all hover:opacity-90 cursor-pointer shadow-sm flex items-center gap-2"
+            style={{ background: 'linear-gradient(135deg, #2563EB, #10B981)' }}
+          >
+            <span>Continue to Client Questionnaire</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setShowCredsModal(true)}
+            className="px-6 py-2.5 rounded-full text-sm font-semibold text-white bg-amber-600 hover:bg-amber-700 transition-all cursor-pointer shadow-sm flex items-center gap-2"
+          >
+            <span>+ Connect {cloudObj.short} Credentials</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+          </button>
+        )}
       </div>
+
+      {/* Account Credentials Modal */}
+      <AccountCredentialsModal
+        isOpen={showCredsModal}
+        onClose={() => setShowCredsModal(false)}
+        initialCloud={selectedCloud}
+        isDark={theme === 'dark'}
+        onSave={(newAcc) => {
+          setConfiguredAccount(newAcc);
+          setShowCredsModal(false);
+        }}
+      />
     </div>
   );
 }
@@ -1065,7 +1162,6 @@ function Step2({
   onBack: () => void;
 }) {
   const { go } = useApp();
-  const [scopeFilter, setScopeFilter] = useState<'all' | 'account' | 'organization'>('account');
   const [activeQuestionId, setActiveQuestionId] = useState<string | null>('ACC-05');
   const [draftAnswers, setDraftAnswers] = useState<Record<string, string>>({});
   const [selectedInfoQuestion, setSelectedInfoQuestion] = useState<QuestionnaireItem | null>(null);
@@ -1075,8 +1171,8 @@ function Step2({
 
   const accountAnswered = accountQuestions.filter(q => q.answered && q.ans && q.ans.trim().length > 0).length;
   const orgAnswered = orgQuestions.filter(q => q.answered && q.ans && q.ans.trim().length > 0).length;
-  const totalAnswered = questions.filter(q => q.answered && q.ans && q.ans.trim().length > 0).length;
-  const totalQuestions = questions.length;
+  const totalAnswered = accountAnswered;
+  const totalQuestions = accountQuestions.length;
   const isAllComplete = totalAnswered === totalQuestions;
   const remainingCount = totalQuestions - totalAnswered;
 
@@ -1085,12 +1181,6 @@ function Step2({
   const totalAccountChecks = allAccountManualChecks.length;
 
   const totalPct = Math.round((totalAnswered / totalQuestions) * 100);
-
-  const displayedQuestions = questions.filter(q => {
-    if (scopeFilter === 'account') return q.scope === 'account';
-    if (scopeFilter === 'organization') return q.scope === 'organization';
-    return true;
-  });
 
   const SAMPLE_ANSWERS: Record<string, string> = {
     'ACC-01': 'CloudWatch dashboards with custom metrics and SNS alerts for P1/P2 severity. Microservices export traces via OpenTelemetry and logs to Datadog.',
@@ -1181,7 +1271,7 @@ function Step2({
           </p>
         </div>
         <div className="text-right">
-          <div className="text-sm font-semibold text-gray-900">{totalAnswered} of {questions.length} answered</div>
+          <div className="text-sm font-semibold text-gray-900">{totalAnswered} of {totalQuestions} answered</div>
           <div className="text-[11px] mt-0.5 text-gray-400">≈ 6 min remaining</div>
         </div>
       </div>
@@ -1230,80 +1320,32 @@ function Step2({
         </button>
       </div>
 
-      {/* ── 2 SCOPE SWITCHER TABS ── */}
-      <div className="grid grid-cols-2 gap-3 p-1.5 rounded-2xl bg-gray-100 border border-gray-200/80">
-        {/* Account Specific Tab */}
-        <button
-          type="button"
-          onClick={() => setScopeFilter(scopeFilter === 'account' ? 'all' : 'account')}
-          className="p-3 rounded-xl text-left transition-all cursor-pointer flex flex-col gap-1"
-          style={{
-            backgroundColor: scopeFilter === 'account' ? '#FFFFFF' : 'transparent',
-            boxShadow: scopeFilter === 'account' ? '0 2px 6px rgba(0,0,0,0.06)' : 'none',
-          }}
-        >
-          <div className="flex items-center justify-between flex-wrap gap-1">
-            <span className="text-xs font-bold text-blue-700 flex items-center gap-1.5">
-              <span>Account-Specific</span>
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 font-semibold">
-                Manual Checks
-              </span>
+      {/* ── Account-Specific Scope Header ── */}
+      <div className="p-4 rounded-2xl bg-white border border-gray-200/80 shadow-xs flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-bold text-blue-700">Account-Specific Questions</span>
+            <span className="text-[10px] px-2 py-0.5 rounded-md bg-blue-100 text-blue-800 font-semibold">
+              Manual Checks
             </span>
-            <div className="flex items-center gap-1">
-              <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 border border-blue-100 font-medium">
-                {accountAnswered}/{accountQuestions.length} answered
-              </span>
-              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold">
-                {verifiedAccountChecks}/{totalAccountChecks} checks
-              </span>
-            </div>
           </div>
-          <p className="text-[11px] text-gray-500">
+          <p className="text-xs text-gray-500 mt-0.5">
             Workload resources, technical manual checks, and account-level security controls
           </p>
-        </button>
-
-        {/* Organization Specific Tab */}
-        <button
-          type="button"
-          onClick={() => setScopeFilter(scopeFilter === 'organization' ? 'all' : 'organization')}
-          className="p-3 rounded-xl text-left transition-all cursor-pointer flex flex-col gap-1"
-          style={{
-            backgroundColor: scopeFilter === 'organization' ? '#FFFFFF' : 'transparent',
-            boxShadow: scopeFilter === 'organization' ? '0 2px 6px rgba(0,0,0,0.06)' : 'none',
-          }}
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-purple-700">Organization-Specific</span>
-            <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-purple-50 text-purple-600 border border-purple-100">
-              {orgAnswered}/{orgQuestions.length} answered
-            </span>
-          </div>
-          <p className="text-[11px] text-gray-500">
-            Landing Zone SCPs, centralized logging, budgets, and enterprise governance
-          </p>
-        </button>
-      </div>
-
-      {/* Scope Filter Pill info */}
-      <div className="flex items-center justify-between px-1 text-xs text-gray-500">
-        <span>
-          Showing {displayedQuestions.length} questions {scopeFilter !== 'all' ? `(${scopeFilter === 'account' ? 'Account Scope with Manual Checks' : 'Organization Scope'})` : '(All Scopes)'}
-        </span>
-        {scopeFilter !== 'all' && (
-          <button
-            type="button"
-            onClick={() => setScopeFilter('all')}
-            className="text-blue-600 font-medium hover:underline cursor-pointer"
-          >
-            Show all questions
-          </button>
-        )}
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-mono px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-100 font-semibold">
+            {accountAnswered}/{accountQuestions.length} answered
+          </span>
+          <span className="text-xs font-mono px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold">
+            {verifiedAccountChecks}/{totalAccountChecks} checks verified
+          </span>
+        </div>
       </div>
 
       {/* ── QUESTION LIST ── */}
       <div className="flex flex-col gap-3">
-        {displayedQuestions.map(q => {
+        {accountQuestions.map(q => {
           const isOpen = activeQuestionId === q.id;
           const cat = CAT_COLORS[q.cat] ?? { bg: '#F8FAFC', text: '#64748B' };
           const isAccount = q.scope === 'account';
@@ -1758,6 +1800,7 @@ function Step3({
   questions,
   onBack,
   onStart,
+  onSchedule,
 }: {
   selectedCloud: Cloud;
   selectedAccount: string;
@@ -1767,12 +1810,26 @@ function Step3({
   questions: QuestionnaireItem[];
   onBack: () => void;
   onStart: () => void;
+  onSchedule: () => void;
 }) {
+  const { isCloudConfigured, getConfiguredAccount } = useApp();
   const [retention, setRetention] = useState('90');
 
   const cloudObj = CLOUD_OPTIONS.find(c => c.id === selectedCloud) || CLOUD_OPTIONS[0];
-  const accounts = CLOUD_ACCOUNTS[selectedCloud] || CLOUD_ACCOUNTS.aws;
-  const accObj = accounts.find(a => a.id === selectedAccount) || accounts[0];
+  const cloudAccount = getConfiguredAccount(selectedCloud);
+  const accObj = cloudAccount ? {
+    id: 'acc-configured',
+    name: cloudAccount.name,
+    num: cloudAccount.id,
+    env: 'Production',
+    resources: 'Connected Account',
+  } : {
+    id: 'acc-none',
+    name: `${cloudObj.short} Account`,
+    num: '—',
+    env: 'Production',
+    resources: 'Connected Account',
+  };
   const regions = CLOUD_REGIONS[selectedCloud] || CLOUD_REGIONS.aws;
   const regObj = regions.find(r => r.id === selectedRegion) || regions[0];
 
@@ -1780,8 +1837,8 @@ function Step3({
   const orgQuestions = questions.filter(q => q.scope === 'organization');
   const accountAnswered = accountQuestions.filter(q => q.answered && q.ans && q.ans.trim().length > 0).length;
   const orgAnswered = orgQuestions.filter(q => q.answered && q.ans && q.ans.trim().length > 0).length;
-  const totalAnswered = questions.filter(q => q.answered && q.ans && q.ans.trim().length > 0).length;
-  const isAllComplete = totalAnswered === questions.length;
+  const totalAnswered = accountAnswered;
+  const isAllComplete = accountQuestions.length === 0 || accountAnswered === accountQuestions.length;
 
   const allAccountManualChecks = accountQuestions.flatMap(q => q.manualChecks || []);
   const verifiedAccountChecks = allAccountManualChecks.filter(c => c.verified).length;
@@ -1795,7 +1852,7 @@ function Step3({
     ['Account Questionnaire', `${accountAnswered} of ${accountQuestions.length} answered`],
     ['Account Manual Checks', `${verifiedAccountChecks} of ${allAccountManualChecks.length} checks verified`],
     ['Organization Questionnaire', `${orgAnswered} of ${orgQuestions.length} answered`],
-    ['Questionnaire Status', isAllComplete ? 'Complete & Verified (All questions & manual checks verified)' : `Incomplete (${totalAnswered}/${questions.length} answered)`],
+    ['Questionnaire Status', 'Ready for Evaluation & Automated Scan'],
     ['Pillars Evaluated', 'Reliability, Security, Cost Optimization, Operational Excellence, Performance'],
     ['Estimated Scan Duration', '6–8 minutes (Non-intrusive read-only scan)'],
   ];
@@ -1810,23 +1867,23 @@ function Step3({
       </div>
 
       {!isAllComplete && (
-        <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-900 flex items-center justify-between gap-3 text-xs">
+        <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 flex items-center justify-between gap-3 text-xs">
           <div className="flex items-center gap-2">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#E11D48" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#D97706" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
               <circle cx="12" cy="12" r="10" />
               <line x1="12" y1="8" x2="12" y2="12" />
               <line x1="12" y1="16" x2="12.01" y2="16" />
             </svg>
             <span>
-              <strong>Questionnaire Incomplete:</strong> {questions.length - totalAnswered} question(s) remaining. You cannot launch the assessment without completing all questionnaire answers.
+              <strong>Note:</strong> {accountQuestions.length - accountAnswered} account question(s) not yet answered. You can still proceed or return to edit answers.
             </span>
           </div>
           <button
             type="button"
             onClick={onBack}
-            className="px-3 py-1.5 rounded-xl font-bold bg-rose-600 text-white hover:bg-rose-700 transition-colors cursor-pointer shrink-0"
+            className="px-3 py-1.5 rounded-xl font-bold bg-amber-600 text-white hover:bg-amber-700 transition-colors cursor-pointer shrink-0"
           >
-            ← Complete Questionnaire
+            ← Review Answers
           </button>
         </div>
       )}
@@ -1842,7 +1899,7 @@ function Step3({
         {configRows.map(([label, value]) => (
           <div key={label} className="flex items-start gap-4 px-5 py-3 border-b border-gray-50 last:border-0">
             <span className="text-xs w-48 shrink-0 pt-0.5 text-gray-400">{label}</span>
-            <span className={`text-sm font-medium flex-1 ${label === 'Questionnaire Status' ? (isAllComplete ? 'text-emerald-600 font-semibold' : 'text-rose-600 font-semibold') : 'text-gray-800'}`}>{value}</span>
+            <span className={`text-sm font-medium flex-1 ${label === 'Questionnaire Status' ? 'text-emerald-600 font-semibold' : 'text-gray-800'}`}>{value}</span>
           </div>
         ))}
       </div>
@@ -1904,22 +1961,34 @@ function Step3({
         >
           ← Back to Questionnaire
         </button>
-        <button
-          type="button"
-          disabled={!isAllComplete}
-          onClick={onStart}
-          className={`flex items-center gap-2 px-8 py-3 rounded-full text-sm font-bold shadow-lg transition-all ${
-            isAllComplete
-              ? 'text-white cursor-pointer hover:opacity-90 hover:scale-[1.02] active:scale-100'
-              : 'bg-gray-200 text-gray-400 cursor-not-allowed shadow-none'
-          }`}
-          style={isAllComplete ? { background: 'linear-gradient(135deg, #2563EB, #22C55E)' } : undefined}
-        >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
-            <polygon points="5 3 19 12 5 21 5 3"/>
-          </svg>
-          <span>Start Assessment</span>
-        </button>
+
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={onSchedule}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-semibold border border-blue-200 text-blue-600 bg-blue-50 hover:bg-blue-100 transition-all cursor-pointer shadow-xs"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+              <line x1="16" y1="2" x2="16" y2="6"/>
+              <line x1="8" y1="2" x2="8" y2="6"/>
+              <line x1="3" y1="10" x2="21" y2="10"/>
+            </svg>
+            <span>Schedule Recurring</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={onStart}
+            className="flex items-center gap-2 px-8 py-3 rounded-full text-sm font-bold shadow-lg transition-all text-white cursor-pointer hover:opacity-95 hover:scale-[1.02] active:scale-100"
+            style={{ background: 'linear-gradient(135deg, #2563EB, #22C55E)' }}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+              <polygon points="5 3 19 12 5 21 5 3"/>
+            </svg>
+            <span>Start Assessment</span>
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -1927,8 +1996,9 @@ function Step3({
 
 /* ── Main Wizard Component ── */
 export function Wizard() {
-  const { go, cloud, setWizardStep, wizardStep: globalStep, orgQuestions } = useApp();
+  const { go, cloud, setWizardStep, wizardStep: globalStep, orgQuestions, isCloudConfigured, getConfiguredAccount, runOrUpdateAssessment } = useApp();
   const [step, setStep] = useState<1 | 2 | 3>(globalStep <= 3 ? (globalStep as 1 | 2 | 3) : 1);
+  const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
 
   // Form State
   const [selectedCloud, setSelectedCloud] = useState<Cloud>(cloud || 'aws');
@@ -1955,22 +2025,23 @@ export function Wizard() {
     }
   }, [orgQuestions]);
 
-  // Synchronize when user selects a cloud in SelectCloud screen
+  // Synchronize when user selects a cloud in SelectCloud screen or configuredAccount
   useEffect(() => {
     if (cloud) {
       setSelectedCloud(cloud);
-      const newAccounts = CLOUD_ACCOUNTS[cloud];
       const newRegions = CLOUD_REGIONS[cloud];
-      if (newAccounts?.length) {
-        setSelectedAccount(newAccounts[0].id);
-        if (newAccounts[0].env.toLowerCase().includes('prod')) setAccountType('prod');
-        else if (newAccounts[0].env.toLowerCase().includes('dev')) setAccountType('dev');
-        else setAccountType('pre-prod');
+      const isConfigured = isCloudConfigured(cloud);
+      const cloudAcc = getConfiguredAccount(cloud);
+      if (isConfigured && cloudAcc) {
+        setSelectedAccount('acc-configured');
+        setAssessmentName(`${cloudAcc.name} — ${newRegions?.[0]?.id || 'us-east-1'} Review`);
+      } else {
+        setSelectedAccount('');
+        setAssessmentName(`${cloud.toUpperCase()} Production — ${newRegions?.[0]?.id || 'us-east-1'} Full Review`);
       }
       if (newRegions?.length) setSelectedRegion(newRegions[0].id);
-      setAssessmentName(`${cloud.toUpperCase()} Production — ${newRegions?.[0]?.id || 'us-east-1'} Full Review`);
     }
-  }, [cloud]);
+  }, [cloud, isCloudConfigured, getConfiguredAccount]);
 
   const advance = () => {
     const n = (step + 1) as 1 | 2 | 3;
@@ -1982,6 +2053,16 @@ export function Wizard() {
     setStep(n);
     setWizardStep(n);
   };
+
+  const rawAccounts = CLOUD_ACCOUNTS[selectedCloud] || CLOUD_ACCOUNTS.aws;
+  const cloudAccount = getConfiguredAccount(selectedCloud);
+  const userAccount = cloudAccount ? {
+    id: 'acc-configured',
+    name: cloudAccount.name,
+    num: cloudAccount.id,
+  } : null;
+  const accountsList = userAccount ? [userAccount, ...rawAccounts] : rawAccounts;
+  const accObj = accountsList.find(a => a.id === selectedAccount) || accountsList[0];
 
   return (
     <div className="flex flex-col h-screen bg-gray-50">
@@ -2044,10 +2125,35 @@ export function Wizard() {
             assessmentName={assessmentName}
             questions={questions}
             onBack={back}
-            onStart={() => go('live-scan')}
+            onSchedule={() => setIsScheduleModalOpen(true)}
+            onStart={() => {
+              runOrUpdateAssessment({
+                cloud: selectedCloud,
+                accountId: accObj?.num || '124890123456',
+                accountName: accObj?.name || 'Primary Account',
+                region: selectedRegion || 'us-east-1',
+                name: assessmentName || `${selectedCloud.toUpperCase()} Production Review`,
+              });
+              go('live-scan');
+            }}
           />
         )}
       </div>
+
+      {/* Schedule Assessment Modal */}
+      <ScheduleAssessmentModal
+        isOpen={isScheduleModalOpen}
+        onClose={() => setIsScheduleModalOpen(false)}
+        initialCloud={selectedCloud}
+        initialAccountId={accObj?.num}
+        initialAccountName={accObj?.name}
+        initialRegion={selectedRegion}
+        initialName={assessmentName}
+        onSuccess={() => {
+          setIsScheduleModalOpen(false);
+          go('assessment-list');
+        }}
+      />
     </div>
   );
 }

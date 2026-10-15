@@ -1,0 +1,2 @@
+id,org_id,cloud_account_id,name,frequency,cron_expression,time_of_day,timezone,is_active,last_run_at,next_run_at,created_at,updated_at
+sched_01,org_01,acc_01,Weekly Audit,weekly,0 2 * * 1,02:00:00,UTC,true,2026-10-01,2026-10-08,2026-10-01,2026-10-01

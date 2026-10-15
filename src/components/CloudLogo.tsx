@@ -100,23 +100,26 @@ export const GcpMark = ({
  * Uniform aspect ratio across AWS, Azure, and GCP with crisp borders and soft shadows.
  */
 export function CloudChip({
-  id,
+  id = 'aws',
   size = 'md',
   selected = false,
   isDark = false,
   className = '',
 }: {
-  id: CloudId;
-  size?: 'sm' | 'md' | 'lg';
+  id?: CloudId;
+  size?: 'xs' | 'sm' | 'md' | 'lg';
   selected?: boolean;
   isDark?: boolean;
   className?: string;
 }) {
-  const sizeConfig = {
+  const sizeMap = {
+    xs: { box: 'w-7 h-7 rounded-lg p-1', imgW: 20, imgH: 14, azSize: 16, gcpSize: 16 },
     sm: { box: 'w-10 h-10 rounded-xl p-1.5', imgW: 28, imgH: 22, azSize: 24, gcpSize: 24 },
     md: { box: 'w-12 h-12 rounded-2xl p-2', imgW: 36, imgH: 26, azSize: 30, gcpSize: 30 },
     lg: { box: 'w-16 h-16 rounded-2xl p-2.5', imgW: 48, imgH: 34, azSize: 40, gcpSize: 40 },
-  }[size];
+  };
+
+  const config = sizeMap[size] || sizeMap.sm;
 
   const BORDERS: Record<CloudId, string> = {
     aws: selected ? 'rgba(255,153,0,0.6)' : isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)',
@@ -130,22 +133,25 @@ export function CloudChip({
     gcp: 'rgba(66,133,244,0.2)',
   };
 
+  const border = (id && BORDERS[id]) || (isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)');
+  const ring = (id && RINGS[id]) || 'rgba(59,130,246,0.2)';
+
   return (
     <span
-      className={`inline-flex items-center justify-center shrink-0 transition-all ${sizeConfig.box} ${className}`}
+      className={`inline-flex items-center justify-center shrink-0 transition-all ${config.box} ${className}`}
       style={{
         backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
-        border: `1px solid ${BORDERS[id]}`,
+        border: `1px solid ${border}`,
         boxShadow: selected
-          ? `0 0 0 3px ${RINGS[id]}, 0 2px 6px rgba(0,0,0,0.08)`
+          ? `0 0 0 3px ${ring}, 0 2px 6px rgba(0,0,0,0.08)`
           : isDark
             ? '0 1px 3px rgba(0,0,0,0.3)'
             : '0 1px 3px rgba(0,0,0,0.06)',
       }}
     >
-      {id === 'aws' && <AwsWordmark width={sizeConfig.imgW} height={sizeConfig.imgH} isDark={isDark} />}
-      {id === 'azure' && <AzureMark size={sizeConfig.azSize} />}
-      {id === 'gcp' && <GcpMark size={sizeConfig.gcpSize} />}
+      {id === 'aws' && <AwsWordmark width={config.imgW} height={config.imgH} isDark={isDark} />}
+      {id === 'azure' && <AzureMark size={config.azSize} />}
+      {id === 'gcp' && <GcpMark size={config.gcpSize} />}
     </span>
   );
 }
@@ -164,6 +170,28 @@ export function CloudifyOpsSymbol({
     <img
       src="/logos/cloudifyops.png"
       alt="CloudifyOps"
+      height={height}
+      className={`shrink-0 object-contain ${className}`}
+      style={{ height, width: 'auto' }}
+      loading="eager"
+    />
+  );
+}
+
+/**
+ * Official LENS WAFR Product Brand Logo (LEN with Green Infinity Loop)
+ */
+export function LensLogo({
+  className = '',
+  height = 28,
+}: {
+  className?: string;
+  height?: number;
+}) {
+  return (
+    <img
+      src="/lens-logo.png"
+      alt="LENS"
       height={height}
       className={`shrink-0 object-contain ${className}`}
       style={{ height, width: 'auto' }}

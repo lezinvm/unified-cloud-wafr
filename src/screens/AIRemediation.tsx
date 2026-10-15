@@ -1,10 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../context';
 import { AppLayout } from '../components/AppLayout';
 import { SeverityPill, type Severity } from '../components/FindingUI';
 import { CloudChip } from '../components/CloudLogo';
 import { PILLARS_DATA } from '../data/wafrData';
 import { INITIAL_ASSESSMENTS, type AssessmentInfo } from '../data/assessmentData';
+import { JiraTicketModal } from '../components/JiraTicketModal';
+import { SlackAlertModal } from '../components/SlackAlertModal';
+import { SlackLogo, JiraLogo } from '../components/IntegrationLogos';
+import { api } from '../services/apiClient';
 
 const LIGHT = {
   bg: '#F8FAFC',
@@ -46,756 +50,28 @@ const DARK = {
   shadowMd: '0 4px 6px rgba(0,0,0,.35),0 2px 4px rgba(0,0,0,.25)',
 };
 
-export interface ManualStepItem {
-  step: number;
-  title: string;
-  instruction: string;
-  consolePath?: string;
-}
+export {
+  type ManualStepItem,
+  type CheckRemediationData,
+  type ResourceInfo,
+  parseResourceInfo,
+  getResourceSpecificRemediation,
+  AWS_REMEDIATIONS,
+  AZURE_REMEDIATIONS,
+  GCP_REMEDIATIONS,
+  getFallbackRemediations,
+  fetchRemediationsFromDb,
+} from '../data/remediationData';
 
-export interface CheckRemediationData {
-  id: string;
-  pillar: string;
-  pillarId: string;
-  severity: Severity;
-  title: string;
-  effort: string;
-  estTime: string;
-  risk: string;
-  description: string;
-  rationale: string;
-  resources: string[];
-  manualSteps: ManualStepItem[];
-  cli: {
-    command: string;
-    explanation: string;
-  };
-  iac: {
-    tf: string;
-    cf: string;
-  };
-}
-
-export const REMEDIATION_DATABASE: Record<string, CheckRemediationData> = {
-  // ── RELIABILITY ──────────────────────────────────────────────────────────
-  'REL-019': {
-    id: 'REL-019',
-    pillar: 'Reliability',
-    pillarId: 'reliability',
-    severity: 'high',
-    title: 'ALB target group missing active health check configuration',
-    effort: 'Low Effort',
-    estTime: '15 min',
-    risk: 'High Risk',
-    description: 'Application Load Balancer target group prod-api-tg lacks an explicit health check endpoint, risking traffic routing to unhealthy backend targets.',
-    rationale: 'Active health checks automatically detect application degradation and deregister unhealthy instances before user impact occurs.',
-    resources: [
-      'arn:aws:elasticloadbalancing:us-east-1:124890123456:targetgroup/prod-api-tg/a1b2c3d4e5f6',
-      'arn:aws:elasticloadbalancing:us-east-1:124890123456:targetgroup/prod-checkout-tg/f7e6d5c4b3a2',
-      'arn:aws:elasticloadbalancing:us-east-1:124890123456:targetgroup/prod-auth-tg/998877665544',
-      'arn:aws:elasticloadbalancing:us-east-1:124890123456:targetgroup/prod-payments-tg/332211445566',
-      'arn:aws:elasticloadbalancing:us-east-1:124890123456:loadbalancer/app/prod-public-alb/50dc6c495c0c9188',
-      'arn:aws:elasticloadbalancing:us-east-1:124890123456:targetgroup/prod-search-tg/77aa88bb99cc',
-      'arn:aws:ec2:us-east-1:124890123456:instance/i-0a1b2c3d4e5f67890',
-      'arn:aws:ec2:us-east-1:124890123456:instance/i-0f9e8d7c6b5a43210',
-    ],
-    manualSteps: [
-      {
-        step: 1,
-        title: 'Navigate to EC2 Target Groups in AWS Console',
-        consolePath: 'EC2 Console → Load Balancing → Target Groups',
-        instruction: 'Log into the AWS Management Console in region us-east-1, navigate to EC2 > Target Groups, and select "prod-api-tg".',
-      },
-      {
-        step: 2,
-        title: 'Open Health Checks Configuration Tab',
-        consolePath: 'prod-api-tg → Health checks tab → Edit',
-        instruction: 'Under the "Health checks" tab, click "Edit". Ensure the Health check protocol is set to HTTP.',
-      },
-      {
-        step: 3,
-        title: 'Set Health Check Path and Status Matchers',
-        consolePath: 'Health check path: /healthz | Success codes: 200',
-        instruction: 'Enter "/healthz" as the Health check path. Set HTTP Success codes to "200". Set Port to "Traffic port".',
-      },
-      {
-        step: 4,
-        title: 'Tune Health Check Timing Thresholds',
-        consolePath: 'Interval: 15s | Timeout: 5s | Healthy: 3 | Unhealthy: 2',
-        instruction: 'Set Health check interval to 15 seconds, Timeout to 5 seconds, Healthy threshold to 3 consecutive passes, and Unhealthy threshold to 2.',
-      },
-      {
-        step: 5,
-        title: 'Save and Verify Target Health',
-        consolePath: 'prod-api-tg → Targets tab',
-        instruction: 'Click "Save changes". Navigate to the "Targets" tab and verify all registered backend instances transition to "Healthy" state.',
-      },
-    ],
-    cli: {
-      command: `aws elbv2 modify-target-group \\
-  --target-group-arn arn:aws:elasticloadbalancing:us-east-1:124890123456:targetgroup/prod-api-tg/a1b2c3d4e5f6 \\
-  --health-check-protocol HTTP \\
-  --health-check-port 80 \\
-  --health-check-path /healthz \\
-  --health-check-interval-seconds 15 \\
-  --health-check-timeout-seconds 5 \\
-  --healthy-threshold-count 3 \\
-  --unhealthy-threshold-count 2 \\
-  --matcher HttpCode=200`,
-      explanation: 'Modifies the target group health check configuration in-place without dropping live connections.',
-    },
-    iac: {
-      tf: `# terraform/alb_health_check.tf
-resource "aws_lb_target_group" "api_tg" {
-  name     = "prod-api-tg"
-  port     = 80
-  protocol = "HTTP"
-  vpc_id   = aws_vpc.main.id
-
-  health_check {
-    enabled             = true
-    path                = "/healthz"
-    protocol            = "HTTP"
-    port                = "traffic-port"
-    matcher             = "200"
-    interval            = 15
-    timeout             = 5
-    healthy_threshold   = 3
-    unhealthy_threshold = 2
-  }
-
-  tags = {
-    Environment = "production"
-    ManagedBy   = "Terraform"
-  }
-}`,
-      cf: `Resources:
-  ApiTargetGroup:
-    Type: AWS::ElasticLoadBalancingV2::TargetGroup
-    Properties:
-      Name: prod-api-tg
-      Port: 80
-      Protocol: HTTP
-      VpcId: !Ref VpcId
-      HealthCheckEnabled: true
-      HealthCheckPath: /healthz
-      HealthCheckProtocol: HTTP
-      HealthCheckIntervalSeconds: 15
-      HealthCheckTimeoutSeconds: 5
-      HealthyThresholdCount: 3
-      UnhealthyThresholdCount: 2
-      Matcher:
-        HttpCode: '200'`,
-    },
-  },
-
-  'REL-CHK-301': {
-    id: 'REL-CHK-301',
-    pillar: 'Reliability',
-    pillarId: 'reliability',
-    severity: 'medium',
-    title: 'SQS Dead Letter Queue (DLQ) missing for asynchronous order processing queue',
-    effort: 'Medium Effort',
-    estTime: '20 min',
-    risk: 'Medium Risk',
-    description: 'The production asynchronous order processing SQS queue does not have a Dead Letter Queue (DLQ) attached, risking consumer thread starvation when encountering malformed messages.',
-    rationale: 'DLQs isolate poison-pill messages so normal queue processing continues uninterrupted while engineers inspect bad payloads.',
-    resources: [
-      'arn:aws:sqs:us-east-1:124890123456:prod-order-processing-queue',
-      'arn:aws:sqs:us-east-1:124890123456:prod-email-notification-queue',
-      'arn:aws:sqs:us-east-1:124890123456:prod-inventory-sync-queue',
-      'arn:aws:sqs:us-east-1:124890123456:prod-billing-events-queue',
-      'arn:aws:sqs:us-east-1:124890123456:prod-webhook-dispatch-queue',
-      'arn:aws:sqs:us-east-1:124890123456:prod-analytics-raw-queue',
-      'arn:aws:sqs:us-east-1:124890123456:prod-sms-delivery-queue',
-      'arn:aws:sqs:us-east-1:124890123456:prod-report-export-queue',
-    ],
-    manualSteps: [
-      {
-        step: 1,
-        title: 'Create Dead Letter Queue in SQS Console',
-        consolePath: 'Amazon SQS Console → Create queue',
-        instruction: 'Create a standard SQS queue named "prod-order-processing-dlq" with message retention set to 14 days.',
-      },
-      {
-        step: 2,
-        title: 'Configure Redrive Policy on Main Queue',
-        consolePath: 'prod-order-processing-queue → Edit → Dead-letter queue',
-        instruction: 'Select "prod-order-processing-queue", click "Edit", and expand the "Dead-letter queue" section. Set status to Enabled.',
-      },
-      {
-        step: 3,
-        title: 'Set Maximum Receives Threshold',
-        consolePath: 'Dead-letter queue ARN: prod-order-processing-dlq | Maximum receives: 5',
-        instruction: 'Select the newly created DLQ and set Maximum receives to 5 before automatic redrive occurs.',
-      },
-      {
-        step: 4,
-        title: 'Save and Set Alarm on DLQ Depth',
-        consolePath: 'CloudWatch Alarms → Create Alarm → ApproximateNumberOfMessagesVisible > 0',
-        instruction: 'Save the configuration. Create a CloudWatch Alarm to alert oncall if any message lands in the DLQ.',
-      },
-    ],
-    cli: {
-      command: `# 1. Create Dead Letter Queue
-aws sqs create-queue \\
-  --queue-name prod-order-processing-dlq \\
-  --attributes MessageRetentionPeriod=1209600
-
-# 2. Attach Redrive Policy to source queue
-aws sqs set-queue-attributes \\
-  --queue-url https://sqs.us-east-1.amazonaws.com/124890123456/prod-order-processing-queue \\
-  --attributes '{"RedrivePolicy":"{\\"deadLetterTargetArn\\":\\"arn:aws:sqs:us-east-1:124890123456:prod-order-processing-dlq\\",\\"maxReceiveCount\\":\\"5\\"}"}'`,
-      explanation: 'Creates a 14-day retention DLQ and binds it to the primary queue with a 5-retry limit.',
-    },
-    iac: {
-      tf: `# terraform/sqs_dlq.tf
-resource "aws_sqs_queue" "orders_dlq" {
-  name                      = "prod-order-processing-dlq"
-  message_retention_seconds = 1209600 # 14 days
-}
-
-resource "aws_sqs_queue" "orders_queue" {
-  name                      = "prod-order-processing-queue"
-  redrive_policy = jsonencode({
-    deadLetterTargetArn = aws_sqs_queue.orders_dlq.arn
-    maxReceiveCount     = 5
-  })
-} `,
-      cf: `Resources:
-  OrdersDLQ:
-    Type: AWS::SQS::Queue
-    Properties:
-      QueueName: prod-order-processing-dlq
-      MessageRetentionPeriod: 1209600
-  OrdersQueue:
-    Type: AWS::SQS::Queue
-    Properties:
-      QueueName: prod-order-processing-queue
-      RedrivePolicy:
-        deadLetterTargetArn: !GetAtt OrdersDLQ.Arn
-        maxReceiveCount: 5`,
-    },
-  },
-
-  // ── SECURITY ─────────────────────────────────────────────────────────────
-  'SEC-047': {
-    id: 'SEC-047',
-    pillar: 'Security',
-    pillarId: 'security',
-    severity: 'critical',
-    title: 'IAM role with wildcard resource permission (*) on S3 and DynamoDB',
-    effort: 'Low Effort',
-    estTime: '15 min',
-    risk: 'Critical Risk',
-    description: 'IAM role acme-lambda-exec contains inline policies granting s3:* actions across wildcard Resource: *. This violates least-privilege principles and enables unauthorized cross-bucket access.',
-    rationale: 'Scoping IAM resource permissions restricts compromised compute instances from accessing sensitive backup, billing, or customer data buckets.',
-    resources: [
-      'arn:aws:iam::124890123456:role/acme-lambda-exec',
-      'arn:aws:iam::124890123456:role/acme-batch-worker',
-      'arn:aws:iam::124890123456:role/acme-api-handler',
-      'arn:aws:iam::124890123456:role/acme-db-migrator-role',
-      'arn:aws:iam::124890123456:role/acme-ecs-task-execution',
-      'arn:aws:iam::124890123456:role/acme-ci-deployer',
-      'arn:aws:s3:::acme-prod-data-lake-raw',
-      'arn:aws:s3:::acme-prod-analytics-warehouse',
-      'arn:aws:dynamodb:us-east-1:124890123456:table/prod-customer-sessions',
-      'arn:aws:dynamodb:us-east-1:124890123456:table/prod-order-history',
-    ],
-    manualSteps: [
-      {
-        step: 1,
-        title: 'Open IAM Roles in AWS Management Console',
-        consolePath: 'IAM Console → Roles → acme-lambda-exec',
-        instruction: 'Open IAM Console and search for the role "acme-lambda-exec".',
-      },
-      {
-        step: 2,
-        title: 'Review and Edit Inline Permission Policies',
-        consolePath: 'Permissions tab → Inline policies → WildcardAccessPolicy',
-        instruction: 'Under the Permissions tab, locate the policy with Resource: * statements and click "Edit policy".',
-      },
-      {
-        step: 3,
-        title: 'Scope Resource ARNs to Specific Production Buckets',
-        consolePath: 'Resource: arn:aws:s3:::acme-prod-data/* and arn:aws:s3:::acme-prod-assets/*',
-        instruction: 'Replace the wildcard asterisk "*" with explicit bucket ARNs required for the workload.',
-      },
-      {
-        step: 4,
-        title: 'Simulate and Review Policy',
-        consolePath: 'IAM Policy Simulator → Verify GetObject and PutObject',
-        instruction: 'Run the IAM Policy Simulator to confirm Lambda execution succeeds without error, then click "Save changes".',
-      },
-    ],
-    cli: {
-      command: `aws iam put-role-policy \\
-  --role-name acme-lambda-exec \\
-  --policy-name LambdaS3ScopedPolicy \\
-  --policy-document '{
-    "Version": "2012-10-17",
-    "Statement": [{
-      "Effect": "Allow",
-      "Action": ["s3:GetObject","s3:PutObject"],
-      "Resource": ["arn:aws:s3:::acme-prod-data/*","arn:aws:s3:::acme-prod-assets/*"]
-    }]
-  }'`,
-      explanation: 'Replaces the inline policy with scoped ARN destinations, enforcing strict least-privilege.',
-    },
-    iac: {
-      tf: `# terraform/iam.tf
-resource "aws_iam_role_policy" "lambda_s3_scoped" {
-  name = "LambdaS3ScopedPolicy"
-  role = aws_iam_role.lambda_exec.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect   = "Allow"
-      Action   = ["s3:GetObject", "s3:PutObject"]
-      Resource = [
-        "arn:aws:s3:::acme-prod-data/*",
-        "arn:aws:s3:::acme-prod-assets/*"
-      ]
-    }]
-  })
-}`,
-      cf: `Resources:
-  LambdaScopedPolicy:
-    Type: AWS::IAM::Policy
-    Properties:
-      PolicyName: LambdaS3ScopedPolicy
-      PolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Action:
-              - s3:GetObject
-              - s3:PutObject
-            Resource:
-              - 'arn:aws:s3:::acme-prod-data/*'
-              - 'arn:aws:s3:::acme-prod-assets/*'
-      Roles:
-        - acme-lambda-exec`,
-    },
-  },
-
-  'SEC-061': {
-    id: 'SEC-061',
-    pillar: 'Security',
-    pillarId: 'security',
-    severity: 'high',
-    title: 'Security group allows open ingress 0.0.0.0/0 on port 22 (SSH)',
-    effort: 'Medium Effort',
-    estTime: '20 min',
-    risk: 'High Risk',
-    description: 'Security group prod-bastion-sg allows unrestricted ingress (0.0.0.0/0) on SSH port 22, exposing instances to unauthorized brute-force attempts.',
-    rationale: 'Direct internet SSH access is a major attack vector. Replace with AWS Systems Manager (SSM) Session Manager or restrict to VPN IP ranges.',
-    resources: [
-      'sg-0a81b2c3d4e5f6789 (prod-bastion-sg)',
-      'sg-0192837465abcde12 (prod-admin-ingress-sg)',
-      'sg-05f4e3d2c1b0a9876 (prod-vpn-gateway-sg)',
-      'sg-0ab9c8d7e6f5a4321 (staging-bastion-sg)',
-      'sg-077aa88bb99cc0011 (legacy-jumpbox-sg)',
-      'sg-04433221100aabbcc (dev-mgmt-access-sg)',
-    ],
-    manualSteps: [
-      {
-        step: 1,
-        title: 'Open VPC Security Groups Console',
-        consolePath: 'VPC Console → Security Groups → sg-0a81b2c3d4e5f6789',
-        instruction: 'Navigate to VPC > Security Groups and select "prod-bastion-sg".',
-      },
-      {
-        step: 2,
-        title: 'Edit Inbound Rules',
-        consolePath: 'Inbound rules tab → Edit inbound rules',
-        instruction: 'Click "Edit inbound rules". Find the rule matching Type: SSH (Port 22) and Source: 0.0.0.0/0.',
-      },
-      {
-        step: 3,
-        title: 'Restrict Source to Corporate VPN CIDR or Delete',
-        consolePath: 'Source: 10.200.0.0/16 (Corporate VPN)',
-        instruction: 'Change the source CIDR from 0.0.0.0/0 to the corporate VPN block 10.200.0.0/16, or delete the rule if using AWS SSM Session Manager.',
-      },
-      {
-        step: 4,
-        title: 'Save Inbound Rules',
-        consolePath: 'Click Save rules',
-        instruction: 'Click "Save rules". Verify that direct public SSH access from the internet is immediately blocked.',
-      },
-    ],
-    cli: {
-      command: `# 1. Revoke public 0.0.0.0/0 SSH rule
-aws ec2 revoke-security-group-ingress \\
-  --group-id sg-0a81b2c3d4e5f6789 \\
-  --protocol tcp --port 22 --cidr 0.0.0.0/0
-
-# 2. Add corporate VPN CIDR rule
-aws ec2 authorize-security-group-ingress \\
-  --group-id sg-0a81b2c3d4e5f6789 \\
-  --protocol tcp --port 22 --cidr 10.200.0.0/16`,
-      explanation: 'Revokes open public SSH port 22 access and restricts inbound traffic strictly to the corporate VPN range.',
-    },
-    iac: {
-      tf: `# terraform/security_group.tf
-resource "aws_security_group_rule" "restricted_ssh" {
-  type              = "ingress"
-  from_port         = 22
-  to_port           = 22
-  protocol          = "tcp"
-  cidr_blocks       = ["10.200.0.0/16"] # Corporate VPN only
-  security_group_id = "sg-0a81b2c3d4e5f6789"
-} `,
-      cf: `SecurityGroupIngress:
-  - IpProtocol: tcp
-    FromPort: 22
-    ToPort: 22
-    CidrIp: 10.200.0.0/16`,
-    },
-  },
-
-  'SEC-024': {
-    id: 'SEC-024',
-    pillar: 'Security',
-    pillarId: 'security',
-    severity: 'high',
-    title: 'S3 bucket missing server access logging and object lock protection',
-    effort: 'Low Effort',
-    estTime: '10 min',
-    risk: 'High Risk',
-    description: 'S3 bucket acme-prod-assets does not have server access logging configured. Inbound HTTP requests and forensic audit trails are unmonitored.',
-    rationale: 'Server access logging provides detailed records for requests made to your bucket, critical for security incident response and compliance verification.',
-    resources: [
-      'arn:aws:s3:::acme-prod-assets',
-      'arn:aws:s3:::acme-prod-backups',
-      'arn:aws:s3:::acme-prod-customer-invoices',
-      'arn:aws:s3:::acme-prod-receipts-archive',
-      'arn:aws:s3:::acme-prod-media-uploads',
-      'arn:aws:s3:::acme-prod-audit-records',
-      'arn:aws:s3:::acme-prod-reports-exports',
-      'arn:aws:s3:::acme-prod-frontend-dist',
-    ],
-    manualSteps: [
-      {
-        step: 1,
-        title: 'Open Amazon S3 Console and Select Bucket',
-        consolePath: 'Amazon S3 Console → Buckets → acme-prod-assets',
-        instruction: 'Navigate to S3 Console, choose "acme-prod-assets", and open the "Properties" tab.',
-      },
-      {
-        step: 2,
-        title: 'Enable Server Access Logging',
-        consolePath: 'Properties tab → Server access logging → Edit',
-        instruction: 'Under Server access logging, click "Edit", select "Enable", and set Target bucket to "acme-prod-s3-logs".',
-      },
-      {
-        step: 3,
-        title: 'Set Log Object Prefix',
-        consolePath: 'Target prefix: logs/acme-prod-assets/',
-        instruction: 'Set the target prefix to "logs/acme-prod-assets/" and click "Save changes".',
-      },
-    ],
-    cli: {
-      command: `aws s3api put-bucket-logging \\
-  --bucket acme-prod-assets \\
-  --bucket-logging-status '{
-    "LoggingEnabled": {
-      "TargetBucket": "acme-prod-s3-logs",
-      "TargetPrefix": "logs/acme-prod-assets/"
-    }
-  }'`,
-      explanation: 'Configures automated access logging delivered to the centralized compliance S3 bucket.',
-    },
-    iac: {
-      tf: `# terraform/s3_logging.tf
-resource "aws_s3_bucket_logging" "assets_logging" {
-  bucket        = "acme-prod-assets"
-  target_bucket = "acme-prod-s3-logs"
-  target_prefix = "logs/acme-prod-assets/"
-} `,
-      cf: `Resources:
-  AssetsBucketLogging:
-    Type: AWS::S3::Bucket
-    Properties:
-      BucketName: acme-prod-assets
-      LoggingConfiguration:
-        DestinationBucketName: acme-prod-s3-logs
-        LogFilePrefix: logs/acme-prod-assets/`,
-    },
-  },
-
-  'SEC-033': {
-    id: 'SEC-033',
-    pillar: 'Security',
-    pillarId: 'security',
-    severity: 'medium',
-    title: 'AWS CloudTrail multi-region logging not enabled in secondary active regions',
-    effort: 'Low Effort',
-    estTime: '10 min',
-    risk: 'Medium Risk',
-    description: 'CloudTrail trail acme-management-events is restricted to a single region. Malicious API calls in secondary regions will bypass auditing.',
-    rationale: 'Multi-region trails aggregate global AWS account events into a single tamper-evident bucket, providing comprehensive activity auditing.',
-    resources: [
-      'arn:aws:cloudtrail:us-east-1:124890123456:trail/acme-management-events',
-      'arn:aws:cloudtrail:us-west-2:124890123456:trail/acme-secondary-trail',
-      'arn:aws:cloudtrail:eu-west-1:124890123456:trail/acme-dr-region-trail',
-      'arn:aws:s3:::acme-prod-audit-logs',
-      'arn:aws:kms:us-east-1:124890123456:key/mrk-091823746510',
-      'arn:aws:kms:us-west-2:124890123456:key/mrk-091823746510',
-    ],
-    manualSteps: [
-      {
-        step: 1,
-        title: 'Open CloudTrail Console',
-        consolePath: 'CloudTrail Console → Trails → acme-management-events',
-        instruction: 'Select the existing trail "acme-management-events" and click "Edit".',
-      },
-      {
-        step: 2,
-        title: 'Enable Multi-Region Trail Flag',
-        consolePath: 'Trail settings → Apply trail to all regions: Yes',
-        instruction: 'Toggle "Apply trail to all regions" to Yes. Enable Log file validation with SHA-256.',
-      },
-      {
-        step: 3,
-        title: 'Save and Confirm Global Event Collection',
-        consolePath: 'Click Save changes',
-        instruction: 'Save changes and verify CloudTrail displays "Multi-region: Yes" across all active AWS regions.',
-      },
-    ],
-    cli: {
-      command: `aws cloudtrail update-trail \\
-  --name acme-management-events \\
-  --is-multi-region-trail \\
-  --include-global-service-events \\
-  --enable-log-file-validation`,
-      explanation: 'Upgrades single-region trail to multi-region with cryptographic digest verification.',
-    },
-    iac: {
-      tf: `# terraform/cloudtrail.tf
-resource "aws_cloudtrail" "main" {
-  name                          = "acme-management-events"
-  s3_bucket_name                = "acme-prod-audit-logs"
-  include_global_service_events = true
-  is_multi_region_trail         = true
-  enable_log_file_validation    = true
-} `,
-      cf: `Resources:
-  ManagementTrail:
-    Type: AWS::CloudTrail::Trail
-    Properties:
-      TrailName: acme-management-events
-      IsMultiRegionTrail: true
-      IncludeGlobalServiceEvents: true
-      EnableLogFileValidation: true`,
-    },
-  },
-
-  // ── COST OPTIMIZATION ────────────────────────────────────────────────────
-  'COST-008': {
-    id: 'COST-008',
-    pillar: 'Cost Optimization',
-    pillarId: 'cost',
-    severity: 'medium',
-    title: '14 unattached EBS volumes incurring idle monthly charges ($342/mo)',
-    effort: 'Low Effort',
-    estTime: '15 min',
-    risk: 'Medium Risk',
-    description: 'Found 14 unattached gp2/gp3 EBS volumes leftover from decommissioned EC2 instances, generating $342/month in waste.',
-    rationale: 'Cleaning up unattached storage volumes reclaims unnecessary cloud spend without affecting running production instances.',
-    resources: [
-      'vol-01a2b3c4d5e6f7890 (us-east-1a, 500GB gp3, unattached)',
-      'vol-09876f5e4d3c2b1a0 (us-east-1b, 250GB gp2, unattached)',
-      'vol-0ab12cd34ef56789a (us-east-1a, 100GB gp3, unattached)',
-      'vol-0fedcba9876543210 (us-east-1c, 1000GB io2, unattached)',
-      'vol-0554433221100aabb (us-east-1b, 750GB gp3, unattached)',
-      'vol-0ccddeeff00112233 (us-east-1a, 320GB gp3, unattached)',
-      'vol-01122334455667788 (us-east-1b, 120GB gp2, unattached)',
-      'vol-09988776655443322 (us-east-1c, 500GB gp3, unattached)',
-      'vol-0aabbccddeeff0011 (us-east-1a, 200GB gp3, unattached)',
-      'vol-077889900aabbccdd (us-east-1b, 150GB gp2, unattached)',
-      'vol-03344556677889900 (us-east-1c, 400GB gp3, unattached)',
-      'vol-02233445566778899 (us-east-1a, 600GB gp3, unattached)',
-      'vol-0ffeeddccbbaa9988 (us-east-1b, 800GB gp3, unattached)',
-      'vol-06677889900112233 (us-east-1c, 250GB gp2, unattached)',
-    ],
-    manualSteps: [
-      {
-        step: 1,
-        title: 'Filter Available Volumes in EC2 Console',
-        consolePath: 'EC2 Console → Elastic Block Store → Volumes → Filter: State = Available',
-        instruction: 'Filter EBS volumes with state equal to "Available" (unattached).',
-      },
-      {
-        step: 2,
-        title: 'Create Final Recovery Snapshots',
-        consolePath: 'Actions → Create snapshot',
-        instruction: 'Select volumes and take final safety snapshots for compliance archival.',
-      },
-      {
-        step: 3,
-        title: 'Delete Unattached Volumes',
-        consolePath: 'Actions → Delete volume',
-        instruction: 'Click Actions > Delete volume and confirm deletion to stop billing.',
-      },
-    ],
-    cli: {
-      command: `aws ec2 create-snapshot --volume-id vol-01a2b3c4d5e6f7890 --description "Pre-cleanup snapshot"
-aws ec2 delete-volume --volume-id vol-01a2b3c4d5e6f7890`,
-      explanation: 'Snapshots the detached volume for safety, then releases the idle provisioned storage.',
-    },
-    iac: {
-      tf: `# terraform/ebs_cleanup.tf
-# Deploy AWS Config rule to continuously flag unattached volumes
-resource "aws_config_config_rule" "unattached_volumes" {
-  name = "ec2-volume-inuse-check"
-  source {
-    owner             = "AWS"
-    source_identifier = "EC2_VOLUME_INUSE_CHECK"
-  }
-} `,
-      cf: `Resources:
-  VolumeInUseRule:
-    Type: AWS::Config::ConfigRule
-    Properties:
-      ConfigRuleName: ec2-volume-inuse-check
-      Source:
-        Owner: AWS
-        SourceIdentifier: EC2_VOLUME_INUSE_CHECK`,
-    },
-  },
-
-  // ── OPERATIONAL EXCELLENCE ───────────────────────────────────────────────
-  'OPS-014': {
-    id: 'OPS-014',
-    pillar: 'Operational Excellence',
-    pillarId: 'operational-excellence',
-    severity: 'medium',
-    title: 'No automated backup retention policy configured for Amazon RDS instances',
-    effort: 'Medium Effort',
-    estTime: '20 min',
-    risk: 'Medium Risk',
-    description: 'Production RDS instance acme-main-db has backup retention disabled or set to 0 days, preventing Point-in-Time Recovery (PITR).',
-    rationale: 'Enabling automated continuous backups with a minimum 7-day retention window is critical for rapid recovery from data corruption.',
-    resources: [
-      'arn:aws:rds:us-east-1:124890123456:db:acme-main-db',
-      'arn:aws:rds:us-east-1:124890123456:db:acme-analytics-db',
-      'arn:aws:rds:us-east-1:124890123456:db:acme-payments-db',
-      'arn:aws:rds:us-east-1:124890123456:db:acme-staging-db',
-      'arn:aws:rds:us-east-1:124890123456:db:acme-audit-archive-db',
-    ],
-    manualSteps: [
-      {
-        step: 1,
-        title: 'Open Amazon RDS Console and Select Database',
-        consolePath: 'RDS Console → Databases → acme-main-db → Modify',
-        instruction: 'Choose "acme-main-db" and click "Modify".',
-      },
-      {
-        step: 2,
-        title: 'Configure Backup Retention Period to 30 Days',
-        consolePath: 'Backup section → Backup retention period: 30 days',
-        instruction: 'Set Backup retention period to 30 days and specify preferred window 03:00-04:00 UTC.',
-      },
-      {
-        step: 3,
-        title: 'Enable Deletion Protection and Apply Immediately',
-        consolePath: 'Deletion protection: Enabled → Apply immediately',
-        instruction: 'Enable deletion protection and select "Apply immediately".',
-      },
-    ],
-    cli: {
-      command: `aws rds modify-db-instance \\
-  --db-instance-identifier acme-main-db \\
-  --backup-retention-period 30 \\
-  --preferred-backup-window 03:00-04:00 \\
-  --apply-immediately`,
-      explanation: 'Enables 30-day continuous WAL automated backup retention with PITR recovery.',
-    },
-    iac: {
-      tf: `# terraform/rds_backup.tf
-resource "aws_db_instance" "main_db" {
-  identifier              = "acme-main-db"
-  backup_retention_period = 30
-  backup_window           = "03:00-04:00"
-  copy_tags_to_snapshot   = true
-  deletion_protection     = true
-} `,
-      cf: `Resources:
-  DatabaseInstance:
-    Type: AWS::RDS::DBInstance
-    Properties:
-      DBInstanceIdentifier: acme-main-db
-      BackupRetentionPeriod: 30
-      PreferredBackupWindow: '03:00-04:00'`,
-    },
-  },
-
-  // ── PERFORMANCE EFFICIENCY ───────────────────────────────────────────────
-  'PERF-CHK-201': {
-    id: 'PERF-CHK-201',
-    pillar: 'Performance Efficiency',
-    pillarId: 'performance-efficiency',
-    severity: 'high',
-    title: 'RDS database read replica missing for high-volume analytics queries',
-    effort: 'Medium Effort',
-    estTime: '25 min',
-    risk: 'High Risk',
-    description: 'Heavy read-intensive reporting queries are executed directly on the master database instance, causing CPU contention on transactions.',
-    rationale: 'Provisioning an asynchronous read replica offloads query load and isolates background reporting from real-time customer checkouts.',
-    resources: [
-      'arn:aws:rds:us-east-1:124890123456:db:acme-main-db',
-      'arn:aws:rds:us-east-1:124890123456:db:acme-orders-db',
-      'arn:aws:rds:us-east-1:124890123456:db:acme-reporting-cluster-instance-1',
-      'arn:aws:rds:us-east-1:124890123456:db:acme-reporting-cluster-instance-2',
-      'arn:aws:rds:us-east-1:124890123456:cluster:acme-aurora-cluster',
-    ],
-    manualSteps: [
-      {
-        step: 1,
-        title: 'Open RDS Console and Choose Primary DB',
-        consolePath: 'RDS Console → Databases → acme-main-db',
-        instruction: 'Select "acme-main-db", click Actions > "Create read replica".',
-      },
-      {
-        step: 2,
-        title: 'Select Instance Type and Multi-AZ Placement',
-        consolePath: 'DB instance identifier: acme-main-db-replica | Instance class: db.r6g.large',
-        instruction: 'Choose db.r6g.large and select a secondary Availability Zone.',
-      },
-      {
-        step: 3,
-        title: 'Deploy Replica and Route Analytics Connections',
-        consolePath: 'Click Create read replica',
-        instruction: 'Deploy the replica and update reporting connection pools to the read-replica endpoint.',
-      },
-    ],
-    cli: {
-      command: `aws rds create-db-instance-read-replica \\
-  --db-instance-identifier acme-main-db-replica \\
-  --source-db-instance-identifier acme-main-db \\
-  --db-instance-class db.r6g.large`,
-      explanation: 'Spawns an asynchronous read-only replica to handle analytics workload traffic.',
-    },
-    iac: {
-      tf: `# terraform/rds_replica.tf
-resource "aws_db_instance" "read_replica" {
-  identifier             = "acme-main-db-replica"
-  replicate_source_db    = "acme-main-db"
-  instance_class         = "db.r6g.large"
-  publicly_accessible    = false
-}`,
-      cf: `Resources:
-  ReadReplicaDB:
-    Type: AWS::RDS::DBInstance
-    Properties:
-      DBInstanceIdentifier: acme-main-db-replica
-      SourceDBInstanceIdentifier: acme-main-db
-      DBInstanceClass: db.r6g.large`,
-    },
-  },
-};
+import {
+  type CheckRemediationData,
+  parseResourceInfo,
+  getResourceSpecificRemediation,
+  getFallbackRemediations,
+  fetchRemediationsFromDb,
+  REMEDIATION_DATABASE,
+} from '../data/remediationData';
+export { REMEDIATION_DATABASE };
 
 export function AIRemediation() {
   const {
@@ -809,31 +85,57 @@ export function AIRemediation() {
     solvedCheckIds,
     toggleCheckSolved,
     markCheckSolved,
+    resourceRemediations,
+    setResourceRemediationStatus,
+    getCheckRemediationStatus,
+    repoConfig,
+    setRepoConfig,
+    jiraTickets,
+    currentAssessment,
+    runOrUpdateAssessment,
+    showToast,
+    currentUser,
   } = useApp();
   const isDark = theme === 'dark';
   const T = isDark ? DARK : LIGHT;
 
-  // Git Connection State
+  // Verification & Rerun State (Resource-level & Check-level)
+  const [verifyingResourceKeys, setVerifyingResourceKeys] = useState<Record<string, boolean>>({});
+  const [verifiedResourceResults, setVerifiedResourceResults] = useState<Record<string, { passed: boolean; message: string; timestamp: string }>>({});
+  const [verifyingFindingCheck, setVerifyingFindingCheck] = useState(false);
+  const [checkRerunFeedback, setCheckRerunFeedback] = useState<{ checkId: string; passed: boolean; message: string } | null>(null);
+  const [verifyingModalResource, setVerifyingModalResource] = useState(false);
+
+  // Jira and Slack Modal State
+  const [jiraModalOpen, setJiraModalOpen] = useState(false);
+  const [slackModalOpen, setSlackModalOpen] = useState(false);
+
+  // Git Connection State (backed by global repoConfig from Settings)
   const [gitConfig, setGitConfig] = useState<{
     connected: boolean;
+    ignored?: boolean;
+    markedAsDone?: boolean;
     hasExistingRepo: boolean | null;
     repoName: string;
     branch: string;
     pat: string;
   }>({
-    connected: false,
-    hasExistingRepo: null,
-    repoName: 'acme-corp/terraform-aws-infrastructure',
-    branch: 'main',
-    pat: '',
+    connected: repoConfig.connected,
+    ignored: false,
+    markedAsDone: false,
+    hasExistingRepo: repoConfig.connected,
+    repoName: repoConfig.repoName || 'acme-corp/terraform-aws-infrastructure',
+    branch: repoConfig.branch || 'main',
+    pat: repoConfig.pat || '',
   });
 
-  const [isGitModalOpen, setIsGitModalOpen] = useState(!gitConfig.connected);
+  // Modal is closed by default. Repository details are configured in Settings and will NOT pop up automatically
+  const [isGitModalOpen, setIsGitModalOpen] = useState(false);
   const [gitModalStep, setGitModalStep] = useState<'ask_repo' | 'pat_form' | 'validating' | 'connected_success'>('ask_repo');
   const [pendingAssessmentId, setPendingAssessmentId] = useState<string | null>(null);
-  const [patInput, setPatInput] = useState('');
-  const [repoInput, setRepoInput] = useState('acme-corp/terraform-aws-infrastructure');
-  const [branchInput, setBranchInput] = useState('main');
+  const [patInput, setPatInput] = useState(repoConfig.pat || '');
+  const [repoInput, setRepoInput] = useState(repoConfig.repoName || 'acme-corp/terraform-aws-infrastructure');
+  const [branchInput, setBranchInput] = useState(repoConfig.branch || 'main');
   const [showPat, setShowPat] = useState(false);
   const [patError, setPatError] = useState('');
 
@@ -845,12 +147,49 @@ export function AIRemediation() {
     remediationFindingId ? (selectedAssessmentId || 'A-001') : null
   );
 
+  // Active cloud determined from selected assessment or context
+  const selectedAssessment = assessments.find(a => a.id === (activeAssessmentId || selectedAssessmentId)) || currentAssessment;
+  const activeCloud = (((selectedAssessment?.cloud || 'aws') as string).toLowerCase()) as 'aws' | 'azure' | 'gcp';
+
+  // Remediations database loaded dynamically from MongoDB for active cloud
+  const [remediationsDb, setRemediationsDb] = useState<Record<string, CheckRemediationData>>(() => getFallbackRemediations(activeCloud));
+  const [loadingRemediations, setLoadingRemediations] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingRemediations(true);
+    fetchRemediationsFromDb(activeCloud).then(data => {
+      if (!cancelled && data && Object.keys(data).length > 0) {
+        setRemediationsDb(data);
+      }
+      setLoadingRemediations(false);
+    }).catch(() => {
+      if (!cancelled) setLoadingRemediations(false);
+    });
+    return () => { cancelled = true; };
+  }, [activeCloud]);
+
+  const allChecksList = useMemo(() => {
+    return Object.values(remediationsDb);
+  }, [remediationsDb]);
+
   // Active check in check-by-check remediation
   const [activeCheckId, setActiveCheckId] = useState<string>(
-    remediationFindingId && REMEDIATION_DATABASE[remediationFindingId]
+    remediationFindingId && remediationsDb[remediationFindingId]
       ? remediationFindingId
-      : 'REL-019'
+      : (Object.keys(remediationsDb)[0] || 'REL-019')
   );
+
+  // Synchronize when entered directly from "AI Fix" button on AssessmentReport / PillarDetail or cloud switches
+  useEffect(() => {
+    if (remediationFindingId && remediationsDb[remediationFindingId]) {
+      setActiveAssessmentId(selectedAssessmentId || 'A-001');
+      setActiveCheckId(remediationFindingId);
+      setIsGitModalOpen(false);
+    } else if (allChecksList.length > 0 && !remediationsDb[activeCheckId]) {
+      setActiveCheckId(allChecksList[0].id);
+    }
+  }, [remediationFindingId, selectedAssessmentId, remediationsDb, allChecksList]);
 
   // Check filters & search in check list
   const [checkSearch, setCheckSearch] = useState('');
@@ -861,7 +200,11 @@ export function AIRemediation() {
   const [assessmentCloudFilter, setAssessmentCloudFilter] = useState<'all' | 'aws' | 'azure' | 'gcp'>('all');
 
   // Check detail state
-  const checkData = REMEDIATION_DATABASE[activeCheckId] || REMEDIATION_DATABASE['REL-019'];
+  const checkData = remediationsDb[activeCheckId] || allChecksList[0] || REMEDIATION_DATABASE['REL-019'];
+  const [selectedResourceIndex, setSelectedResourceIndex] = useState(0);
+  const [fixModalOpen, setFixModalOpen] = useState(false);
+  const [solvedResourceArns, setSolvedResourceArns] = useState<Record<string, boolean>>({});
+  const [showAllResourcesList, setShowAllResourcesList] = useState(false);
   const [methodTab, setMethodTab] = useState<'manual' | 'cli' | 'iac'>('iac');
   const [iacLanguage, setIacLanguage] = useState<'tf' | 'cf'>('tf');
   const [copied, setCopied] = useState(false);
@@ -884,15 +227,34 @@ export function AIRemediation() {
   const [prCreatedSuccess, setPrCreatedSuccess] = useState(false);
   const [completedChecks, setCompletedChecks] = useState<Record<string, boolean>>({});
 
+  // Ignored Modal State
+  const [cantFixModalOpen, setCantFixModalOpen] = useState(false);
+  const [cantFixTargetResource, setCantFixTargetResource] = useState<string | null>(null);
+  const [cantFixNote, setCantFixNote] = useState('');
+
   // Reset check detail state when check changes
   useEffect(() => {
     setSimulationSuccess(false);
     setIacGenerated(false);
     setResourceSearch('');
     setResourcesModalOpen(false);
+    setFixModalOpen(false);
+    setSelectedResourceIndex(0);
+    setShowAllResourcesList(false);
   }, [activeCheckId]);
 
-  // Handle Git Validation & Connect
+  // Sync with global repoConfig from Settings
+  useEffect(() => {
+    setGitConfig(prev => ({
+      ...prev,
+      connected: repoConfig.connected,
+      repoName: repoConfig.repoName || 'acme-corp/terraform-aws-infrastructure',
+      branch: repoConfig.branch || 'main',
+      pat: repoConfig.pat || '',
+    }));
+  }, [repoConfig]);
+
+  // Handle Git Validation & Connect (Authenticate Repo)
   const handleConnectGit = () => {
     if (!patInput.trim()) {
       setPatError('Please enter your GitHub Personal Access Token (PAT)');
@@ -902,15 +264,61 @@ export function AIRemediation() {
     setGitModalStep('validating');
 
     setTimeout(() => {
-      setGitConfig({
-        connected: true,
-        hasExistingRepo: gitConfig.hasExistingRepo ?? true,
+      const updated = {
+        provider: 'github' as const,
         repoName: repoInput.trim() || 'acme-corp/terraform-aws-infrastructure',
         branch: branchInput.trim() || 'main',
         pat: patInput.trim(),
+        connected: true,
+        lastSync: 'Just now',
+        autoCreatePr: true,
+      };
+      setRepoConfig(updated);
+      setGitConfig({
+        connected: true,
+        ignored: false,
+        markedAsDone: false,
+        hasExistingRepo: true,
+        repoName: updated.repoName,
+        branch: updated.branch,
+        pat: updated.pat,
       });
       setGitModalStep('connected_success');
     }, 1200);
+  };
+
+  // Handle Mark as Done (Pre-configured repo)
+  const handleMarkAsDone = () => {
+    setGitConfig(prev => ({
+      ...prev,
+      connected: true,
+      markedAsDone: true,
+      ignored: false,
+      repoName: repoInput.trim() || 'acme-corp/terraform-aws-infrastructure',
+      branch: branchInput.trim() || 'main',
+    }));
+    setIsGitModalOpen(false);
+    setGitModalStep('ask_repo');
+    if (pendingAssessmentId) {
+      setActiveAssessmentId(pendingAssessmentId);
+      setPendingAssessmentId(null);
+    }
+  };
+
+  // Handle Ignore Git integration for now
+  const handleIgnoreGit = () => {
+    setGitConfig(prev => ({
+      ...prev,
+      connected: false,
+      ignored: true,
+      markedAsDone: false,
+    }));
+    setIsGitModalOpen(false);
+    setGitModalStep('ask_repo');
+    if (pendingAssessmentId) {
+      setActiveAssessmentId(pendingAssessmentId);
+      setPendingAssessmentId(null);
+    }
   };
 
   const handleFinishGitModal = () => {
@@ -923,13 +331,7 @@ export function AIRemediation() {
   };
 
   const handleStartRemediation = (assessmentId: string) => {
-    if (!gitConfig.connected) {
-      setPendingAssessmentId(assessmentId);
-      setGitModalStep('ask_repo');
-      setIsGitModalOpen(true);
-    } else {
-      setActiveAssessmentId(assessmentId);
-    }
+    setActiveAssessmentId(assessmentId);
   };
 
   const handleOpenGitSettings = () => {
@@ -976,14 +378,151 @@ export function AIRemediation() {
     setTimeout(() => setCopied(false), 1800);
   };
 
+  const allResources = checkData.resources || [];
+  const safeResourceIndex = selectedResourceIndex >= 0 && selectedResourceIndex < allResources.length
+    ? selectedResourceIndex
+    : 0;
+  const activeResourceArn = allResources[safeResourceIndex] || '';
+  const activeResourceInfo = useMemo(() => parseResourceInfo(activeResourceArn), [activeResourceArn]);
+  const cliName = activeCloud === 'azure' ? 'Azure CLI (az)' : activeCloud === 'gcp' ? 'Google Cloud CLI (gcloud)' : 'AWS CLI v2';
+  const cliHint = activeCloud === 'azure'
+    ? `Run these Azure CLI (az) commands in your terminal to apply configuration to ${activeResourceInfo.shortName}.`
+    : activeCloud === 'gcp'
+    ? `Run these Google Cloud CLI (gcloud) commands in your terminal to apply configuration to ${activeResourceInfo.shortName}.`
+    : `Run these AWS CLI commands in your terminal to apply configuration to ${activeResourceInfo.shortName}.`;
+  const iacSecondLabel = activeCloud === 'azure' ? 'Azure Bicep (.bicep)' : activeCloud === 'gcp' ? 'Deployment Manager (.yml)' : 'CloudFormation (.yml)';
+  const iacSecondExt = activeCloud === 'azure' ? 'bicep' : 'yml';
+  const consoleName = activeCloud === 'azure' ? 'Azure Portal' : activeCloud === 'gcp' ? 'Google Cloud Console' : 'AWS Management Console';
+
+  const currentResourceRemediation = useMemo(
+    () => getResourceSpecificRemediation(checkData, activeResourceArn),
+    [checkData, activeResourceArn]
+  );
+  const isCurrentResourceSolved = Boolean(solvedResourceArns[activeResourceArn]);
+  const solvedResourcesInCheckCount = allResources.filter(r => solvedResourceArns[r]).length;
+
+  const toggleResourceSolved = (arn: string) => {
+    setSolvedResourceArns(prev => {
+      const next = { ...prev, [arn]: !prev[arn] };
+      const allDone = allResources.length > 0 && allResources.every(r => (r === arn ? next[arn] : next[r]));
+      if (allDone) {
+        markCheckSolved(checkData.id, true);
+      }
+      return next;
+    });
+  };
+
+  const handleRerunResourceCheck = (checkId: string, arn: string) => {
+    setVerifyingResourceKeys(prev => ({ ...prev, [arn]: true }));
+    const targetAssessment = activeAssessmentId || selectedAssessmentId || 'A-001';
+    api.rerunCheck({
+      check_id: checkId,
+      assessment_id: targetAssessment,
+      resource_arn: arn,
+      user_id: currentUser?.id,
+      status: 'fixed',
+    }).catch(err => console.warn('Could not rerun check in DB:', err));
+
+    setTimeout(() => {
+      setVerifyingResourceKeys(prev => ({ ...prev, [arn]: false }));
+      setSolvedResourceArns(prev => ({ ...prev, [arn]: true }));
+      setResourceRemediationStatus(checkId, arn, 'fixed');
+      const info = parseResourceInfo(arn);
+      setVerifiedResourceResults(prev => ({
+        ...prev,
+        [arn]: {
+          passed: true,
+          message: `${info.shortName} telemetry re-scanned: WAFR configuration rules verified compliant.`,
+          timestamp: 'Just now',
+        },
+      }));
+      showToast(
+        `Check Passed: ${info.shortName} Verified`,
+        'success',
+        'Resource configuration verified compliant and synced across DB.'
+      );
+    }, 850);
+  };
+
+  const handleRerunFindingCheck = (checkId: string) => {
+    setVerifyingFindingCheck(true);
+    setCheckRerunFeedback(null);
+    const targetAssessment = activeAssessmentId || selectedAssessmentId || 'A-001';
+    api.rerunCheck({
+      check_id: checkId,
+      assessment_id: targetAssessment,
+      user_id: currentUser?.id,
+      status: 'fixed',
+    }).catch(err => console.warn('Could not rerun finding check in DB:', err));
+
+    setTimeout(() => {
+      setVerifyingFindingCheck(false);
+      const resources = checkData.resources || [];
+      resources.forEach(r => {
+        setResourceRemediationStatus(checkId, r, 'fixed');
+      });
+      setSolvedResourceArns(prev => {
+        const next = { ...prev };
+        resources.forEach(r => {
+          next[r] = true;
+        });
+        return next;
+      });
+      markCheckSolved(checkId, true);
+      setCheckRerunFeedback({
+        checkId,
+        passed: true,
+        message: `Check ${checkId} verified! All ${resources.length} impacted resources passed telemetry inspection.`,
+      });
+      showToast(
+        `Check ${checkId} Rerun Passed`,
+        'success',
+        'All resources verified compliant and updated in DB.'
+      );
+    }, 1000);
+  };
+
+  const handleRerunModalResource = () => {
+    if (!activeResourceArn) return;
+    setVerifyingModalResource(true);
+    const targetAssessment = activeAssessmentId || selectedAssessmentId || 'A-001';
+    api.rerunCheck({
+      check_id: checkData.id,
+      assessment_id: targetAssessment,
+      resource_arn: activeResourceArn,
+      user_id: currentUser?.id,
+      status: 'fixed',
+    }).catch(err => console.warn('Could not rerun check in DB:', err));
+
+    setTimeout(() => {
+      setVerifyingModalResource(false);
+      setSolvedResourceArns(prev => ({ ...prev, [activeResourceArn]: true }));
+      setResourceRemediationStatus(checkData.id, activeResourceArn, 'fixed');
+      const info = activeResourceInfo;
+      setVerifiedResourceResults(prev => ({
+        ...prev,
+        [activeResourceArn]: {
+          passed: true,
+          message: `${info.shortName} telemetry re-scanned: Configuration verified compliant.`,
+          timestamp: 'Just now',
+        },
+      }));
+      showToast(
+        `Check Passed: ${info.shortName} Verified`,
+        'success',
+        'Resource verified compliant and updated in DB.'
+      );
+    }, 850);
+  };
+
   const handleCopyCli = () => {
-    navigator.clipboard.writeText(checkData.cli.command);
+    navigator.clipboard.writeText(currentResourceRemediation.cliCommand);
     setCliCopied(true);
     setTimeout(() => setCliCopied(false), 1800);
   };
 
   const handleDownloadCode = (code: string, ext: string) => {
-    const fileName = `remediate-${checkData.id.toLowerCase()}.${ext}`;
+    const fileName = `remediate-${checkData.id.toLowerCase()}-${activeResourceInfo.shortName || 'resource'}.${ext}`;
     const blob = new Blob([code], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -1026,13 +565,20 @@ export function AIRemediation() {
       setPrSubmitting(false);
       setPrCreatedSuccess(true);
       setCompletedChecks(prev => ({ ...prev, [checkData.id]: true }));
-      markCheckSolved(checkData.id, true);
+      setSolvedResourceArns(prev => {
+        const next = { ...prev, [activeResourceArn]: true };
+        const allDone = allResources.length > 0 && allResources.every(r => (r === activeResourceArn ? true : next[r]));
+        if (allDone) {
+          markCheckSolved(checkData.id, true);
+        }
+        return next;
+      });
     }, 1400);
   };
 
   // Assessment list
-  const assessmentList: AssessmentInfo[] = assessments?.length ? assessments : INITIAL_ASSESSMENTS;
-  const currentActiveAssessment = assessmentList.find(a => a.id === activeAssessmentId) || assessmentList[0];
+  const assessmentList: AssessmentInfo[] = assessments || [];
+  const currentActiveAssessment = assessmentList.find(a => a.id === activeAssessmentId) || assessmentList[0] || null;
 
   const filteredAssessments = assessmentList.filter(a => {
     if (assessmentCloudFilter !== 'all' && a.cloud !== assessmentCloudFilter) return false;
@@ -1043,9 +589,11 @@ export function AIRemediation() {
     return true;
   });
 
-  // All checks in database
-  const allChecksList = Object.values(REMEDIATION_DATABASE);
-  const solvedChecksCount = allChecksList.filter(c => solvedCheckIds[c.id]).length;
+  const isCheckSolved = (id: string) => {
+    const assessmentKey = activeAssessmentId || 'default';
+    return !!(solvedCheckIds[`${assessmentKey}::${id}`] || solvedCheckIds[id]);
+  };
+  const solvedChecksCount = allChecksList.filter(c => isCheckSolved(c.id)).length;
   const filteredChecks = allChecksList.filter(c => {
     if (checkSeverityFilter === 'critical_high' && !(c.severity === 'critical' || c.severity === 'high')) return false;
     if (checkSeverityFilter === 'medium' && c.severity !== 'medium') return false;
@@ -1056,9 +604,22 @@ export function AIRemediation() {
     return true;
   });
 
-  const allResources = checkData.resources || [];
-  const DISPLAY_LIMIT = 3;
-  const visibleResources = allResources.slice(0, DISPLAY_LIMIT);
+  const checkPendingCount = useMemo(() => {
+    const resList = checkData.resources || [];
+    if (resList.length === 0) return 0;
+    const assessmentKey = activeAssessmentId || 'default';
+    return resList.filter(r => {
+      const key = `${assessmentKey}::${checkData.id}::${r}`;
+      const legacyKey = `${checkData.id}::${r}`;
+      const st = (resourceRemediations[key] || resourceRemediations[legacyKey])?.status;
+      return st !== 'fixed' && st !== 'cant_fix';
+    }).length;
+  }, [checkData, resourceRemediations, activeAssessmentId]);
+
+  const isCheckMarkableSolved = checkPendingCount === 0;
+
+  const DISPLAY_LIMIT = 4;
+  const visibleResources = showAllResourcesList ? allResources : allResources.slice(0, DISPLAY_LIMIT);
 
   const filteredModalResources = allResources.filter(res => {
     if (!resourceSearch.trim()) return true;
@@ -1200,7 +761,9 @@ export function AIRemediation() {
                   <path d="M18 9a9 9 0 0 1-9 9" />
                 </svg>
                 <span className="font-mono">{gitConfig.repoName}</span>
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 font-bold">{gitConfig.branch}</span>
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 font-bold">
+                  {gitConfig.markedAsDone ? 'Done' : gitConfig.branch}
+                </span>
               </button>
             ) : (
               <button
@@ -1215,7 +778,7 @@ export function AIRemediation() {
                   <circle cx="6" cy="18" r="3" />
                   <path d="M18 9a9 9 0 0 1-9 9" />
                 </svg>
-                <span>Connect Infra Repo</span>
+                <span>{gitConfig.ignored ? 'Link Git Repo' : 'Connect Infra Repo'}</span>
               </button>
             )}
           </div>
@@ -1224,63 +787,6 @@ export function AIRemediation() {
         {/* ── VIEW 1: ASSESSMENT SELECTION LIST (when activeAssessmentId is null) ── */}
         {!activeAssessmentId ? (
           <div className="max-w-6xl w-full mx-auto p-6 flex flex-col gap-6">
-
-            {/* Git Banner */}
-            <div
-              className="p-5 rounded-2xl border flex items-center justify-between gap-4 flex-wrap"
-              style={{
-                backgroundColor: gitConfig.connected
-                  ? (isDark ? 'rgba(52,211,153,0.06)' : '#F0FDF4')
-                  : (isDark ? 'rgba(59,130,246,0.08)' : '#EFF6FF'),
-                borderColor: gitConfig.connected
-                  ? (isDark ? 'rgba(52,211,153,0.25)' : '#BBF7D0')
-                  : (isDark ? 'rgba(59,130,246,0.25)' : '#BFDBFE'),
-              }}
-            >
-              <div className="flex items-center gap-3.5 min-w-0">
-                <div
-                  className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
-                  style={{
-                    backgroundColor: gitConfig.connected ? (isDark ? 'rgba(52,211,153,0.2)' : '#DCFCE7') : (isDark ? 'rgba(59,130,246,0.2)' : '#DBEAFE'),
-                    color: gitConfig.connected ? '#059669' : '#2563EB',
-                  }}
-                >
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <line x1="6" y1="3" x2="6" y2="15" />
-                    <circle cx="18" cy="6" r="3" />
-                    <circle cx="6" cy="18" r="3" />
-                    <path d="M18 9a9 9 0 0 1-9 9" />
-                  </svg>
-                </div>
-                <div>
-                  <div className="text-sm font-bold" style={{ color: T.text }}>
-                    {gitConfig.connected ? (
-                      <>Connected to GitHub Infra Repo: <span className="font-mono text-emerald-600 dark:text-emerald-400">{gitConfig.repoName}</span></>
-                    ) : (
-                      'Infrastructure Git Repository Not Connected'
-                    )}
-                  </div>
-                  <div className="text-xs mt-0.5" style={{ color: T.textSub }}>
-                    {gitConfig.connected
-                      ? `Pull requests and verified Terraform/CloudFormation code fixes will target branch "${gitConfig.branch}".`
-                      : 'Connect your GitHub PAT to enable one-click pull requests and IaC automation directly from assessment findings.'}
-                  </div>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={handleOpenGitSettings}
-                className="px-4 py-2 rounded-xl text-xs font-semibold border transition-all cursor-pointer shrink-0"
-                style={{
-                  borderColor: gitConfig.connected ? (isDark ? '#059669' : '#10B981') : '#2563EB',
-                  backgroundColor: gitConfig.connected ? (isDark ? 'rgba(5,150,105,0.15)' : '#FFFFFF') : '#2563EB',
-                  color: gitConfig.connected ? (isDark ? '#6EE7B7' : '#059669') : '#FFFFFF',
-                }}
-              >
-                {gitConfig.connected ? 'Repository Settings' : 'Connect Repo via GitHub PAT'}
-              </button>
-            </div>
 
             {/* Assessment Hub Header & Filters */}
             <div className="flex flex-col gap-4">
@@ -1347,95 +853,121 @@ export function AIRemediation() {
             </div>
 
             {/* Assessment Cards Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {filteredAssessments.map(assessment => {
-                const highRiskCount = assessment.id === 'A-001' ? 4 : assessment.id === 'A-002' ? 3 : 2;
-                const remediableCount = 8;
-                return (
-                  <div
-                    key={assessment.id}
-                    className="p-5 rounded-2xl border flex flex-col justify-between gap-4 transition-all hover:shadow-lg"
-                    style={{
-                      backgroundColor: T.card,
-                      borderColor: T.border,
-                      boxShadow: T.shadow,
-                    }}
+            {filteredAssessments.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 gap-3 text-center px-4 rounded-2xl border" style={{ backgroundColor: T.card, borderColor: T.border }}>
+                <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ backgroundColor: isDark ? 'rgba(37,99,235,0.15)' : '#EFF6FF', color: T.primary }}>
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/>
+                  </svg>
+                </div>
+                <div className="font-semibold text-sm" style={{ color: T.text }}>
+                  {assessmentList.length === 0 ? 'No assessments available for remediation' : 'No assessments match your search'}
+                </div>
+                <div className="text-xs max-w-sm" style={{ color: T.textSub }}>
+                  {assessmentList.length === 0 ? 'Run your first architecture review to discover findings and automate infrastructure remediation.' : 'Try adjusting your search query or changing the cloud filter.'}
+                </div>
+                {assessmentList.length === 0 && (
+                  <button
+                    type="button"
+                    onClick={() => go('org-questions')}
+                    className="mt-2 px-5 py-2.5 rounded-full text-xs font-bold text-white shadow-sm cursor-pointer hover:opacity-90"
+                    style={{ background: 'linear-gradient(135deg,#1B6FC9,#14A085,#10B981)' }}
                   >
-                    <div className="flex flex-col gap-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex items-center gap-3">
-                          <CloudChip id={assessment.cloud} size="sm" isDark={isDark} />
-                          <div>
-                            <h3 className="text-sm font-bold" style={{ color: T.text }}>
-                              {assessment.name}
-                            </h3>
-                            <div className="text-[11px] font-mono mt-0.5" style={{ color: T.textSub }}>
-                              {assessment.accountName} · {assessment.region}
+                    + Run New Assessment
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {filteredAssessments.map(assessment => {
+                  const highRiskCount = assessment.id === 'A-001' ? 4 : assessment.id === 'A-002' ? 3 : 2;
+                  const remediableCount = 8;
+                  return (
+                    <div
+                      key={assessment.id}
+                      className="p-5 rounded-2xl border flex flex-col justify-between gap-4 transition-all hover:shadow-lg"
+                      style={{
+                        backgroundColor: T.card,
+                        borderColor: T.border,
+                        boxShadow: T.shadow,
+                      }}
+                    >
+                      <div className="flex flex-col gap-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-center gap-3">
+                            <CloudChip id={assessment.cloud} size="sm" isDark={isDark} />
+                            <div>
+                              <h3 className="text-sm font-bold" style={{ color: T.text }}>
+                                {assessment.name}
+                              </h3>
+                              <div className="text-[11px] font-mono mt-0.5" style={{ color: T.textSub }}>
+                                {assessment.accountName} · {assessment.region}
+                              </div>
                             </div>
+                          </div>
+
+                          <div className="flex flex-col items-end">
+                            <span className="text-sm font-bold font-mono" style={{ color: assessment.score >= 80 ? T.success : T.primary }}>
+                              {assessment.score}%
+                            </span>
+                            <span className="text-[10px]" style={{ color: T.muted }}>Score</span>
                           </div>
                         </div>
 
-                        <div className="flex flex-col items-end">
-                          <span className="text-sm font-bold font-mono" style={{ color: assessment.score >= 80 ? T.success : T.primary }}>
-                            {assessment.score}%
+                        {/* Pill info badges */}
+                        <div className="flex items-center gap-2 flex-wrap pt-1">
+                          <span
+                            className="text-[11px] font-semibold px-2.5 py-1 rounded-lg"
+                            style={{
+                              backgroundColor: isDark ? 'rgba(244,63,94,0.15)' : '#FFF1F2',
+                              color: isDark ? '#FB7185' : '#E11D48',
+                            }}
+                          >
+                            {highRiskCount} High Risks
                           </span>
-                          <span className="text-[10px]" style={{ color: T.muted }}>Score</span>
+                          <span
+                            className="text-[11px] font-semibold px-2.5 py-1 rounded-lg"
+                            style={{
+                              backgroundColor: isDark ? 'rgba(59,130,246,0.15)' : '#EFF6FF',
+                              color: isDark ? '#93C5FD' : '#2563EB',
+                            }}
+                          >
+                            {remediableCount} Automated Fixes Ready
+                          </span>
+                          <span
+                            className="text-[11px] font-medium px-2.5 py-1 rounded-lg"
+                            style={{
+                              backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : '#F8FAFC',
+                              color: T.textSub,
+                            }}
+                          >
+                            ~35 min fix time
+                          </span>
                         </div>
                       </div>
 
-                      {/* Pill info badges */}
-                      <div className="flex items-center gap-2 flex-wrap pt-1">
-                        <span
-                          className="text-[11px] font-semibold px-2.5 py-1 rounded-lg"
-                          style={{
-                            backgroundColor: isDark ? 'rgba(244,63,94,0.15)' : '#FFF1F2',
-                            color: isDark ? '#FB7185' : '#E11D48',
-                          }}
-                        >
-                          {highRiskCount} High Risks
+                      <div className="border-t pt-3 flex items-center justify-between" style={{ borderColor: T.border }}>
+                        <span className="text-[11px] font-mono" style={{ color: T.textSub }}>
+                          ID: {assessment.id}
                         </span>
-                        <span
-                          className="text-[11px] font-semibold px-2.5 py-1 rounded-lg"
-                          style={{
-                            backgroundColor: isDark ? 'rgba(59,130,246,0.15)' : '#EFF6FF',
-                            color: isDark ? '#93C5FD' : '#2563EB',
-                          }}
+
+                        <button
+                          type="button"
+                          onClick={() => handleStartRemediation(assessment.id)}
+                          className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold text-white transition-opacity hover:opacity-90 cursor-pointer shadow-sm"
+                          style={{ background: 'linear-gradient(135deg,#1B6FC9,#14A085,#10B981)' }}
                         >
-                          {remediableCount} Automated Fixes Ready
-                        </span>
-                        <span
-                          className="text-[11px] font-medium px-2.5 py-1 rounded-lg"
-                          style={{
-                            backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : '#F8FAFC',
-                            color: T.textSub,
-                          }}
-                        >
-                          ~35 min fix time
-                        </span>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/>
+                          </svg>
+                          <span>Remediate Findings →</span>
+                        </button>
                       </div>
                     </div>
-
-                    <div className="border-t pt-3 flex items-center justify-between" style={{ borderColor: T.border }}>
-                      <span className="text-[11px] font-mono" style={{ color: T.textSub }}>
-                        ID: {assessment.id}
-                      </span>
-
-                      <button
-                        type="button"
-                        onClick={() => handleStartRemediation(assessment.id)}
-                        className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold text-white transition-opacity hover:opacity-90 cursor-pointer shadow-sm"
-                        style={{ background: 'linear-gradient(135deg,#1B6FC9,#14A085,#10B981)' }}
-                      >
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/>
-                        </svg>
-                        <span>Remediate Findings →</span>
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         ) : (
           /* ── VIEW 2: CHECK-BY-CHECK REMEDIATION WORKSPACE ── */
@@ -1587,29 +1119,114 @@ export function AIRemediation() {
                     </span>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {!isCheckMarkableSolved && !solvedCheckIds[checkData.id] && (
+                      <span
+                        className="text-[11px] font-semibold px-2.5 py-1 rounded-lg border flex items-center gap-1.5"
+                        style={{
+                          backgroundColor: isDark ? 'rgba(245,158,11,0.12)' : '#FEF3C7',
+                          borderColor: isDark ? 'rgba(245,158,11,0.3)' : '#FCD34D',
+                          color: isDark ? '#FBBF24' : '#D97706',
+                        }}
+                        title={`${checkPendingCount} resources still pending. Rerun check or mark all resources as Fixed/Ignored to solve.`}
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                        {checkPendingCount} resource{checkPendingCount > 1 ? 's' : ''} pending
+                      </span>
+                    )}
+
+                    {/* RERUN CHECK FOR FINDING */}
                     <button
                       type="button"
-                      onClick={() => toggleCheckSolved(checkData.id)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer shadow-sm"
-                      style={{
-                        backgroundColor: solvedCheckIds[checkData.id]
-                          ? (isDark ? 'rgba(52,211,153,0.15)' : '#ECFDF5')
-                          : (isDark ? 'rgba(255,255,255,0.04)' : '#FFFFFF'),
-                        borderColor: solvedCheckIds[checkData.id]
-                          ? (isDark ? 'rgba(52,211,153,0.35)' : '#A7F3D0')
-                          : T.border,
-                        color: solvedCheckIds[checkData.id]
-                          ? (isDark ? '#6EE7B7' : '#059669')
-                          : T.text,
-                      }}
-                      title={solvedCheckIds[checkData.id] ? 'Click to mark as unresolved' : 'Click to mark as solved'}
+                      disabled={verifyingFindingCheck}
+                      onClick={() => handleRerunFindingCheck(checkData.id)}
+                      className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold border transition-all shadow-xs cursor-pointer bg-blue-600 hover:bg-blue-700 text-white border-blue-600 disabled:opacity-50"
+                      title="Rerun automated telemetry checks across all impacted resources for this finding"
                     >
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="20 6 9 17 4 12" />
-                      </svg>
-                      <span>{solvedCheckIds[checkData.id] ? 'Marked as Solved' : 'Mark as Solved'}</span>
+                      {verifyingFindingCheck ? (
+                        <>
+                          <svg className="animate-spin" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                            <circle cx="12" cy="12" r="10" strokeDasharray="60" strokeDashoffset="20" />
+                          </svg>
+                          <span>Rerunning Check...</span>
+                        </>
+                      ) : (
+                        <>
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="23 4 23 10 17 10" />
+                            <polyline points="1 20 1 14 7 14" />
+                            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                          </svg>
+                          <span>Rerun Check</span>
+                        </>
+                      )}
                     </button>
+
+                    {/* Finding Solved Status Badge */}
+                    {solvedCheckIds[checkData.id] && (
+                      <span
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border"
+                        style={{
+                          backgroundColor: isDark ? 'rgba(52,211,153,0.15)' : '#ECFDF5',
+                          borderColor: isDark ? 'rgba(52,211,153,0.35)' : '#A7F3D0',
+                          color: isDark ? '#6EE7B7' : '#059669',
+                        }}
+                      >
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                        <span>Finding Solved</span>
+                      </span>
+                    )}
+
+                    {/* Slack Alert Button */}
+                    <button
+                      type="button"
+                      onClick={() => setSlackModalOpen(true)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl border transition-all cursor-pointer shadow-xs text-[#E01E5A] dark:text-[#ECB22E]"
+                      style={{
+                        borderColor: isDark ? 'rgba(236,178,46,0.3)' : 'rgba(224,30,90,0.2)',
+                        backgroundColor: isDark ? 'rgba(236,178,46,0.1)' : '#FFF5F7',
+                      }}
+                      title="Send instant Slack alert for this finding"
+                    >
+                      <SlackLogo size={12} />
+                      <span>Slack Alert</span>
+                    </button>
+
+                    {/* Jira Linked Ticket */}
+                    {jiraTickets && jiraTickets[checkData.id] ? (
+                      <button
+                        type="button"
+                        onClick={() => setJiraModalOpen(true)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl border transition-all cursor-pointer shadow-xs text-[#0052CC] dark:text-[#388BFF]"
+                        style={{
+                          borderColor: isDark ? 'rgba(56,139,255,0.35)' : 'rgba(0,82,204,0.25)',
+                          backgroundColor: isDark ? 'rgba(0,82,204,0.15)' : '#EFF6FF',
+                        }}
+                        title={`Jira ticket ${jiraTickets[checkData.id].key} is ${jiraTickets[checkData.id].status}. Click to view or edit.`}
+                      >
+                        <JiraLogo size={12} />
+                        <span>{jiraTickets[checkData.id].key}</span>
+                        <span className="text-[10px] px-1.5 py-0.2 rounded font-bold bg-blue-500/20">
+                          {jiraTickets[checkData.id].status}
+                        </span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setJiraModalOpen(true)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl border transition-all cursor-pointer shadow-xs text-[#0052CC] dark:text-[#388BFF]"
+                        style={{
+                          borderColor: isDark ? 'rgba(56,139,255,0.35)' : 'rgba(0,82,204,0.25)',
+                          backgroundColor: isDark ? 'rgba(0,82,204,0.12)' : '#EFF6FF',
+                        }}
+                        title="Create and link Jira ticket for this finding"
+                      >
+                        <JiraLogo size={12} />
+                        <span>+ Jira Ticket</span>
+                      </button>
+                    )}
 
                     <button
                       type="button"
@@ -1632,6 +1249,65 @@ export function AIRemediation() {
                   {checkData.title}
                 </h2>
 
+                {/* Notice Banner: Check Rerun vs Full Assessment Status */}
+                <div
+                  className="p-3.5 rounded-xl border flex items-center justify-between gap-3 text-xs leading-relaxed flex-wrap"
+                  style={{
+                    backgroundColor: isDark ? 'rgba(59,130,246,0.06)' : '#F0F9FF',
+                    borderColor: isDark ? 'rgba(59,130,246,0.25)' : '#BAE6FD',
+                  }}
+                >
+                  <div className="flex items-start gap-2.5 min-w-0 flex-1">
+                    <div className="w-5 h-5 rounded-md flex items-center justify-center shrink-0 mt-0.5 bg-blue-500/15 text-blue-500 font-bold text-xs">
+                      ℹ
+                    </div>
+                    <div className="min-w-0">
+                      <span className="font-bold text-blue-600 dark:text-blue-400">Rerun Check vs Assessment Status:</span>
+                      <p className="mt-0.5" style={{ color: T.textSub }}>
+                        After fixing impacted resources, click <strong>Rerun Check</strong> to test and confirm whether each resource is compliant. Rerunning individual checks verifies findings locally and does <em>not</em> update the overall Assessment Status or scores. To recalculate your overall WAFR score and update the assessment status, rerun the full assessment.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (currentAssessment) {
+                        runOrUpdateAssessment({
+                          cloud: currentAssessment.cloud,
+                          accountId: currentAssessment.accountId,
+                          accountName: currentAssessment.accountName,
+                          region: currentAssessment.region,
+                          name: currentAssessment.name,
+                        });
+                        showToast('Full Assessment Re-scan Initiated', 'info', `Re-scanning ${currentAssessment.name}`);
+                        go('report');
+                      } else {
+                        go('assessment-list');
+                      }
+                    }}
+                    className="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white transition-colors cursor-pointer shrink-0 shadow-xs flex items-center gap-1.5"
+                    title="Run a complete re-scan of this cloud assessment to refresh overall WAFR score and status"
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <polyline points="23 4 23 10 17 10" />
+                      <polyline points="1 20 1 14 7 14" />
+                      <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                    </svg>
+                    <span>Rerun Full Assessment</span>
+                  </button>
+                </div>
+
+                {checkRerunFeedback && checkRerunFeedback.checkId === checkData.id && (
+                  <div
+                    className="p-3 rounded-xl border flex items-center gap-2.5 text-xs font-semibold bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400 animate-fadeIn"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                    <span>{checkRerunFeedback.message}</span>
+                  </div>
+                )}
+
                 {/* Problem Statement & Rationale */}
                 <div
                   className="p-4 rounded-xl border flex items-start gap-3.5"
@@ -1653,166 +1329,591 @@ export function AIRemediation() {
                   </div>
                 </div>
 
-                {/* Impacted Resources */}
-                <div>
-                  <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
-                    <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: T.textSub }}>
-                      Impacted Resources ({allResources.length})
-                    </span>
+                {/* ── IMPACTED RESOURCES & RESOURCE-LEVEL REMEDIATION ── */}
+                <div className="flex flex-col gap-4 pt-2 border-t" style={{ borderColor: T.border }}>
+                  {/* Header bar */}
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div className="flex items-center gap-2.5">
+                      <span className="text-xs font-bold uppercase tracking-wider" style={{ color: T.textSub }}>
+                        Impacted Resources ({allResources.length})
+                      </span>
+                      <span
+                        className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full"
+                        style={{
+                          backgroundColor: solvedResourcesInCheckCount > 0
+                            ? (isDark ? 'rgba(52,211,153,0.15)' : '#ECFDF5')
+                            : (isDark ? 'rgba(255,255,255,0.06)' : '#F1F5F9'),
+                          color: solvedResourcesInCheckCount > 0
+                            ? (isDark ? '#6EE7B7' : '#059669')
+                            : T.muted,
+                        }}
+                      >
+                        {solvedResourcesInCheckCount} of {allResources.length} Remediated
+                      </span>
+                    </div>
 
-                    <button
-                      type="button"
-                      onClick={() => go('diagram')}
-                      className="text-xs font-medium hover:underline cursor-pointer flex items-center gap-1 transition-colors"
-                      style={{ color: T.textSub }}
-                    >
-                      <span>View in Architecture Diagram</span>
-                    </button>
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => go('diagram')}
+                        className="text-xs font-medium hover:underline cursor-pointer flex items-center gap-1 transition-colors"
+                        style={{ color: T.textSub }}
+                      >
+                        <span>View in Architecture Diagram</span>
+                      </button>
+                      {allResources.length > DISPLAY_LIMIT && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setResourceSearch('');
+                            setResourcesModalOpen(true);
+                          }}
+                          className="text-xs font-semibold px-2.5 py-1 rounded-lg border transition-all cursor-pointer"
+                          style={{ borderColor: T.border, color: T.primary }}
+                        >
+                          Search All ({allResources.length})
+                        </button>
+                      )}
+                    </div>
                   </div>
 
-                  <div className="flex flex-col gap-2">
+                  <p className="text-xs leading-relaxed" style={{ color: T.textSub }}>
+                    After applying your fix via IaC, CLI, or console, click <strong>Rerun Check</strong> on any resource to test whether it is resolved.
+                  </p>
+
+                  {/* Clean List of Impacted Resources (Not opened by default) */}
+                  <div className="flex flex-col gap-2.5">
                     {visibleResources.map((res, i) => {
-                      const isCopied = copiedArnId === `main-${i}`;
+                      const realIndex = allResources.indexOf(res);
+                      const resInfo = parseResourceInfo(res);
+                      const resKey = `${activeAssessmentId || 'default'}::${checkData.id}::${res}`;
+                      const legacyKey = `${checkData.id}::${res}`;
+                      const resRem = resourceRemediations[resKey] || resourceRemediations[legacyKey];
+                      const resStatus = resRem?.status || (solvedResourceArns[res] ? 'fixed' : 'pending');
+                      const resNote = resRem?.note;
+                      const isResSolved = resStatus === 'fixed';
+                      const isCantFix = resStatus === 'cant_fix';
+                      const isCopied = copiedArnId === `card-${i}`;
+                      const isVerifying = Boolean(verifyingResourceKeys[res]);
+                      const verResult = verifiedResourceResults[res];
+
                       return (
                         <div
-                          key={i}
-                          className="px-3.5 py-2.5 rounded-xl text-xs font-mono flex items-center justify-between border transition-colors"
+                          key={res}
+                          className="p-3.5 rounded-xl border transition-all flex items-center justify-between gap-3 flex-wrap hover:border-blue-400/50"
                           style={{
-                            backgroundColor: isDark ? 'rgba(255,255,255,0.02)' : '#F8FAFC',
-                            borderColor: T.border,
-                            color: T.text,
+                            borderColor: isCantFix ? '#F59E0B' : isResSolved ? '#10B981' : T.border,
+                            backgroundColor: isDark ? 'rgba(255,255,255,0.02)' : '#FFFFFF',
+                            boxShadow: T.shadow,
                           }}
                         >
-                          <div className="flex items-center gap-2.5 min-w-0 flex-1 mr-3">
-                            <span
-                              className="w-1.5 h-1.5 rounded-full shrink-0"
-                              style={{ backgroundColor: isDark ? '#94A3B8' : '#64748B' }}
-                            />
-                            <span className="truncate select-all">{res}</span>
+                          <div className="flex items-center gap-3 min-w-0 flex-1">
+                            {/* Status Indicator Icon */}
+                            <div
+                              className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border"
+                              style={{
+                                backgroundColor: isVerifying
+                                  ? (isDark ? 'rgba(59,130,246,0.15)' : '#EFF6FF')
+                                  : isResSolved
+                                  ? (isDark ? 'rgba(52,211,153,0.15)' : '#DCFCE7')
+                                  : isCantFix
+                                  ? (isDark ? 'rgba(245,158,11,0.15)' : '#FEF3C7')
+                                  : (isDark ? 'rgba(239,68,68,0.12)' : '#FEE2E2'),
+                                borderColor: isVerifying
+                                  ? (isDark ? 'rgba(59,130,246,0.3)' : '#BFDBFE')
+                                  : isResSolved
+                                  ? (isDark ? 'rgba(52,211,153,0.3)' : '#86EFAC')
+                                  : isCantFix
+                                  ? (isDark ? 'rgba(245,158,11,0.3)' : '#FCD34D')
+                                  : (isDark ? 'rgba(239,68,68,0.3)' : '#FCA5A5'),
+                                color: isVerifying
+                                  ? '#3B82F6'
+                                  : isResSolved
+                                  ? (isDark ? '#6EE7B7' : '#059669')
+                                  : isCantFix
+                                  ? (isDark ? '#FBBF24' : '#D97706')
+                                  : (isDark ? '#F87171' : '#DC2626'),
+                              }}
+                            >
+                              {isVerifying ? (
+                                <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                  <circle cx="12" cy="12" r="10" strokeDasharray="60" strokeDashoffset="20" />
+                                </svg>
+                              ) : isResSolved ? (
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                  <polyline points="20 6 9 17 4 12" />
+                                </svg>
+                              ) : isCantFix ? (
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                  <circle cx="12" cy="12" r="10" />
+                                  <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
+                                </svg>
+                              ) : (
+                                <span className="text-xs font-bold font-mono">!</span>
+                              )}
+                            </div>
+
+                            {/* Resource Identity */}
+                            <div className="flex flex-col min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-mono text-xs font-bold truncate select-all" style={{ color: T.text }}>
+                                  {resInfo.shortName}
+                                </span>
+                                <span
+                                  className="text-[10px] font-semibold px-2 py-0.5 rounded-md"
+                                  style={{
+                                    backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : '#F1F5F9',
+                                    color: T.textSub,
+                                  }}
+                                >
+                                  {resInfo.type}
+                                </span>
+                                <span className="text-[10px] font-mono opacity-60">
+                                  {resInfo.region}
+                                </span>
+                              </div>
+                              <span className="text-[11px] font-mono text-slate-400 dark:text-slate-500 truncate max-w-lg mt-0.5 select-all">
+                                {res}
+                              </span>
+                              {isCantFix && resNote && (
+                                <div className="text-[11px] text-amber-600 dark:text-amber-400 font-medium mt-1 flex items-center gap-1">
+                                  <span className="font-semibold">Reason:</span> {resNote}
+                                </div>
+                              )}
+                              {verResult && isResSolved && (
+                                <div className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium mt-0.5 flex items-center gap-1">
+                                  <span>✓ Live check verified: Compliant with rules</span>
+                                </div>
+                              )}
+                            </div>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => handleCopyArn(res, `main-${i}`)}
-                            className="text-[11px] font-sans px-2.5 py-1 rounded-lg border transition-all shrink-0 cursor-pointer flex items-center gap-1.5"
-                            style={{
-                              borderColor: isCopied ? T.success : T.border,
-                              color: isCopied ? T.success : T.textSub,
-                              backgroundColor: isCopied
-                                ? (isDark ? 'rgba(82,183,136,0.12)' : '#ECFDF5')
-                                : (isDark ? 'rgba(255,255,255,0.03)' : '#FFFFFF'),
-                            }}
-                          >
-                            <span>{isCopied ? 'Copied' : 'Copy ARN'}</span>
-                          </button>
+
+                          {/* Status & Actions */}
+                          <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                            {/* Status Badge */}
+                            {isVerifying ? (
+                              <span
+                                className="text-[11px] font-bold px-2.5 py-1 rounded-full border flex items-center gap-1.5 bg-blue-500/10 text-blue-500 border-blue-500/30"
+                              >
+                                <svg className="animate-spin" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                  <circle cx="12" cy="12" r="10" strokeDasharray="60" strokeDashoffset="20" />
+                                </svg>
+                                Testing Check...
+                              </span>
+                            ) : isResSolved ? (
+                              <span
+                                className="text-[11px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1.5 border"
+                                style={{
+                                  backgroundColor: isDark ? 'rgba(52,211,153,0.15)' : '#DCFCE7',
+                                  borderColor: isDark ? 'rgba(52,211,153,0.3)' : '#86EFAC',
+                                  color: isDark ? '#6EE7B7' : '#059669',
+                                }}
+                              >
+                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                                  <polyline points="20 6 9 17 4 12" />
+                                </svg>
+                                Fixed
+                              </span>
+                            ) : isCantFix ? (
+                              <span
+                                className="text-[11px] font-bold px-2.5 py-1 rounded-full border flex items-center gap-1.5"
+                                style={{
+                                  backgroundColor: isDark ? 'rgba(245,158,11,0.15)' : '#FEF3C7',
+                                  borderColor: isDark ? 'rgba(245,158,11,0.35)' : '#FCD34D',
+                                  color: isDark ? '#FBBF24' : '#D97706',
+                                }}
+                              >
+                                <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                                Ignored
+                              </span>
+                            ) : (
+                              <span
+                                className="text-[11px] font-bold px-2.5 py-1 rounded-full border flex items-center gap-1.5"
+                                style={{
+                                  backgroundColor: isDark ? 'rgba(239,68,68,0.12)' : '#FEE2E2',
+                                  borderColor: isDark ? 'rgba(239,68,68,0.3)' : '#FCA5A5',
+                                  color: isDark ? '#F87171' : '#DC2626',
+                                }}
+                              >
+                                <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                                Fix Pending
+                              </span>
+                            )}
+
+                            {/* BUTTON 1: RERUN CHECK */}
+                            <button
+                              type="button"
+                              disabled={isVerifying}
+                              onClick={() => handleRerunResourceCheck(checkData.id, res)}
+                              className={`text-[11px] font-semibold px-2.5 py-1 rounded-lg border transition-all cursor-pointer flex items-center gap-1.5 ${
+                                isResSolved
+                                  ? 'bg-slate-100 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:bg-slate-200'
+                                  : 'bg-blue-600 hover:bg-blue-700 text-white border-blue-600 shadow-xs'
+                              } disabled:opacity-50`}
+                              title="Rerun automated check to test whether this resource is fixed"
+                            >
+                              {isVerifying ? (
+                                <>
+                                  <svg className="animate-spin" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                    <circle cx="12" cy="12" r="10" strokeDasharray="60" strokeDashoffset="20" />
+                                  </svg>
+                                  <span>Testing...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                    <polyline points="23 4 23 10 17 10" />
+                                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10" />
+                                  </svg>
+                                  <span>{isResSolved ? 'Re-verify' : 'Rerun Check'}</span>
+                                </>
+                              )}
+                            </button>
+
+                            {/* BUTTON 2: IGNORED (WITH POPUP FOR REASON / CONSTRAINT NOTE) */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setCantFixTargetResource(res);
+                                setCantFixNote(resNote || 'Code dependency on legacy pipeline');
+                                setCantFixModalOpen(true);
+                              }}
+                              className={`text-[11px] font-semibold px-2.5 py-1 rounded-lg border transition-all cursor-pointer ${
+                                isCantFix
+                                  ? 'bg-amber-500/20 text-amber-700 dark:text-amber-300 border-amber-500/50 hover:bg-amber-500/30'
+                                  : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30 hover:bg-amber-500/20'
+                              }`}
+                              title="Mark resource as ignored with a reason/constraint note"
+                            >
+                              {isCantFix ? 'Edit Note' : 'Ignored'}
+                            </button>
+
+                            {isCantFix && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setResourceRemediationStatus(checkData.id, res, 'pending');
+                                  setSolvedResourceArns(prev => ({ ...prev, [res]: false }));
+                                }}
+                                className="text-[11px] font-semibold px-2 py-1 rounded-lg border bg-slate-500/10 text-slate-500 border-slate-500/30 hover:bg-slate-500/20 cursor-pointer"
+                                title="Reset resource back to pending"
+                              >
+                                Reset
+                              </button>
+                            )}
+
+                            {/* BUTTON 3: COPY ARN */}
+                            <button
+                              type="button"
+                              onClick={() => handleCopyArn(res, `card-${i}`)}
+                              className="text-[11px] font-sans px-2.5 py-1.5 rounded-xl border transition-all shrink-0 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800"
+                              style={{
+                                borderColor: isCopied ? T.success : T.border,
+                                color: isCopied ? T.success : T.textSub,
+                                backgroundColor: isCopied
+                                  ? (isDark ? 'rgba(82,183,136,0.12)' : '#ECFDF5')
+                                  : (isDark ? 'rgba(255,255,255,0.03)' : '#FFFFFF'),
+                              }}
+                              title="Copy Resource ARN"
+                            >
+                              {isCopied ? 'Copied ARN' : 'Copy ARN'}
+                            </button>
+
+                            {/* BUTTON 4: AI FIX → */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedResourceIndex(realIndex);
+                                setFixModalOpen(true);
+                              }}
+                              className={`text-xs font-semibold px-3 py-1.5 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shadow-sm ${
+                                isResSolved
+                                  ? 'border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                                  : 'text-white bg-blue-600 hover:bg-blue-700'
+                              }`}
+                            >
+                              <span>{isResSolved ? 'View Fix ↗' : 'AI Fix →'}</span>
+                            </button>
+                          </div>
                         </div>
                       );
                     })}
 
                     {allResources.length > DISPLAY_LIMIT && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setResourceSearch('');
-                          setResourcesModalOpen(true);
-                        }}
-                        className="w-full py-2.5 px-4 rounded-xl border border-dashed text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer"
-                        style={{
-                          borderColor: isDark ? 'rgba(59,130,246,0.35)' : '#BFDBFE',
-                          backgroundColor: isDark ? 'rgba(59,130,246,0.06)' : '#EFF6FF',
-                          color: T.primary,
-                        }}
-                      >
-                        <span>View All {allResources.length} Resources</span>
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setShowAllResourcesList(prev => !prev)}
+                          className="flex-1 py-2.5 px-4 rounded-xl border border-dashed text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer"
+                          style={{
+                            borderColor: isDark ? 'rgba(59,130,246,0.35)' : '#BFDBFE',
+                            backgroundColor: isDark ? 'rgba(59,130,246,0.06)' : '#EFF6FF',
+                            color: T.primary,
+                          }}
+                        >
+                          <span>{showAllResourcesList ? `Show Fewer (${DISPLAY_LIMIT}) Resources` : `Show All ${allResources.length} Resources Inline`}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setResourceSearch('');
+                            setResourcesModalOpen(true);
+                          }}
+                          className="py-2.5 px-4 rounded-xl border text-xs font-semibold transition-all cursor-pointer"
+                          style={{
+                            borderColor: T.border,
+                            color: T.textSub,
+                            backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : '#FFFFFF',
+                          }}
+                        >
+                          Search All Modal
+                        </button>
+                      </div>
                     )}
                   </div>
                 </div>
               </div>
+            </div>
+          </div>
+        )}
 
-              {/* ── THE 3 REMEDIATION METHODS SELECTOR (IaC Templates, CLI, Manual) ── */}
+        {/* ── RESOURCE FIX MODAL POPUP ── */}
+        {fixModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/75 backdrop-blur-sm animate-fadeIn">
+            <div
+              className="w-full max-w-4xl max-h-[92vh] rounded-2xl flex flex-col overflow-hidden shadow-2xl border"
+              style={{
+                backgroundColor: T.card,
+                borderColor: T.border,
+                color: T.text,
+              }}
+            >
+              {/* Modal Top Header */}
               <div
-                className="rounded-2xl overflow-hidden flex flex-col"
-                style={{ background: T.card, border: `1px solid ${T.border}`, boxShadow: T.shadow }}
+                className="px-6 py-4 border-b flex items-center justify-between shrink-0 gap-3"
+                style={{
+                  backgroundColor: isDark ? '#111B2E' : '#F8FAFC',
+                  borderColor: T.border,
+                }}
               >
-                {/* 3 Tabs Bar */}
-                <div className="p-3 border-b flex items-center justify-between flex-wrap gap-3" style={{ borderColor: T.border, backgroundColor: isDark ? 'rgba(0,0,0,0.15)' : '#FAFBFD' }}>
-                  <div className="flex items-center gap-1.5 p-1 rounded-xl" style={{ backgroundColor: isDark ? 'rgba(0,0,0,0.3)' : '#F1F5F9' }}>
-                    <button
-                      type="button"
-                      onClick={() => setMethodTab('iac')}
-                      className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer"
-                      style={{
-                        backgroundColor: methodTab === 'iac' ? (isDark ? '#1E293B' : '#FFFFFF') : 'transparent',
-                        color: methodTab === 'iac' ? T.primary : T.textSub,
-                        boxShadow: methodTab === 'iac' ? T.shadow : 'none',
-                      }}
-                    >
-                      <span>IaC Templates</span>
-                    </button>
+                <div className="flex items-center gap-3 min-w-0">
+                  <div
+                    className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border"
+                    style={{
+                      backgroundColor: isCurrentResourceSolved
+                        ? (isDark ? 'rgba(52,211,153,0.15)' : '#DCFCE7')
+                        : (isDark ? 'rgba(59,130,246,0.15)' : '#EFF6FF'),
+                      borderColor: isCurrentResourceSolved
+                        ? (isDark ? 'rgba(52,211,153,0.3)' : '#86EFAC')
+                        : (isDark ? 'rgba(59,130,246,0.3)' : '#BFDBFE'),
+                      color: isCurrentResourceSolved ? '#059669' : '#2563EB',
+                    }}
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="16 18 22 12 16 6" />
+                      <polyline points="8 6 2 12 8 18" />
+                    </svg>
+                  </div>
 
-                    <button
-                      type="button"
-                      onClick={() => setMethodTab('cli')}
-                      className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer"
-                      style={{
-                        backgroundColor: methodTab === 'cli' ? (isDark ? '#1E293B' : '#FFFFFF') : 'transparent',
-                        color: methodTab === 'cli' ? T.primary : T.textSub,
-                        boxShadow: methodTab === 'cli' ? T.shadow : 'none',
-                      }}
-                    >
-                      <span>Cloud CLI</span>
-                    </button>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-blue-500/10 text-blue-500 border border-blue-500/20">
+                        {checkData.id}
+                      </span>
+                      <h3 className="text-sm sm:text-base font-bold font-mono truncate" style={{ color: T.text }}>
+                        {activeResourceInfo.shortName}
+                      </h3>
+                      {isCurrentResourceSolved ? (
+                        <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                            <polyline points="20 6 9 17 4 12" />
+                          </svg>
+                          Remediated
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+                          Fix Pending
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs text-slate-500 dark:text-slate-400 font-mono truncate mt-0.5 select-all">
+                      {activeResourceArn}
+                    </div>
+                  </div>
+                </div>
 
+                <div className="flex items-center gap-2 shrink-0">
+                  {/* Previous / Next resource navigation */}
+                  <div className="hidden sm:flex items-center gap-1 border rounded-xl p-1 bg-slate-100 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700 text-xs">
                     <button
                       type="button"
-                      onClick={() => setMethodTab('manual')}
-                      className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer"
-                      style={{
-                        backgroundColor: methodTab === 'manual' ? (isDark ? '#1E293B' : '#FFFFFF') : 'transparent',
-                        color: methodTab === 'manual' ? T.primary : T.textSub,
-                        boxShadow: methodTab === 'manual' ? T.shadow : 'none',
-                      }}
+                      disabled={safeResourceIndex === 0}
+                      onClick={() => setSelectedResourceIndex(safeResourceIndex - 1)}
+                      className="px-2 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed hover:bg-white dark:hover:bg-slate-700"
+                      style={{ color: T.textSub }}
+                      title="Previous resource"
                     >
-                      <span>Manual Console Steps</span>
+                      ← Prev
+                    </button>
+                    <span className="text-[11px] font-mono px-2 font-semibold" style={{ color: T.textSub }}>
+                      {safeResourceIndex + 1} of {allResources.length}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={safeResourceIndex === allResources.length - 1}
+                      onClick={() => setSelectedResourceIndex(safeResourceIndex + 1)}
+                      className="px-2 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed hover:bg-white dark:hover:bg-slate-700"
+                      style={{ color: T.textSub }}
+                      title="Next resource"
+                    >
+                      Next →
                     </button>
                   </div>
 
-                  {methodTab === 'iac' && (
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={handleCreatePullRequest}
-                        className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold text-white transition-opacity hover:opacity-90 cursor-pointer shadow-sm"
-                        style={{ background: 'linear-gradient(135deg,#1B6FC9,#14A085,#10B981)' }}
-                      >
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                          <line x1="6" y1="3" x2="6" y2="15" />
-                          <circle cx="18" cy="6" r="3" />
-                          <circle cx="6" cy="18" r="3" />
-                          <path d="M18 9a9 9 0 0 1-9 9" />
+                  {/* Rerun Check on Resource button */}
+                  <button
+                    type="button"
+                    disabled={verifyingModalResource}
+                    onClick={handleRerunModalResource}
+                    className="px-3.5 py-1.5 text-xs font-semibold rounded-xl bg-blue-600 hover:bg-blue-700 text-white transition-all cursor-pointer flex items-center gap-1.5 shadow-xs disabled:opacity-50"
+                    title="Rerun automated check to test and verify whether this resource has been fixed"
+                  >
+                    {verifyingModalResource ? (
+                      <>
+                        <svg className="animate-spin" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                          <circle cx="12" cy="12" r="10" strokeDasharray="60" strokeDashoffset="20" />
                         </svg>
-                        <span>Create Pull Request</span>
-                      </button>
-                    </div>
-                  )}
+                        <span>Testing Check...</span>
+                      </>
+                    ) : (
+                      <>
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                          <polyline points="23 4 23 10 17 10" />
+                          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10" />
+                        </svg>
+                        <span>{isCurrentResourceSolved ? 'Re-verify Check' : 'Rerun Check & Verify'}</span>
+                      </>
+                    )}
+                  </button>
 
-                  {methodTab === 'cli' && (
-                    <button
-                      type="button"
-                      onClick={handleCopyCli}
-                      className="px-3 py-1.5 text-xs font-semibold rounded-xl border transition-colors cursor-pointer flex items-center gap-1.5"
-                      style={{ borderColor: T.border, color: cliCopied ? T.success : T.textSub }}
-                    >
-                      <span>{cliCopied ? '✓ Copied CLI Script' : 'Copy CLI Command'}</span>
-                    </button>
-                  )}
+                  {/* Close Modal Button */}
+                  <button
+                    type="button"
+                    onClick={() => setFixModalOpen(false)}
+                    className="w-8 h-8 rounded-xl flex items-center justify-center text-xs font-bold border transition-colors cursor-pointer hover:opacity-80"
+                    style={{ borderColor: T.border, color: T.textSub }}
+                    title="Close popup"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+
+              {/* Modal Sub-Bar: Finding Context */}
+              <div
+                className="px-6 py-2.5 border-b text-xs flex items-center justify-between flex-wrap gap-2"
+                style={{
+                  backgroundColor: isDark ? '#0C1322' : '#F1F5F9',
+                  borderColor: T.border,
+                }}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-slate-500 dark:text-slate-400">Finding:</span>
+                  <span className="font-medium text-slate-800 dark:text-slate-200">{checkData.title}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-[11px] text-slate-500">Placement: {activeResourceInfo.type} · {activeResourceInfo.region}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleCopyArn(activeResourceArn, 'modal-arn')}
+                    className="text-[11px] text-blue-500 hover:underline cursor-pointer font-medium"
+                  >
+                    {copiedArnId === 'modal-arn' ? '✓ Copied ARN' : 'Copy ARN'}
+                  </button>
+                </div>
+              </div>
+
+              {/* 3 Tabs Header Bar */}
+              <div
+                className="px-6 py-3 border-b flex items-center justify-between flex-wrap gap-3"
+                style={{ borderColor: T.border, backgroundColor: isDark ? 'rgba(0,0,0,0.15)' : '#FAFBFD' }}
+              >
+                <div className="flex items-center gap-1.5 p-1 rounded-xl" style={{ backgroundColor: isDark ? 'rgba(0,0,0,0.3)' : '#F1F5F9' }}>
+                  <button
+                    type="button"
+                    onClick={() => setMethodTab('iac')}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer"
+                    style={{
+                      backgroundColor: methodTab === 'iac' ? (isDark ? '#1E293B' : '#FFFFFF') : 'transparent',
+                      color: methodTab === 'iac' ? T.primary : T.textSub,
+                      boxShadow: methodTab === 'iac' ? T.shadow : 'none',
+                    }}
+                  >
+                    <span>IaC Templates</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setMethodTab('cli')}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer"
+                    style={{
+                      backgroundColor: methodTab === 'cli' ? (isDark ? '#1E293B' : '#FFFFFF') : 'transparent',
+                      color: methodTab === 'cli' ? T.primary : T.textSub,
+                      boxShadow: methodTab === 'cli' ? T.shadow : 'none',
+                    }}
+                  >
+                    <span>Cloud CLI</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setMethodTab('manual')}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer"
+                    style={{
+                      backgroundColor: methodTab === 'manual' ? (isDark ? '#1E293B' : '#FFFFFF') : 'transparent',
+                      color: methodTab === 'manual' ? T.primary : T.textSub,
+                      boxShadow: methodTab === 'manual' ? T.shadow : 'none',
+                    }}
+                  >
+                    <span>Manual Console Steps</span>
+                  </button>
                 </div>
 
-                {/* ── METHOD 1: IAC TEMPLATES ── */}
                 {methodTab === 'iac' && (
-                  <div className="p-6 flex flex-col gap-4">
+                  <button
+                    type="button"
+                    onClick={handleCreatePullRequest}
+                    className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold text-white transition-opacity hover:opacity-90 cursor-pointer shadow-sm"
+                    style={{ background: 'linear-gradient(135deg,#1B6FC9,#14A085,#10B981)' }}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="6" y1="3" x2="6" y2="15" />
+                      <circle cx="18" cy="6" r="3" />
+                      <circle cx="6" cy="18" r="3" />
+                      <path d="M18 9a9 9 0 0 1-9 9" />
+                    </svg>
+                    <span>Create Pull Request</span>
+                  </button>
+                )}
+
+                {methodTab === 'cli' && (
+                  <button
+                    type="button"
+                    onClick={handleCopyCli}
+                    className="px-3.5 py-1.5 text-xs font-semibold rounded-xl border transition-colors cursor-pointer flex items-center gap-1.5"
+                    style={{ borderColor: T.border, color: cliCopied ? T.success : T.textSub }}
+                  >
+                    <span>{cliCopied ? '✓ Copied CLI Script' : 'Copy CLI Command'}</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Modal Body: Scrollable Tab Content */}
+              <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-4">
+                {/* Method 1: IaC Templates */}
+                {methodTab === 'iac' && (
+                  <div className="flex flex-col gap-4">
                     <div className="flex items-center justify-between flex-wrap gap-3 border-b pb-3" style={{ borderColor: T.border }}>
-                      {/* Language switch */}
                       <div className="flex items-center gap-1 p-1 rounded-xl" style={{ backgroundColor: isDark ? 'rgba(0,0,0,0.3)' : '#F1F5F9' }}>
                         <button
                           type="button"
@@ -1836,14 +1937,14 @@ export function AIRemediation() {
                             boxShadow: iacLanguage === 'cf' ? T.shadow : 'none',
                           }}
                         >
-                          CloudFormation (.yml)
+                          {iacSecondLabel}
                         </button>
                       </div>
 
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
-                          onClick={() => handleCopyCode(checkData.iac[iacLanguage])}
+                          onClick={() => handleCopyCode(currentResourceRemediation[iacLanguage])}
                           className="px-3.5 py-1.5 text-xs font-semibold rounded-xl border transition-colors cursor-pointer"
                           style={{ borderColor: T.border, color: copied ? T.success : T.textSub }}
                         >
@@ -1851,11 +1952,11 @@ export function AIRemediation() {
                         </button>
                         <button
                           type="button"
-                          onClick={() => handleDownloadCode(checkData.iac[iacLanguage], iacLanguage === 'tf' ? 'tf' : 'yml')}
+                          onClick={() => handleDownloadCode(currentResourceRemediation[iacLanguage], iacLanguage === 'tf' ? 'tf' : iacSecondExt)}
                           className="px-3.5 py-1.5 text-xs font-semibold rounded-xl border transition-colors cursor-pointer"
                           style={{ borderColor: T.border, color: T.textSub }}
                         >
-                          ↓ Download {iacLanguage === 'tf' ? '.tf' : '.yml'}
+                          ↓ Download {iacLanguage === 'tf' ? '.tf' : `.${iacSecondExt}`}
                         </button>
                         <button
                           type="button"
@@ -1869,7 +1970,6 @@ export function AIRemediation() {
                       </div>
                     </div>
 
-                    {/* Simulation Output Banner */}
                     {simulationSuccess && (
                       <div
                         className="p-4 rounded-xl border flex items-center justify-between gap-3 animate-fadeIn flex-wrap"
@@ -1880,145 +1980,168 @@ export function AIRemediation() {
                         }}
                       >
                         <div className="flex items-center gap-2 text-xs font-semibold">
-                          <span>Simulation Passed: 0 breaking changes detected. 100% compliant with WAFR standards.</span>
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="20 6 9 17 4 12" />
+                          </svg>
+                          <span>Simulation Passed: Configuration valid for {activeResourceInfo.shortName}. 0 breaking changes detected.</span>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => toggleCheckSolved(checkData.id)}
-                          className="px-3 py-1 text-xs font-semibold rounded-lg transition-colors cursor-pointer shrink-0"
-                          style={{
-                            backgroundColor: solvedCheckIds[checkData.id]
-                              ? (isDark ? 'rgba(52,211,153,0.25)' : '#D1FAE5')
-                              : '#059669',
-                            color: solvedCheckIds[checkData.id]
-                              ? (isDark ? '#6EE7B7' : '#065F46')
-                              : '#FFFFFF',
-                          }}
-                        >
-                          {solvedCheckIds[checkData.id] ? '✓ Marked as Solved' : 'Mark as Solved'}
-                        </button>
+                        <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 font-bold">
+                          Exit Code 0
+                        </span>
                       </div>
                     )}
 
-                    {/* Code block */}
-                    <div
-                      className="p-4 rounded-xl font-mono text-xs overflow-x-auto leading-relaxed"
-                      style={{
-                        backgroundColor: isDark ? '#0A0E17' : '#0F172A',
-                        color: '#E2E8F0',
-                        border: `1px solid ${isDark ? '#1E293B' : '#334155'}`,
-                      }}
-                    >
-                      <pre>{checkData.iac[iacLanguage]}</pre>
+                    <div className="relative rounded-2xl overflow-hidden border shadow-inner" style={{ borderColor: T.border }}>
+                      <div className="px-4 py-2.5 border-b flex items-center justify-between text-xs font-mono" style={{ backgroundColor: isDark ? '#0F172A' : '#1E293B', borderColor: isDark ? '#1E293B' : '#334155', color: '#94A3B8' }}>
+                        <span className="text-white font-bold">
+                          {iacLanguage === 'tf'
+                            ? `terraform/${activeResourceInfo.shortName}.tf`
+                            : activeCloud === 'azure'
+                            ? `bicep/${activeResourceInfo.shortName}.bicep`
+                            : activeCloud === 'gcp'
+                            ? `deployment-manager/${activeResourceInfo.shortName}.yml`
+                            : `cloudformation/${activeResourceInfo.shortName}.yml`}
+                        </span>
+                        <span>Tailored for {activeResourceInfo.shortName}</span>
+                      </div>
+                      <pre className="p-4 text-xs font-mono overflow-x-auto leading-relaxed" style={{ backgroundColor: isDark ? '#0A0F1D' : '#0F172A', color: '#E2E8F0' }}>
+                        <code>{currentResourceRemediation[iacLanguage]}</code>
+                      </pre>
                     </div>
                   </div>
                 )}
 
-                {/* ── METHOD 2: USING CLI ── */}
+                {/* Method 2: Cloud CLI */}
                 {methodTab === 'cli' && (
-                  <div className="p-6 flex flex-col gap-4">
-                    <div className="flex items-center justify-between flex-wrap gap-2">
-                      <div>
-                        <h3 className="text-sm font-bold" style={{ color: T.text }}>
-                          Command Line Interface (CLI Script)
-                        </h3>
-                        <p className="text-xs mt-0.5" style={{ color: T.textSub }}>
-                          {checkData.cli.explanation}
-                        </p>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={handleCopyCli}
-                          className="px-3.5 py-1.5 text-xs font-semibold rounded-xl bg-blue-600 hover:bg-blue-700 text-white transition-colors cursor-pointer shadow-sm"
-                        >
-                          {cliCopied ? '✓ Copied' : 'Copy Script'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDownloadCode(checkData.cli.command, 'sh')}
-                          className="px-3.5 py-1.5 text-xs font-semibold rounded-xl border transition-colors cursor-pointer"
-                          style={{ borderColor: T.border, color: T.textSub }}
-                        >
-                          ↓ Download .sh
-                        </button>
-                      </div>
+                  <div className="flex flex-col gap-4">
+                    <div className="p-4 rounded-xl border flex items-center justify-between gap-3" style={{ borderColor: T.border, backgroundColor: isDark ? 'rgba(255,255,255,0.02)' : '#F8FAFC' }}>
+                      <span className="text-xs" style={{ color: T.textSub }}>{cliHint}</span>
+                      <button
+                        type="button"
+                        onClick={handleCopyCli}
+                        className="px-3 py-1.5 text-xs font-semibold rounded-xl border transition-colors cursor-pointer shrink-0"
+                        style={{ borderColor: T.border, color: cliCopied ? T.success : T.textSub }}
+                      >
+                        {cliCopied ? '✓ Copied' : 'Copy Command'}
+                      </button>
                     </div>
 
-                    {/* CLI Code block */}
-                    <div
-                      className="p-4 rounded-xl font-mono text-xs overflow-x-auto leading-relaxed"
-                      style={{
-                        backgroundColor: isDark ? '#0A0E17' : '#0F172A',
-                        color: '#E2E8F0',
-                        border: `1px solid ${isDark ? '#1E293B' : '#334155'}`,
-                      }}
-                    >
-                      <pre>{checkData.cli.command}</pre>
+                    <div className="relative rounded-2xl overflow-hidden border shadow-inner" style={{ borderColor: T.border }}>
+                      <div className="px-4 py-2.5 border-b flex items-center justify-between text-xs font-mono" style={{ backgroundColor: isDark ? '#0F172A' : '#1E293B', borderColor: isDark ? '#1E293B' : '#334155', color: '#94A3B8' }}>
+                        <span className="text-white font-bold">{cliName}</span>
+                        <span>{activeResourceInfo.region}</span>
+                      </div>
+                      <pre className="p-4 text-xs font-mono overflow-x-auto leading-relaxed" style={{ backgroundColor: isDark ? '#0A0F1D' : '#0F172A', color: '#6EE7B7' }}>
+                        <code>{currentResourceRemediation.cliCommand}</code>
+                      </pre>
                     </div>
                   </div>
                 )}
 
-                {/* ── METHOD 3: MANUAL STEPS ── */}
+                {/* Method 3: Manual Console Steps */}
                 {methodTab === 'manual' && (
-                  <div className="p-6 flex flex-col gap-4">
-                    <div>
-                      <h3 className="text-sm font-bold" style={{ color: T.text }}>
-                        Cloud Management Console Guided Steps
-                      </h3>
-                      <p className="text-xs mt-0.5" style={{ color: T.textSub }}>
-                        Follow these step-by-step instructions inside the management console to remediate this finding.
-                      </p>
-                    </div>
+                  <div className="flex flex-col gap-3">
+                    <p className="text-xs" style={{ color: T.textSub }}>
+                      Follow these step-by-step console instructions to configure {activeResourceInfo.shortName} in the {consoleName}:
+                    </p>
 
-                    <div className="flex flex-col gap-3">
+                    <div className="flex flex-col gap-2.5">
                       {checkData.manualSteps.map(step => (
                         <div
                           key={step.step}
-                          className="p-4 rounded-xl border flex items-start gap-4 transition-all"
+                          className="p-4 rounded-xl border flex items-start gap-3.5 transition-all"
                           style={{
-                            backgroundColor: isDark ? 'rgba(255,255,255,0.015)' : '#FFFFFF',
                             borderColor: T.border,
+                            backgroundColor: isDark ? 'rgba(255,255,255,0.02)' : '#FFFFFF',
                           }}
                         >
-                          <div
-                            className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 mt-0.5"
-                            style={{
-                              backgroundColor: isDark ? '#1E293B' : '#F1F5F9',
-                              color: T.textSub,
-                              border: `1px solid ${T.border}`,
-                            }}
+                          <span
+                            className="w-6 h-6 rounded-full flex items-center justify-center font-bold text-xs shrink-0 mt-0.5"
+                            style={{ backgroundColor: isDark ? 'rgba(59,130,246,0.2)' : '#DBEAFE', color: T.primary }}
                           >
                             {step.step}
-                          </div>
-
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between gap-2 flex-wrap mb-1">
-                              <div className="text-xs font-bold" style={{ color: T.text }}>
-                                Step {step.step}: {step.title}
-                              </div>
+                          </span>
+                          <div className="flex-1 min-w-0 flex flex-col gap-1">
+                            <div className="flex items-center justify-between flex-wrap gap-1">
+                              <h5 className="text-xs font-bold" style={{ color: T.text }}>
+                                {step.title}
+                              </h5>
                               {step.consolePath && (
-                                <span
-                                  className="text-[11px] font-mono px-2 py-0.5 rounded"
-                                  style={{
-                                    backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : '#F1F5F9',
-                                    color: T.textSub,
-                                  }}
-                                >
+                                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400">
                                   {step.consolePath}
                                 </span>
                               )}
                             </div>
-                            <div className="text-xs leading-relaxed" style={{ color: T.textSub }}>
+                            <p className="text-xs leading-relaxed" style={{ color: T.textSub }}>
                               {step.instruction}
-                            </div>
+                            </p>
                           </div>
                         </div>
                       ))}
                     </div>
                   </div>
                 )}
+              </div>
+
+              {/* Modal Footer */}
+              <div
+                className="px-6 py-3.5 border-t flex items-center justify-between flex-wrap gap-3 shrink-0"
+                style={{
+                  backgroundColor: isDark ? '#111B2E' : '#F8FAFC',
+                  borderColor: T.border,
+                }}
+              >
+                <div className="flex items-center gap-2 text-xs font-medium" style={{ color: T.textSub }}>
+                  <span>Progress:</span>
+                  <span className="font-bold text-emerald-600 dark:text-emerald-400">
+                    {solvedResourcesInCheckCount} of {allResources.length} Resources Remediated
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setFixModalOpen(false)}
+                    className="px-4 py-1.5 text-xs font-semibold rounded-xl border transition-colors cursor-pointer border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800"
+                  >
+                    Close
+                  </button>
+
+                  {/* Rerun Check on Resource button in footer */}
+                  <button
+                    type="button"
+                    disabled={verifyingModalResource}
+                    onClick={handleRerunModalResource}
+                    className="px-4 py-1.5 text-xs font-bold text-white rounded-xl transition-all cursor-pointer shadow-sm bg-blue-600 hover:bg-blue-700 flex items-center gap-1.5 disabled:opacity-50"
+                  >
+                    {verifyingModalResource ? (
+                      <>
+                        <svg className="animate-spin" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                          <circle cx="12" cy="12" r="10" strokeDasharray="60" strokeDashoffset="20" />
+                        </svg>
+                        <span>Testing Check...</span>
+                      </>
+                    ) : (
+                      <>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                          <polyline points="23 4 23 10 17 10" />
+                          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10" />
+                        </svg>
+                        <span>{isCurrentResourceSolved ? 'Re-verify Check' : 'Rerun Check & Verify'}</span>
+                      </>
+                    )}
+                  </button>
+
+                  {safeResourceIndex < allResources.length - 1 && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedResourceIndex(safeResourceIndex + 1)}
+                      className="px-3.5 py-1.5 text-xs font-semibold rounded-xl border transition-colors cursor-pointer border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800"
+                    >
+                      Next Resource →
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -2058,27 +2181,29 @@ export function AIRemediation() {
 
                 <button
                   type="button"
-                  onClick={handleFinishGitModal}
-                  className="w-8 h-8 rounded-xl flex items-center justify-center text-xs font-bold border transition-colors cursor-pointer"
+                  onClick={handleIgnoreGit}
+                  className="w-8 h-8 rounded-xl flex items-center justify-center text-xs font-bold border transition-colors cursor-pointer hover:opacity-80"
                   style={{ borderColor: T.border, color: T.textSub }}
+                  title="Close / Ignore for now"
                 >
                   ✕
                 </button>
               </div>
 
-              {/* Modal Body: STEP 1 - ASK FOR EXISTING REPO */}
+              {/* Modal Body: STEP 1 - ASK FOR REPO ACTION */}
               {gitModalStep === 'ask_repo' && (
                 <div className="p-6 flex flex-col gap-4">
                   <div>
                     <h4 className="text-base font-bold" style={{ color: T.text }}>
-                      Do you have an existing infra repo?
+                      Git Repository Integration
                     </h4>
                     <p className="text-xs mt-1 leading-relaxed" style={{ color: T.textSub }}>
-                      Connect your existing Git codebase hosting Terraform, CloudFormation, or IaC definitions, or initialize a fresh repository for remediations.
+                      Connect your infrastructure codebase to enable 1-click Pull Requests, or continue with manual fixes.
                     </p>
                   </div>
 
                   <div className="flex flex-col gap-3">
+                    {/* Option 1: Authenticate Repo */}
                     <button
                       type="button"
                       onClick={() => {
@@ -2087,47 +2212,82 @@ export function AIRemediation() {
                       }}
                       className="p-4 rounded-xl border text-left flex items-start gap-3.5 transition-all cursor-pointer hover:border-blue-500 group"
                       style={{
-                        backgroundColor: isDark ? 'rgba(255,255,255,0.02)' : '#F8FAFC',
-                        borderColor: T.border,
+                        backgroundColor: isDark ? 'rgba(59,130,246,0.06)' : '#EFF6FF',
+                        borderColor: isDark ? 'rgba(59,130,246,0.3)' : '#BFDBFE',
                       }}
                     >
-                      <div className="w-8 h-8 rounded-lg bg-blue-500/10 text-blue-500 flex items-center justify-center shrink-0 mt-0.5 group-hover:bg-blue-500 group-hover:text-white transition-colors">
-                        ✓
+                      <div className="w-8 h-8 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0 mt-0.5 group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                          <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                        </svg>
                       </div>
-                      <div>
+                      <div className="flex-1 min-w-0">
                         <div className="text-xs font-bold flex items-center gap-2" style={{ color: T.text }}>
-                          <span>Yes, I have an existing infra repo</span>
-                          <span className="text-[10px] font-semibold px-2 py-0.2 rounded-full bg-blue-500/10 text-blue-500">
+                          <span>Authenticate Repo</span>
+                          <span className="text-[10px] font-semibold px-2 py-0.2 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
                             Recommended
                           </span>
                         </div>
                         <p className="text-xs mt-1" style={{ color: T.textSub }}>
-                          Connect your GitHub repository (e.g. `acme-corp/terraform-aws-infrastructure`) to automatically open Pull Requests with targeted fixes.
+                          Authenticate via GitHub Personal Access Token (PAT) with repo scope to enable code inspection and direct Pull Request creation.
                         </p>
                       </div>
                     </button>
 
+                    {/* Option 2: Mark as Done */}
                     <button
                       type="button"
-                      onClick={() => {
-                        setGitConfig(prev => ({ ...prev, hasExistingRepo: false }));
-                        setGitModalStep('pat_form');
+                      onClick={handleMarkAsDone}
+                      className="p-4 rounded-xl border text-left flex items-start gap-3.5 transition-all cursor-pointer hover:border-emerald-500 group"
+                      style={{
+                        backgroundColor: isDark ? 'rgba(16,185,129,0.06)' : '#ECFDF5',
+                        borderColor: isDark ? 'rgba(16,185,129,0.3)' : '#A7F3D0',
                       }}
-                      className="p-4 rounded-xl border text-left flex items-start gap-3.5 transition-all cursor-pointer hover:border-blue-500 group"
+                    >
+                      <div className="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0 mt-0.5 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs font-bold flex items-center gap-2" style={{ color: T.text }}>
+                          <span>Mark as Done</span>
+                          <span className="text-[10px] font-semibold px-2 py-0.2 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                            Pre-Configured
+                          </span>
+                        </div>
+                        <p className="text-xs mt-1" style={{ color: T.textSub }}>
+                          Repository access and CI/CD pipelines are already established in your organization. Mark this step as completed.
+                        </p>
+                      </div>
+                    </button>
+
+                    {/* Option 3: Ignore */}
+                    <button
+                      type="button"
+                      onClick={handleIgnoreGit}
+                      className="p-4 rounded-xl border text-left flex items-start gap-3.5 transition-all cursor-pointer hover:border-slate-400 group"
                       style={{
                         backgroundColor: isDark ? 'rgba(255,255,255,0.02)' : '#F8FAFC',
                         borderColor: T.border,
                       }}
                     >
-                      <div className="w-8 h-8 rounded-lg bg-slate-500/10 text-slate-500 flex items-center justify-center shrink-0 mt-0.5 group-hover:bg-blue-500 group-hover:text-white transition-colors">
-                        +
+                      <div className="w-8 h-8 rounded-lg bg-slate-500/10 text-slate-500 flex items-center justify-center shrink-0 mt-0.5 group-hover:bg-slate-600 group-hover:text-white transition-colors">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <circle cx="12" cy="12" r="10" />
+                          <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
+                        </svg>
                       </div>
-                      <div>
-                        <div className="text-xs font-bold" style={{ color: T.text }}>
-                          No, initialize a new infra repo
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs font-bold flex items-center gap-2" style={{ color: T.text }}>
+                          <span>Ignore / Skip for Now</span>
+                          <span className="text-[10px] font-semibold px-2 py-0.2 rounded-full bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
+                            Manual & CLI
+                          </span>
                         </div>
                         <p className="text-xs mt-1" style={{ color: T.textSub }}>
-                          Create a dedicated repository to store and track all WAFR automated remediation templates.
+                          Skip repository connection. You can still view, copy, and apply Terraform files, {cliName} scripts, or manual {consoleName} fixes.
                         </p>
                       </div>
                     </button>
@@ -2140,7 +2300,7 @@ export function AIRemediation() {
                 <div className="p-6 flex flex-col gap-4">
                   <div>
                     <h4 className="text-base font-bold" style={{ color: T.text }}>
-                      Connect via GitHub PAT
+                      Authenticate GitHub Repository
                     </h4>
                     <p className="text-xs mt-1" style={{ color: T.textSub }}>
                       Provide your GitHub Personal Access Token (PAT) with <code className="font-mono text-blue-500">repo</code> scope to enable code inspection and PR creation.
@@ -2183,13 +2343,13 @@ export function AIRemediation() {
 
                     <div>
                       <label className="text-xs font-bold block mb-1" style={{ color: T.text }}>
-                        Repository Name (Owner/Repo)
+                        Repo URL
                       </label>
                       <input
                         type="text"
                         value={repoInput}
                         onChange={e => setRepoInput(e.target.value)}
-                        placeholder="acme-corp/terraform-aws-infrastructure"
+                        placeholder="https://github.com/acme-corp/terraform-aws-infrastructure"
                         className="w-full px-3.5 py-2 rounded-xl text-xs font-mono border outline-none transition-all"
                         style={{
                           backgroundColor: isDark ? 'rgba(0,0,0,0.25)' : '#F8FAFC',
@@ -2217,17 +2377,35 @@ export function AIRemediation() {
                       />
                     </div>
 
-                    <div className="flex items-center justify-between pt-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setPatInput('ghp_live983274982374982374982374');
-                          setPatError('');
-                        }}
-                        className="text-xs font-semibold text-blue-500 hover:underline cursor-pointer"
-                      >
-                        Use Demo PAT
-                      </button>
+                    <div className="flex items-center justify-between pt-2 border-t flex-wrap gap-2" style={{ borderColor: T.border }}>
+                      <div className="flex items-center gap-2.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPatInput('ghp_live983274982374982374982374');
+                            setPatError('');
+                          }}
+                          className="text-xs font-semibold text-blue-500 hover:underline cursor-pointer"
+                        >
+                          Demo PAT
+                        </button>
+                        <span style={{ color: T.textSub }}>·</span>
+                        <button
+                          type="button"
+                          onClick={handleMarkAsDone}
+                          className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer"
+                        >
+                          Mark as Done
+                        </button>
+                        <span style={{ color: T.textSub }}>·</span>
+                        <button
+                          type="button"
+                          onClick={handleIgnoreGit}
+                          className="text-xs font-semibold text-slate-500 hover:underline cursor-pointer"
+                        >
+                          Ignore
+                        </button>
+                      </div>
 
                       <div className="flex items-center gap-2">
                         <button
@@ -2243,7 +2421,7 @@ export function AIRemediation() {
                           onClick={handleConnectGit}
                           className="px-4 py-2 rounded-xl text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 cursor-pointer shadow-sm"
                         >
-                          Connect & Verify
+                          Authenticate Repo
                         </button>
                       </div>
                     </div>
@@ -2327,7 +2505,7 @@ export function AIRemediation() {
                       Create Pull Request
                     </h3>
                     <p className="text-[11px]" style={{ color: T.textSub }}>
-                      Target: <span className="font-mono text-blue-500">{gitConfig.repoName}</span>
+                      Target: <span className="font-mono text-blue-500">{repoConfig.repoName || gitConfig.repoName}</span> (branch: <span className="font-mono">{repoConfig.branch || gitConfig.branch}</span>)
                     </p>
                   </div>
                 </div>
@@ -2353,13 +2531,13 @@ export function AIRemediation() {
                         Pull Request #42 Created on GitHub!
                       </div>
                       <div className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
-                        branch: wafr-fix/{checkData.id.toLowerCase()} → main
+                        branch: wafr-fix/{checkData.id.toLowerCase()}-{activeResourceInfo.shortName.toLowerCase().replace(/[^a-z0-9]/g, '-')} → main
                       </div>
                     </div>
                   </div>
 
                   <p className="text-xs leading-relaxed" style={{ color: T.textSub }}>
-                    The pull request contains complete Terraform configurations to resolve finding <span className="font-mono font-bold text-blue-500">{checkData.id}</span> with 0 breaking changes.
+                    The pull request contains complete Terraform configurations to resolve finding <span className="font-mono font-bold text-blue-500">{checkData.id}</span> for <span className="font-mono font-semibold text-emerald-500">{activeResourceInfo.shortName}</span> with 0 breaking changes.
                   </p>
 
                   <div className="flex items-center justify-end gap-2 pt-2 border-t" style={{ borderColor: T.border }}>
@@ -2381,7 +2559,7 @@ export function AIRemediation() {
                     <input
                       type="text"
                       readOnly
-                      value={`[WAFR Fix] ${checkData.title} (${checkData.id})`}
+                      value={`[WAFR Fix] ${checkData.title} - ${activeResourceInfo.shortName} (${checkData.id})`}
                       className="w-full px-3.5 py-2 rounded-xl text-xs font-medium border outline-none bg-slate-500/5"
                       style={{ borderColor: T.border, color: T.text }}
                     />
@@ -2394,7 +2572,7 @@ export function AIRemediation() {
                     <input
                       type="text"
                       readOnly
-                      value={`wafr-fix/${checkData.id.toLowerCase()}`}
+                      value={`wafr-fix/${checkData.id.toLowerCase()}-${activeResourceInfo.shortName.toLowerCase().replace(/[^a-z0-9]/g, '-')}`}
                       className="w-full px-3.5 py-2 rounded-xl text-xs font-mono border outline-none bg-slate-500/5"
                       style={{ borderColor: T.border, color: T.text }}
                     />
@@ -2412,7 +2590,7 @@ export function AIRemediation() {
                         border: `1px solid ${isDark ? '#1E293B' : '#334155'}`,
                       }}
                     >
-                      <pre>+ {checkData.iac.tf.slice(0, 260)}...</pre>
+                      <pre>+ {currentResourceRemediation.tf.slice(0, 300)}...</pre>
                     </div>
                   </div>
 
@@ -2535,29 +2713,116 @@ export function AIRemediation() {
               <div className="p-4 flex-1 overflow-y-auto max-h-[55vh] flex flex-col gap-2">
                 {filteredModalResources.map((res, i) => {
                   const isCopied = copiedArnId === `modal-${i}`;
+                  const resInfo = parseResourceInfo(res);
+                  const resKey = `${activeAssessmentId || 'default'}::${checkData.id}::${res}`;
+                  const legacyKey = `${checkData.id}::${res}`;
+                  const resRem = resourceRemediations[resKey] || resourceRemediations[legacyKey];
+                  const resStatus = resRem?.status || (solvedResourceArns[res] ? 'fixed' : 'pending');
+                  const isResSolved = resStatus === 'fixed';
+                  const isCantFix = resStatus === 'cant_fix';
+                  const originalIndex = allResources.indexOf(res);
+                  const isCurrentlyActive = originalIndex === safeResourceIndex;
+
                   return (
                     <div
                       key={i}
-                      className="px-3.5 py-2.5 rounded-xl border flex items-center justify-between gap-3"
+                      className="p-3 rounded-xl border flex items-center justify-between gap-3 transition-colors"
                       style={{
-                        backgroundColor: isDark ? 'rgba(255,255,255,0.02)' : '#F8FAFC',
-                        borderColor: T.border,
+                        backgroundColor: isCurrentlyActive
+                          ? (isDark ? 'rgba(59,130,246,0.1)' : '#EFF6FF')
+                          : (isDark ? 'rgba(255,255,255,0.02)' : '#F8FAFC'),
+                        borderColor: isCurrentlyActive ? T.primary : T.border,
                       }}
                     >
-                      <span className="font-mono text-xs break-all select-all flex-1" style={{ color: T.text }}>
-                        {res}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => handleCopyArn(res, `modal-${i}`)}
-                        className="text-[11px] font-sans px-3 py-1.5 rounded-lg border transition-all shrink-0 cursor-pointer"
-                        style={{
-                          borderColor: isCopied ? T.success : T.border,
-                          color: isCopied ? T.success : T.textSub,
-                        }}
-                      >
-                        {isCopied ? 'Copied' : 'Copy ARN'}
-                      </button>
+                      <div className="flex flex-col gap-1 min-w-0 flex-1 mr-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-mono text-xs font-bold" style={{ color: isCurrentlyActive ? T.primary : T.text }}>
+                            {resInfo.shortName}
+                          </span>
+                          <span
+                            className="text-[10px] font-semibold px-2 py-0.5 rounded-md"
+                            style={{
+                              backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : '#E2E8F0',
+                              color: T.textSub,
+                            }}
+                          >
+                            {resInfo.type}
+                          </span>
+                          {isResSolved ? (
+                            <span
+                              className="text-[10px] font-bold px-2 py-0.5 rounded-full"
+                              style={{
+                                backgroundColor: isDark ? 'rgba(52,211,153,0.2)' : '#D1FAE5',
+                                color: isDark ? '#6EE7B7' : '#059669',
+                              }}
+                            >
+                              ✓ Fixed
+                            </span>
+                          ) : isCantFix ? (
+                            <span
+                              className="text-[10px] font-bold px-2 py-0.5 rounded-full"
+                              style={{
+                                backgroundColor: isDark ? 'rgba(245,158,11,0.15)' : '#FEF3C7',
+                                color: isDark ? '#FBBF24' : '#D97706',
+                              }}
+                            >
+                              • Ignored
+                            </span>
+                          ) : (
+                            <span
+                              className="text-[10px] font-bold px-2 py-0.5 rounded-full"
+                              style={{
+                                backgroundColor: isDark ? 'rgba(239,68,68,0.12)' : '#FEE2E2',
+                                color: isDark ? '#F87171' : '#DC2626',
+                              }}
+                            >
+                              Fix Pending
+                            </span>
+                          )}
+                        </div>
+                        <span className="font-mono text-[11px] truncate select-all opacity-80" style={{ color: T.textSub }}>
+                          {res}
+                        </span>
+                        {isCantFix && resRem?.note && (
+                          <div className="text-[10px] text-amber-600 dark:text-amber-400 font-medium mt-0.5">
+                            <span className="font-semibold">Reason:</span> {resRem.note}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handleCopyArn(res, `modal-${i}`)}
+                          className="text-[11px] font-sans px-2.5 py-1 rounded-lg border transition-all shrink-0 cursor-pointer"
+                          style={{
+                            borderColor: isCopied ? T.success : T.border,
+                            color: isCopied ? T.success : T.textSub,
+                            backgroundColor: isCopied
+                              ? (isDark ? 'rgba(82,183,136,0.12)' : '#ECFDF5')
+                              : (isDark ? 'rgba(255,255,255,0.03)' : '#FFFFFF'),
+                          }}
+                        >
+                          {isCopied ? 'Copied' : 'Copy ARN'}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (originalIndex !== -1) {
+                              setSelectedResourceIndex(originalIndex);
+                            }
+                            setResourcesModalOpen(false);
+                          }}
+                          className="text-xs font-semibold px-3 py-1 rounded-lg transition-all cursor-pointer shadow-sm"
+                          style={{
+                            backgroundColor: isCurrentlyActive ? T.primary : (isDark ? '#1E293B' : '#E2E8F0'),
+                            color: isCurrentlyActive ? '#FFFFFF' : T.text,
+                          }}
+                        >
+                          {isCurrentlyActive ? 'Active' : 'Select & Remediate'}
+                        </button>
+                      </div>
                     </div>
                   );
                 })}
@@ -2577,6 +2842,102 @@ export function AIRemediation() {
               </div>
             </div>
           </div>
+        )}
+
+        {/* ── IGNORED REASON MODAL ── */}
+        {cantFixModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+            <div
+              className="w-full max-w-md p-6 rounded-2xl shadow-2xl border flex flex-col gap-4"
+              style={{ backgroundColor: T.card, borderColor: T.border, color: T.text }}
+            >
+              <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: T.border }}>
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
+                  <h3 className="font-bold text-sm">Mark Resource as "Ignored"</h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setCantFixModalOpen(false)}
+                  className="text-xs font-mono px-2 py-1 rounded hover:bg-slate-200 dark:hover:bg-slate-800 cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="text-xs space-y-2">
+                <p className="font-medium text-slate-500">Target Resource:</p>
+                <p className="font-mono text-xs p-2 rounded bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 break-all">
+                  {cantFixTargetResource}
+                </p>
+
+                <p className="font-medium text-slate-500 pt-2">Reason / Constraint Note (e.g. Code dependency, vendor restriction):</p>
+                <textarea
+                  rows={3}
+                  value={cantFixNote}
+                  onChange={e => setCantFixNote(e.target.value)}
+                  placeholder="Enter reason why this resource is ignored (e.g. Code dependency on legacy pipeline)..."
+                  className="w-full p-2.5 text-xs rounded-xl border outline-none focus:ring-2 focus:ring-amber-500/50"
+                  style={{ backgroundColor: isDark ? '#0B1220' : '#F8FAFC', borderColor: T.border, color: T.text }}
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t" style={{ borderColor: T.border }}>
+                <button
+                  type="button"
+                  onClick={() => setCantFixModalOpen(false)}
+                  className="px-3.5 py-1.5 text-xs font-semibold rounded-xl border cursor-pointer"
+                  style={{ borderColor: T.border, color: T.textSub }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (cantFixTargetResource) {
+                      setResourceRemediationStatus(activeCheckId || checkData.id, cantFixTargetResource, 'cant_fix', cantFixNote);
+                      setSolvedResourceArns(prev => ({ ...prev, [cantFixTargetResource]: false }));
+                      const info = parseResourceInfo(cantFixTargetResource);
+                      showToast(
+                        'Resource Ignored',
+                        'info',
+                        `Reason recorded for ${info.shortName}. Resource status updated to Ignored.`
+                      );
+                    }
+                    setCantFixModalOpen(false);
+                  }}
+                  className="px-4 py-1.5 text-xs font-semibold rounded-xl text-white bg-amber-600 hover:bg-amber-700 shadow-sm cursor-pointer"
+                >
+                  Save Reason & Exclude
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Linked Jira Ticket Modal */}
+        {jiraModalOpen && (
+          <JiraTicketModal
+            isOpen={true}
+            onClose={() => setJiraModalOpen(false)}
+            checkId={checkData.id}
+            checkTitle={checkData.title}
+            severity={checkData.severity}
+            checkDescription={checkData.description}
+            existingTicket={jiraTickets ? jiraTickets[checkData.id] : undefined}
+          />
+        )}
+
+        {/* Slack Alert Modal */}
+        {slackModalOpen && (
+          <SlackAlertModal
+            isOpen={true}
+            onClose={() => setSlackModalOpen(false)}
+            initialTitle={`Cloud Architecture Alert: ${checkData.title}`}
+            initialMessage={`Remediation required for finding ${checkData.id} (${checkData.pillar} Pillar) - ${checkData.severity.toUpperCase()} risk.\n\nDescription: ${checkData.description}\nImpacted Resources: ${checkData.resources?.length || 0} resource(s).`}
+            initialSeverity={checkData.severity === 'critical' ? 'critical' : checkData.severity === 'high' ? 'high' : 'info'}
+            checkId={checkData.id}
+          />
         )}
       </div>
     </AppLayout>

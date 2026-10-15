@@ -1,0 +1,2 @@
+id,org_id,service_type,is_connected,config,last_tested_at,created_at,updated_at
+int_01,org_01,slack,true,{},2026-10-01,2026-10-01,2026-10-01

@@ -1,0 +1,2 @@
+id,assessment_id,artifact_type,file_name,mongo_document_id,file_size_bytes,mime_type,generated_at
+art_01,ass_01,pdf_executive,WAFR_Exec_Report.pdf,mongo_doc_pdf123,102400,application/pdf,2026-10-01

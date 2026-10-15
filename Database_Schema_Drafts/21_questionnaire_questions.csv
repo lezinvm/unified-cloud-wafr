@@ -1,0 +1,2 @@
+id,scope,category,question,description,why_it_matters,how_to_verify,audit_evidence,framework_ref
+ORG-01,organization,Security,Do you enforce MFA for all users?,Verify MFA policy is active for all human users.,Reduces risk of compromised credentials.,Review IAM settings in console.,Screenshot of IAM password policy enforcing MFA.,SOC2 CC6.1

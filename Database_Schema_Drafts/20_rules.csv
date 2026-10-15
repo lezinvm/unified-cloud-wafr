@@ -1,0 +1,2 @@
+id,best_practice_id,pillar_id,title,description,rationale,severity,effort,est_time,cloud_provider
+SEC-011,SEC-01,security,Ensure MFA is enabled for the root account,Root account must have hardware or virtual MFA enabled.,Prevents unauthorized access to highly privileged credentials.,critical,Low,15m,aws

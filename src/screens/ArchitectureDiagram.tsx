@@ -336,42 +336,47 @@ export function ArchitectureDiagram() {
                     <span
                       className="text-xs font-mono font-bold px-2.5 py-0.5 rounded-lg border"
                       style={{
-                        backgroundColor: selectedNode.isFailed ? (isDark ? 'rgba(225,29,72,0.2)' : '#FFE4E6') : (isDark ? 'rgba(255,255,255,0.08)' : '#E2E8F0'),
-                        borderColor: selectedNode.isFailed ? '#FDA4AF' : T.border,
-                        color: selectedNode.isFailed ? '#E11D48' : T.text,
+                        backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : '#F1F5F9',
+                        borderColor: isDark ? '#334155' : '#CBD5E1',
+                        color: isDark ? '#F1F5F9' : '#0F172A',
                       }}
                     >
                       {TYPE_LABEL[selectedNode.type] || selectedNode.type}
                     </span>
 
                     {selectedNode.isFailed ? (
-                      <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30">
-                        Failed Check
+                      <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400 border border-rose-200 dark:border-rose-900/60 flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                        Non-Compliant
                       </span>
                     ) : (
-                      <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
-                        Healthy
+                      <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-900/60 flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                        Compliant
                       </span>
                     )}
                   </div>
 
-                  <h3 className="font-semibold text-base leading-tight" style={{ color: T.text }}>
+                  <h3 className="font-bold text-base leading-tight mt-1" style={{ color: T.text }}>
                     {selectedNode.label}
                   </h3>
                 </div>
 
                 {/* Status Notice */}
                 {selectedNode.isFailed ? (
-                  <div className="p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-xs text-rose-700 dark:text-rose-300 flex flex-col gap-1">
-                    <div className="font-semibold flex items-center gap-1.5 text-rose-800 dark:text-rose-200">
-                      <span>Remediation Required</span>
+                  <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-800/60 shadow-2xs text-xs flex flex-col gap-2">
+                    <div className="flex items-center justify-between gap-1.5">
+                      <div className="font-bold flex items-center gap-1.5 text-slate-900 dark:text-white">
+                        <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0" />
+                        <span>Remediation Required</span>
+                      </div>
                       {selectedNode.findingId && (
-                        <span className="font-mono text-[10px] px-1.5 py-0.2 rounded bg-rose-600 text-white">
+                        <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-slate-900 dark:bg-slate-700 text-white font-bold">
                           {selectedNode.findingId}
                         </span>
                       )}
                     </div>
-                    <div className="leading-relaxed">
+                    <div className="leading-relaxed text-slate-600 dark:text-slate-300 font-normal">
                       {selectedNode.detail}
                     </div>
                   </div>

@@ -1,0 +1,2041 @@
+{
+  "pillars": [
+    {
+      "id": "reliability",
+      "label": "Reliability",
+      "short": "R",
+      "score": 88,
+      "color": "#3B82F6",
+      "bestPractices": [
+        {
+          "id": "REL-01",
+          "title": "How do you design your workload service architecture?",
+          "description": "Adopt distributed service architectures and loosely coupled components to withstand component degradation.",
+          "status": "pass",
+          "checks": [
+            {
+              "id": "REL-CHK-101",
+              "title": "ALB cross-zone load balancing enabled across all targets",
+              "description": "Ensures even traffic distribution across multiple Availability Zones to prevent target overload.",
+              "severity": "low",
+              "status": "pass"
+            },
+            {
+              "id": "REL-CHK-102",
+              "title": "Multi-AZ redundancy enabled for production RDS & Aurora clusters",
+              "description": "Automates synchronous standby replication for rapid failover during AZ outages.",
+              "severity": "high",
+              "status": "pass"
+            },
+            {
+              "id": "REL-CHK-103",
+              "title": "Route 53 latency-based DNS routing configured for failover",
+              "description": "Routes end users to the healthiest and lowest-latency region automatically.",
+              "severity": "medium",
+              "status": "pass"
+            }
+          ]
+        },
+        {
+          "id": "REL-02",
+          "title": "How do you monitor workload resources to prevent degradation?",
+          "description": "Implement real-time health checks, metrics, and automated alerts on all ingress and compute paths.",
+          "status": "fail",
+          "checks": [
+            {
+              "id": "REL-019",
+              "title": "ALB target group missing active health check configuration",
+              "description": "Target groups without active health checks will route live traffic to unhealthy or terminated instances.",
+              "severity": "high",
+              "status": "fail",
+              "effort": "Low"
+            },
+            {
+              "id": "REL-CHK-202",
+              "title": "CloudWatch alarms configured for CPU, memory, and disk IOPS thresholds",
+              "description": "Sends automated P1/P2 paging notifications when utilization spikes beyond 80%.",
+              "severity": "medium",
+              "status": "pass"
+            },
+            {
+              "id": "REL-CHK-203",
+              "title": "Automated synthetic canary monitoring on critical API endpoints",
+              "description": "Continuously validates login and checkout user journeys every 60 seconds.",
+              "severity": "low",
+              "status": "pass"
+            }
+          ]
+        },
+        {
+          "id": "REL-03",
+          "title": "How do you design distributed systems to mitigate cascading failures?",
+          "description": "Use queues, throttling, dead-letter queues, and graceful degradation for resilient messaging.",
+          "status": "fail",
+          "checks": [
+            {
+              "id": "REL-CHK-301",
+              "title": "SQS Dead Letter Queue (DLQ) missing for asynchronous order processing queue",
+              "description": "Poison-pill messages can stall consumer workers indefinitely without a configured dead-letter queue.",
+              "severity": "medium",
+              "status": "fail",
+              "effort": "Medium"
+            },
+            {
+              "id": "REL-CHK-302",
+              "title": "Exponential backoff and retry jitter implemented in microservice clients",
+              "description": "Prevents thundering herd problems when downstream services recover from blips.",
+              "severity": "low",
+              "status": "pass"
+            }
+          ]
+        },
+        {
+          "id": "REL-04",
+          "title": "How do you plan for disaster recovery (DR)?",
+          "description": "Establish automated backups, cross-region replication, and validated recovery objectives.",
+          "status": "pass",
+          "checks": [
+            {
+              "id": "REL-CHK-401",
+              "title": "Cross-region automated snapshot copying configured for PostgreSQL databases",
+              "description": "Preserves daily incremental backups in a secondary geographic region.",
+              "severity": "high",
+              "status": "pass"
+            },
+            {
+              "id": "REL-CHK-402",
+              "title": "S3 Cross-Region Replication (CRR) active with versioning for critical storage",
+              "description": "Protects critical business documents against regional storage partition failures.",
+              "severity": "medium",
+              "status": "pass"
+            },
+            {
+              "id": "REL-CHK-403",
+              "title": "Documented Recovery Time Objective (RTO < 1h) and RPO (< 15m) validation",
+              "description": "Regular automated drills verify restore times against business SLAs.",
+              "severity": "low",
+              "status": "pass"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "security",
+      "label": "Security",
+      "short": "S",
+      "score": 72,
+      "color": "#FB7185",
+      "bestPractices": [
+        {
+          "id": "SEC-01",
+          "title": "How do you manage identities and permissions for people and machines?",
+          "description": "Apply principle of least privilege, enforce multi-factor authentication, and rotate machine credentials.",
+          "status": "fail",
+          "checks": [
+            {
+              "id": "SEC-047",
+              "title": "IAM role with wildcard resource permission (*) on S3 and DynamoDB",
+              "description": "Production worker role grants overly permissive Action: * on sensitive data stores.",
+              "severity": "critical",
+              "status": "fail",
+              "effort": "Low"
+            },
+            {
+              "id": "SEC-CHK-102",
+              "title": "IAM credentials and access keys unused for 90+ days deactivated",
+              "description": "Stale access keys pose an unauthorized credential harvesting vector.",
+              "severity": "medium",
+              "status": "fail",
+              "effort": "Low"
+            },
+            {
+              "id": "SEC-CHK-103",
+              "title": "MFA enforced for all console and IAM administrative users",
+              "description": "Hardware or TOTP virtual MFA is mandated on all privileged login sessions.",
+              "severity": "high",
+              "status": "pass"
+            },
+            {
+              "id": "SEC-CHK-104",
+              "title": "Root account access keys deleted and hardware MFA enabled",
+              "description": "Root credentials are locked in a vault with no active API keys present.",
+              "severity": "critical",
+              "status": "pass"
+            }
+          ]
+        },
+        {
+          "id": "SEC-02",
+          "title": "How do you protect network boundaries and traffic?",
+          "description": "Layer network perimeters, restrict ingress rules, and inspect inbound traffic via WAF.",
+          "status": "fail",
+          "checks": [
+            {
+              "id": "SEC-061",
+              "title": "Security group allows open ingress 0.0.0.0/0 on port 22 (SSH)",
+              "description": "Public bastion security group exposes SSH to the global internet without VPN restriction.",
+              "severity": "high",
+              "status": "fail",
+              "effort": "Medium"
+            },
+            {
+              "id": "SEC-CHK-202",
+              "title": "AWS WAF attached to public Application Load Balancers",
+              "description": "Inspects web traffic with AWS managed rule sets against SQLi and XSS exploits.",
+              "severity": "high",
+              "status": "pass"
+            },
+            {
+              "id": "SEC-CHK-203",
+              "title": "VPC Flow Logs enabled and delivered to centralized S3 security bucket",
+              "description": "Captures IP traffic metadata for continuous forensic analysis.",
+              "severity": "medium",
+              "status": "pass"
+            }
+          ]
+        },
+        {
+          "id": "SEC-03",
+          "title": "How do you classify and protect data at rest and in transit?",
+          "description": "Enforce ubiquitous cryptographic protection, KMS key rotation, and strict transport layer security.",
+          "status": "fail",
+          "checks": [
+            {
+              "id": "SEC-024",
+              "title": "S3 bucket missing server access logging and object lock protection",
+              "description": "Audit trails and immutability are disabled on customer telemetry storage.",
+              "severity": "high",
+              "status": "fail",
+              "effort": "Low"
+            },
+            {
+              "id": "SEC-CHK-302",
+              "title": "Default EBS volume encryption enabled using AWS KMS Customer Managed Keys",
+              "description": "All newly provisioned block volumes are encrypted at rest with CMK envelope keys.",
+              "severity": "high",
+              "status": "pass"
+            },
+            {
+              "id": "SEC-CHK-303",
+              "title": "TLS 1.3 enforced on CloudFront distributions and ALB listeners",
+              "description": "Modern cipher suites are enforced with SSLv3 and TLS 1.0/1.1 disabled.",
+              "severity": "high",
+              "status": "pass"
+            }
+          ]
+        },
+        {
+          "id": "SEC-04",
+          "title": "How do you detect and investigate security events?",
+          "description": "Aggregate audit trails, enable continuous threat detection, and automate incident dispatch.",
+          "status": "fail",
+          "checks": [
+            {
+              "id": "SEC-033",
+              "title": "AWS CloudTrail multi-region logging not enabled in secondary active regions",
+              "description": "API calls in us-west-2 and eu-west-1 are not captured in the master audit trail.",
+              "severity": "medium",
+              "status": "fail",
+              "effort": "Low"
+            },
+            {
+              "id": "SEC-CHK-402",
+              "title": "Amazon GuardDuty threat detection enabled across all active regions",
+              "description": "Uses machine learning to identify anomalous DNS queries and unauthorized IAM activity.",
+              "severity": "high",
+              "status": "pass"
+            },
+            {
+              "id": "SEC-CHK-403",
+              "title": "AWS Security Hub standards (CIS Benchmark & AWS Foundational) activated",
+              "description": "Aggregates security findings across all organizational accounts.",
+              "severity": "medium",
+              "status": "pass"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "cost",
+      "label": "Cost Optimization",
+      "short": "C",
+      "score": 91,
+      "color": "#34D399",
+      "bestPractices": [
+        {
+          "id": "COST-01",
+          "title": "How do you de-provision unneeded resources and avoid waste?",
+          "description": "Audit idle storage, unattached elastic IPs, and orphaned snapshots on a recurring schedule.",
+          "status": "fail",
+          "checks": [
+            {
+              "id": "COST-008",
+              "title": "14 unattached EBS volumes incurring idle monthly charges ($342/mo)",
+              "description": "Detached volumes left over from terminated EC2 instances continue billing at provisioned rates.",
+              "severity": "medium",
+              "status": "fail",
+              "effort": "Low"
+            },
+            {
+              "id": "COST-CHK-102",
+              "title": "Idle Elastic IP addresses not attached to running instances released",
+              "description": "Unallocated public IPv4 addresses have been released to avoid hourly idle surcharges.",
+              "severity": "low",
+              "status": "pass"
+            },
+            {
+              "id": "COST-CHK-103",
+              "title": "Automated lifecycle cleanup for outdated EBS snapshots older than 90 days",
+              "description": "Snapshots are pruned according to data governance retention rules.",
+              "severity": "low",
+              "status": "pass"
+            }
+          ]
+        },
+        {
+          "id": "COST-02",
+          "title": "How do you evaluate cost when selecting and rightsizing services?",
+          "description": "Leverage modern tiering, ARM64 architecture, and dynamic autoscaling to minimize baseline spend.",
+          "status": "pass",
+          "checks": [
+            {
+              "id": "COST-CHK-201",
+              "title": "S3 Lifecycle transition policies active for infrequent access & Glacier",
+              "description": "Objects older than 30 days automatically move to Glacier Instant Retrieval.",
+              "severity": "medium",
+              "status": "pass"
+            },
+            {
+              "id": "COST-CHK-202",
+              "title": "Graviton3 (ARM64) instance families evaluated and deployed for container workloads",
+              "description": "Delivers up to 25% better compute price-performance over comparable x86 instances.",
+              "severity": "low",
+              "status": "pass"
+            },
+            {
+              "id": "COST-CHK-203",
+              "title": "Auto-scaling dynamic scaling policies tuned to match real-time traffic demand",
+              "description": "Target tracking policies scale down compute capacity during off-peak hours.",
+              "severity": "high",
+              "status": "pass"
+            }
+          ]
+        },
+        {
+          "id": "COST-03",
+          "title": "How do you manage pricing models and commitments?",
+          "description": "Model workload baseline utilization and apply Savings Plans and Reserved Instances.",
+          "status": "fail",
+          "checks": [
+            {
+              "id": "COST-CHK-301",
+              "title": "Compute Savings Plans coverage is at 42% (recommended minimum: 70%)",
+              "description": "On-Demand compute spend can be optimized by extending 1-year No Upfront Compute Savings Plans.",
+              "severity": "medium",
+              "status": "fail",
+              "effort": "Low"
+            },
+            {
+              "id": "COST-CHK-302",
+              "title": "AWS Cost Anomaly Detection monitors daily spend anomalies with Slack alerts",
+              "description": "Automated machine learning identifies unexpected spend spikes within 24 hours.",
+              "severity": "low",
+              "status": "pass"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "operational-excellence",
+      "label": "Operational Excellence",
+      "short": "O",
+      "score": 82,
+      "color": "#FBBF24",
+      "bestPractices": [
+        {
+          "id": "OPS-01",
+          "title": "How do you understand workload health and telemetry?",
+          "description": "Define telemetry standards, centralized log aggregation, and automated recovery procedures.",
+          "status": "fail",
+          "checks": [
+            {
+              "id": "OPS-014",
+              "title": "No automated backup retention policy configured for Amazon RDS instances",
+              "description": "Backup window and automated snapshot retention are not enforced via AWS Backup policy.",
+              "severity": "medium",
+              "status": "fail",
+              "effort": "Medium"
+            },
+            {
+              "id": "OPS-CHK-102",
+              "title": "Structured JSON logging enabled across all backend microservices",
+              "description": "Standardized schemas enable rapid query parsing in OpenSearch and CloudWatch Insights.",
+              "severity": "low",
+              "status": "pass"
+            },
+            {
+              "id": "OPS-CHK-103",
+              "title": "OpenTelemetry distributed tracing integrated across API gateways",
+              "description": "Traces request journeys end-to-end through message queues and microservices.",
+              "severity": "low",
+              "status": "pass"
+            }
+          ]
+        },
+        {
+          "id": "OPS-02",
+          "title": "How do you reduce deployment friction and operational risk?",
+          "description": "Use Infrastructure as Code, CI/CD pipelines, and automated rollback strategies.",
+          "status": "pass",
+          "checks": [
+            {
+              "id": "OPS-CHK-201",
+              "title": "CI/CD deployment pipelines require automated pre-merge testing & linting",
+              "description": "Prevents defective build artifacts from reaching production environments.",
+              "severity": "medium",
+              "status": "pass"
+            },
+            {
+              "id": "OPS-CHK-202",
+              "title": "Blue/Green canary deployment strategy enabled on Amazon ECS Fargate services",
+              "description": "Routes 10% canary traffic before committing 100% of live workload traffic.",
+              "severity": "high",
+              "status": "pass"
+            },
+            {
+              "id": "OPS-CHK-203",
+              "title": "Infrastructure defined entirely via version-controlled Terraform modules",
+              "description": "No manual console modifications are permitted in production VPCs.",
+              "severity": "high",
+              "status": "pass"
+            }
+          ]
+        },
+        {
+          "id": "OPS-03",
+          "title": "How do you evolve operations and respond to incidents?",
+          "description": "Maintain actionable runbooks, automate post-mortems, and test incident escalation paths.",
+          "status": "fail",
+          "checks": [
+            {
+              "id": "OPS-CHK-301",
+              "title": "Incident runbooks not linked to critical CloudWatch alarm notifications",
+              "description": "On-call engineers lack immediate step-by-step remediation links inside alert payloads.",
+              "severity": "low",
+              "status": "fail",
+              "effort": "Low"
+            },
+            {
+              "id": "OPS-CHK-302",
+              "title": "Post-Incident Review (PIR) retrospectives and action tracking documented",
+              "description": "Action items from outages are tracked in Jira with mandatory SLA closure.",
+              "severity": "low",
+              "status": "pass"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "performance-efficiency",
+      "label": "Performance Efficiency",
+      "short": "P",
+      "score": 80,
+      "color": "#3B82F6",
+      "bestPractices": [
+        {
+          "id": "PERF-01",
+          "title": "How do you select the best performing architecture?",
+          "description": "Utilize edge caching, dedicated in-memory data tiers, and optimized compute instances.",
+          "status": "pass",
+          "checks": [
+            {
+              "id": "PERF-CHK-101",
+              "title": "CloudFront CDN configured for global caching of static assets and API responses",
+              "description": "Reduces latency by terminating TLS and caching dynamic responses at 450+ edge PoPs.",
+              "severity": "high",
+              "status": "pass"
+            },
+            {
+              "id": "PERF-CHK-102",
+              "title": "ElastiCache Redis cluster caching frequent database read queries",
+              "description": "Offloads high-frequency read queries to sub-millisecond in-memory cache.",
+              "severity": "high",
+              "status": "pass"
+            },
+            {
+              "id": "PERF-CHK-103",
+              "title": "Modern 6th/7th generation EC2 instance families utilized for core compute",
+              "description": "Replaced legacy c4/m4 instances with nitro-based c6i/m6i compute nodes.",
+              "severity": "medium",
+              "status": "pass"
+            }
+          ]
+        },
+        {
+          "id": "PERF-02",
+          "title": "How do you monitor and optimize compute & data performance?",
+          "description": "Identify data bottlenecks, scale read operations, and optimize storage IOPS.",
+          "status": "fail",
+          "checks": [
+            {
+              "id": "PERF-CHK-201",
+              "title": "RDS database read replica missing for high-volume analytics queries",
+              "description": "Heavy reporting queries run against the primary DB writer, causing CPU contention.",
+              "severity": "high",
+              "status": "fail",
+              "effort": "Medium"
+            },
+            {
+              "id": "PERF-CHK-202",
+              "title": "EBS volume provisioned IOPS (gp3) configured for optimal disk throughput",
+              "description": "Allocated 3,000 IOPS and 125 MB/s throughput independently of storage capacity.",
+              "severity": "medium",
+              "status": "pass"
+            },
+            {
+              "id": "PERF-CHK-203",
+              "title": "Enhanced networking (ENA) and jumbo frames active on internal VPC links",
+              "description": "Maximizes packet throughput between compute clusters and distributed storage.",
+              "severity": "low",
+              "status": "pass"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "complianceFrameworks": [
+    {
+      "id": "cis-8.1",
+      "name": "CIS Controls - 8.1",
+      "shortName": "CIS",
+      "badge": "CIS",
+      "badgeBg": "#1E3A8A",
+      "badgeColor": "#93C5FD",
+      "version": "v8.1",
+      "category": "Universal Security",
+      "description": "Center for Internet Security (CIS) Controls Version 8.1 prioritized set of actions for cyber defense.",
+      "docUrl": "https://www.cisecurity.org/controls/v8",
+      "providers": [
+        "aws",
+        "azure",
+        "gcp",
+        "github",
+        "k8s"
+      ],
+      "compatibleProvidersCount": 14,
+      "totalRequirements": 153,
+      "passingRequirements": 54,
+      "failingRequirements": 1,
+      "manualRequirements": 98,
+      "score": 35,
+      "isPinned": true,
+      "providerCoverage": [
+        {
+          "provider": "aws",
+          "label": "AWS",
+          "passed": 54,
+          "total": 55,
+          "manual": 98,
+          "score": 98
+        },
+        {
+          "provider": "azure",
+          "label": "Azure",
+          "passed": 48,
+          "total": 55,
+          "manual": 98,
+          "score": 87
+        },
+        {
+          "provider": "gcp",
+          "label": "GCP",
+          "passed": 50,
+          "total": 55,
+          "manual": 98,
+          "score": 91
+        }
+      ],
+      "topFailedSections": [
+        {
+          "sectionId": "sec-8",
+          "sectionTitle": "8. Audit Log Management",
+          "failedCount": 1,
+          "totalCount": 1,
+          "failRate": 100
+        },
+        {
+          "sectionId": "sec-3",
+          "sectionTitle": "3. Data Protection",
+          "failedCount": 1,
+          "totalCount": 14,
+          "failRate": 7
+        }
+      ],
+      "sections": [
+        {
+          "id": "sec-1",
+          "number": 1,
+          "title": "1. Inventory and Control of Enterprise Assets",
+          "description": "Actively manage all enterprise assets connected to the infrastructure.",
+          "requirements": [
+            {
+              "id": "1.1",
+              "code": "CIS-1.1",
+              "title": "Establish and Maintain a Detailed Enterprise Asset Inventory",
+              "description": "Utilize an active discovery tool to identify all cloud compute, storage, and serverless resources.",
+              "status": "pass",
+              "severity": "medium",
+              "providers": [
+                "aws",
+                "azure",
+                "gcp"
+              ],
+              "resources": [
+                "AWS CloudTrail (trail-prod-global)",
+                "Azure Activity Logs"
+              ]
+            },
+            {
+              "id": "1.2",
+              "code": "CIS-1.2",
+              "title": "Address Unauthorized Assets in Multi-Cloud Accounts",
+              "description": "Ensure automated alerting for untagged or rogue resource deployments.",
+              "status": "pass",
+              "severity": "high",
+              "providers": [
+                "aws",
+                "azure",
+                "gcp"
+              ],
+              "resources": [
+                "AWS Config Rules (required-tags-check)"
+              ]
+            },
+            {
+              "id": "1.3",
+              "code": "CIS-1.3",
+              "title": "Track Cloud Virtual Machines & Container Workloads",
+              "description": "Maintain accurate real-time inventory of EC2 instances, EKS pods, and ECS tasks.",
+              "status": "pass",
+              "severity": "medium",
+              "providers": [
+                "aws",
+                "k8s"
+              ]
+            },
+            {
+              "id": "1.4",
+              "code": "CIS-1.4",
+              "title": "Maintain DHCP / VPC IP Address Allocation Logs",
+              "description": "Retain VPC IPAM address allocation logs for audit correlation.",
+              "status": "manual",
+              "severity": "low",
+              "providers": [
+                "aws",
+                "azure"
+              ],
+              "manualNote": "Verified via quarterly network architecture reviews."
+            },
+            {
+              "id": "1.5",
+              "code": "CIS-1.5",
+              "title": "Periodic Audit of Connected SaaS & Cloud Integrations",
+              "description": "Review third-party OAuth apps and cross-account IAM role assumptions.",
+              "status": "pass",
+              "severity": "medium",
+              "providers": [
+                "aws",
+                "github"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "sec-2",
+          "number": 2,
+          "title": "2. Inventory and Control of Software Assets",
+          "description": "Manage software and container base images to prevent vulnerable code execution.",
+          "requirements": [
+            {
+              "id": "2.1",
+              "code": "CIS-2.1",
+              "title": "Establish and Maintain a Software Inventory for Container Images",
+              "description": "Ensure all ECR / ACR container images are cataloged with automated vulnerability scans.",
+              "status": "pass",
+              "severity": "high",
+              "providers": [
+                "aws",
+                "azure"
+              ],
+              "resources": [
+                "ECR Repository (acme/payment-api:latest)"
+              ]
+            },
+            {
+              "id": "2.2",
+              "code": "CIS-2.2",
+              "title": "Ensure Authorized Software Libraries in CI/CD Pipelines",
+              "description": "Implement dependency lockfiles and automated CVE scanning in GitHub Actions.",
+              "status": "pass",
+              "severity": "medium",
+              "providers": [
+                "github"
+              ]
+            },
+            {
+              "id": "2.3",
+              "code": "CIS-2.3",
+              "title": "Address Unauthorized Software and Deprecated Runtimes",
+              "description": "Identify and decommission Lambda runtimes reaching end of life support.",
+              "status": "pass",
+              "severity": "high",
+              "providers": [
+                "aws",
+                "gcp"
+              ]
+            },
+            {
+              "id": "2.4",
+              "code": "CIS-2.4",
+              "title": "Track Licensed Cloud Services and Cost Usage",
+              "description": "Enforce FinOps license tracking for enterprise database engines.",
+              "status": "manual",
+              "severity": "low",
+              "providers": [
+                "aws"
+              ],
+              "manualNote": "Reviewed via monthly AWS Cost Explorer billing audit."
+            },
+            {
+              "id": "2.5",
+              "code": "CIS-2.5",
+              "title": "Container Base Image Hardening",
+              "description": "Verify distroless or Alpine hardened images used for production workloads.",
+              "status": "pass",
+              "severity": "medium",
+              "providers": [
+                "k8s",
+                "aws"
+              ]
+            },
+            {
+              "id": "2.6",
+              "code": "CIS-2.6",
+              "title": "Software Gatekeeping via Image Signature Verification",
+              "description": "Enforce Cosign / AWS Signer image signing policies before Kubernetes admission.",
+              "status": "manual",
+              "severity": "high",
+              "providers": [
+                "k8s"
+              ],
+              "manualNote": "Kyverno policy validation required in cluster helm values."
+            },
+            {
+              "id": "2.7",
+              "code": "CIS-2.7",
+              "title": "Automated Software Package Version Enforcement",
+              "description": "Scan AMI templates against CIS benchmarks before production baking.",
+              "status": "pass",
+              "severity": "medium",
+              "providers": [
+                "aws"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "sec-3",
+          "number": 3,
+          "title": "3. Data Protection",
+          "description": "Processes and technical controls to identify, classify, handle, retain, and dispose of data.",
+          "requirements": [
+            {
+              "id": "3.1",
+              "code": "CIS-3.1",
+              "title": "Enforce Encryption at Rest for All S3 Buckets & Block Storage",
+              "description": "All S3 buckets and EBS volumes must enforce AWS KMS Customer Managed Keys (CMK) encryption.",
+              "status": "fail",
+              "severity": "critical",
+              "providers": [
+                "aws",
+                "gcp"
+              ],
+              "checkId": "sec-01",
+              "resources": [
+                "arn:aws:s3:::acme-corp-prod-backups-2024",
+                "vol-0941a87b2210c4f1e"
+              ],
+              "rationale": "Unencrypted storage exposes sensitive transaction logs to unauthorized access or snapshots.",
+              "remediation": "Enable default SSE-KMS encryption on the S3 bucket using terraform or AWS CLI."
+            },
+            {
+              "id": "3.2",
+              "code": "CIS-3.2",
+              "title": "Enforce TLS 1.3 Encryption in Transit for All Load Balancers",
+              "description": "Disable legacy SSL/TLS ciphers on ALB, NLB, and CloudFront distributions.",
+              "status": "pass",
+              "severity": "high",
+              "providers": [
+                "aws",
+                "azure"
+              ],
+              "resources": [
+                "ALB (arn:aws:elasticloadbalancing:us-east-1:app/prod-ingress/8912)"
+              ]
+            },
+            {
+              "id": "3.3",
+              "code": "CIS-3.3",
+              "title": "Configure Data Classification Tags for Production Databases",
+              "description": "Tag all RDS, DynamoDB, and Cloud SQL databases with data sensitivity classifications.",
+              "status": "pass",
+              "severity": "medium",
+              "providers": [
+                "aws",
+                "azure",
+                "gcp"
+              ]
+            },
+            {
+              "id": "3.4",
+              "code": "CIS-3.4",
+              "title": "Enforce S3 Public Access Block at Account Level",
+              "description": "Ensure S3 Block Public Access is active at the root account and organization level.",
+              "status": "pass",
+              "severity": "critical",
+              "providers": [
+                "aws"
+              ],
+              "resources": [
+                "Account 124890123456 (acme-production)"
+              ]
+            },
+            {
+              "id": "3.5",
+              "code": "CIS-3.5",
+              "title": "Automated Key Rotation for KMS CMKs",
+              "description": "Enable yearly automated rotation for all KMS keys protecting customer PII.",
+              "status": "pass",
+              "severity": "high",
+              "providers": [
+                "aws",
+                "gcp"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "sec-4",
+          "number": 4,
+          "title": "4. Secure Configuration of Enterprise Assets and Software",
+          "description": "Establish and maintain secure configurations across cloud networking and compute.",
+          "requirements": [
+            {
+              "id": "4.1",
+              "code": "CIS-4.1",
+              "title": "Ensure Security Groups Do Not Allow Unrestricted Inbound SSH (Port 22)",
+              "description": "Security groups must restrict port 22 access to corporate VPN CIDRs or use AWS Systems Manager Session Manager.",
+              "status": "pass",
+              "severity": "critical",
+              "providers": [
+                "aws",
+                "azure"
+              ],
+              "checkId": "sec-03",
+              "resources": [
+                "sg-0a81b2c3d4e5f6789 (prod-bastion-sg)"
+              ]
+            },
+            {
+              "id": "4.2",
+              "code": "CIS-4.2",
+              "title": "Ensure Security Groups Do Not Allow Inbound RDP (Port 3389) from 0.0.0.0/0",
+              "description": "Restrict Windows remote management ports to internal private subnets.",
+              "status": "pass",
+              "severity": "critical",
+              "providers": [
+                "aws",
+                "azure"
+              ]
+            },
+            {
+              "id": "4.3",
+              "code": "CIS-4.3",
+              "title": "Enforce IMDSv2 on All EC2 Instances",
+              "description": "Require Instance Metadata Service Version 2 to mitigate SSRF token exfiltration.",
+              "status": "pass",
+              "severity": "high",
+              "providers": [
+                "aws"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "sec-5",
+          "number": 5,
+          "title": "5. Account Management",
+          "description": "Processes and tools to assign and manage authorization to credentials and accounts.",
+          "requirements": [
+            {
+              "id": "5.1",
+              "code": "CIS-5.1",
+              "title": "Ensure No IAM Root User Access Keys Exist",
+              "description": "Root accounts must not have active access keys; all administrative duties use IAM roles with MFA.",
+              "status": "pass",
+              "severity": "critical",
+              "providers": [
+                "aws"
+              ],
+              "checkId": "sec-02"
+            },
+            {
+              "id": "5.2",
+              "code": "CIS-5.2",
+              "title": "Enforce MFA for All IAM Users with Console Access",
+              "description": "Multi-factor authentication must be enabled for all administrative and developer console logins.",
+              "status": "pass",
+              "severity": "critical",
+              "providers": [
+                "aws",
+                "azure",
+                "gcp"
+              ]
+            },
+            {
+              "id": "5.3",
+              "code": "CIS-5.3",
+              "title": "Disable Unused Credentials Older Than 90 Days",
+              "description": "Regularly identify and deactivate IAM access keys and user logins dormant for 90+ days.",
+              "status": "pass",
+              "severity": "medium",
+              "providers": [
+                "aws"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "sec-6",
+          "number": 6,
+          "title": "6. Access Control Management",
+          "description": "Processes and tools to create, assign, manage, and revoke access credentials and privileges.",
+          "requirements": [
+            {
+              "id": "6.1",
+              "code": "CIS-6.1",
+              "title": "Enforce Least Privilege IAM Policies (No Full Admin Wildcards)",
+              "description": "Avoid `AdministratorAccess` or wildcard `*` action permissions attached directly to IAM users.",
+              "status": "pass",
+              "severity": "high",
+              "providers": [
+                "aws",
+                "azure",
+                "gcp"
+              ]
+            },
+            {
+              "id": "6.2",
+              "code": "CIS-6.2",
+              "title": "Centralize Identity via Single Sign-On (SSO / IAM Identity Center)",
+              "description": "Enforce SAML 2.0 / OIDC identity federation with Okta or Azure AD.",
+              "status": "pass",
+              "severity": "high",
+              "providers": [
+                "aws",
+                "azure"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "sec-7",
+          "number": 7,
+          "title": "7. Continuous Vulnerability Management",
+          "description": "Plan to continuously assess and track vulnerabilities on all enterprise assets.",
+          "requirements": [
+            {
+              "id": "7.1",
+              "code": "CIS-7.1",
+              "title": "Enable Amazon Inspector / Defender for Cloud on All Workloads",
+              "description": "Continuous automated vulnerability scanning enabled across EC2 instances, ECR repos, and Lambdas.",
+              "status": "pass",
+              "severity": "high",
+              "providers": [
+                "aws",
+                "azure"
+              ]
+            },
+            {
+              "id": "7.2",
+              "code": "CIS-7.2",
+              "title": "Automated Patch Management for OS Kernels",
+              "description": "Use AWS Systems Manager Patch Manager with predefined maintenance windows.",
+              "status": "pass",
+              "severity": "medium",
+              "providers": [
+                "aws"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "sec-8",
+          "number": 8,
+          "title": "8. Audit Log Management",
+          "description": "Collect, alert, review, and retain audit logs of events that could help detect or recover from attacks.",
+          "requirements": [
+            {
+              "id": "8.1",
+              "code": "CIS-8.1",
+              "title": "Ensure CloudTrail is Enabled Across All Multi-Cloud Regions with S3 Log Validation",
+              "description": "Multi-region CloudTrail must be configured with log file validation enabled and logs delivered to a secure S3 bucket.",
+              "status": "fail",
+              "severity": "critical",
+              "providers": [
+                "aws"
+              ],
+              "checkId": "ops-01",
+              "resources": [
+                "CloudTrail (arn:aws:cloudtrail:us-east-1:124890123456:trail/main-trail)"
+              ],
+              "rationale": "Missing log file validation prevents detection of tampered or deleted audit logs during forensic analysis.",
+              "remediation": "Update CloudTrail configuration to enable `--enable-log-file-validation` and KMS log encryption."
+            },
+            {
+              "id": "8.2",
+              "code": "CIS-8.2",
+              "title": "Ensure VPC Flow Logs Are Enabled for All Active Production VPCs",
+              "description": "VPC Flow Logs capture IP traffic metadata to identify port scanning, lateral movement, and data exfiltration.",
+              "status": "pass",
+              "severity": "high",
+              "providers": [
+                "aws"
+              ],
+              "resources": [
+                "vpc-081293a89bc4 (prod-primary-vpc)"
+              ]
+            },
+            {
+              "id": "8.3",
+              "code": "CIS-8.3",
+              "title": "Retain Audit Logs for at Least 365 Days in Object Storage with Object Lock",
+              "description": "S3 audit log bucket must enforce WORM (Write Once Read Many) Object Lock compliance mode.",
+              "status": "manual",
+              "severity": "medium",
+              "providers": [
+                "aws",
+                "gcp"
+              ],
+              "manualNote": "Verified Glacier retention policy lifecycle rules."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "cmmc-2.0",
+      "name": "CMMC - 2.0",
+      "shortName": "CMMC",
+      "badge": "CMMC",
+      "badgeBg": "#0F766E",
+      "badgeColor": "#5EEAD4",
+      "version": "v2.0",
+      "category": "Government & Defense",
+      "description": "Cybersecurity Maturity Model Certification (CMMC 2.0) framework for protecting Controlled Unclassified Information (CUI).",
+      "docUrl": "https://dodcio.defense.gov/CMMC",
+      "providers": [
+        "aws",
+        "azure",
+        "gcp"
+      ],
+      "compatibleProvidersCount": 8,
+      "totalRequirements": 140,
+      "passingRequirements": 54,
+      "failingRequirements": 0,
+      "manualRequirements": 90,
+      "score": 34,
+      "isPinned": false,
+      "providerCoverage": [
+        {
+          "provider": "aws",
+          "label": "AWS GovCloud & Commercial",
+          "passed": 54,
+          "total": 54,
+          "manual": 90,
+          "score": 100
+        },
+        {
+          "provider": "azure",
+          "label": "Azure Government",
+          "passed": 48,
+          "total": 54,
+          "manual": 90,
+          "score": 89
+        }
+      ],
+      "topFailedSections": [],
+      "sections": [
+        {
+          "id": "cmmc-ac",
+          "number": 1,
+          "title": "AC: Access Control",
+          "requirements": [
+            {
+              "id": "AC.L2-3.1.1",
+              "code": "CMMC-AC-3.1.1",
+              "title": "Limit Information System Access to Authorized Users",
+              "description": "Authorize cloud access based on least privilege and separation of duties.",
+              "status": "pass",
+              "severity": "high",
+              "providers": [
+                "aws",
+                "azure"
+              ]
+            },
+            {
+              "id": "AC.L2-3.1.2",
+              "code": "CMMC-AC-3.1.2",
+              "title": "Control Information Flows Between System Components",
+              "description": "Isolate CUI processing subnets with dedicated VPC Security Groups and Network ACLs.",
+              "status": "pass",
+              "severity": "high",
+              "providers": [
+                "aws"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "cmmc-sc",
+          "number": 2,
+          "title": "SC: System and Communications Protection",
+          "requirements": [
+            {
+              "id": "SC.L2-3.13.1",
+              "code": "CMMC-SC-3.13.1",
+              "title": "Monitor, Control, and Protect Organizational Communications",
+              "description": "Enforce boundary firewalls (AWS Network Firewall / Azure Firewall) at all public VPC ingress/egress points.",
+              "status": "pass",
+              "severity": "critical",
+              "providers": [
+                "aws",
+                "azure"
+              ]
+            },
+            {
+              "id": "SC.L2-3.13.8",
+              "code": "CMMC-SC-3.13.8",
+              "title": "Implement Cryptographic Mechanisms for CUI in Transit",
+              "description": "Enforce FIPS 140-3 validated cryptographic endpoints on all load balancers and API Gateways.",
+              "status": "pass",
+              "severity": "high",
+              "providers": [
+                "aws"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "csa-ccm-4.0",
+      "name": "CSA CCM - 4.0",
+      "shortName": "CSA",
+      "badge": "CSA",
+      "badgeBg": "#15803D",
+      "badgeColor": "#86EFAC",
+      "version": "v4.0",
+      "category": "Universal Security",
+      "description": "Cloud Security Alliance Cloud Controls Matrix (CCM v4) cybersecurity control framework for cloud customers and providers.",
+      "docUrl": "https://cloudsecurityalliance.org/research/cloud-controls-matrix",
+      "providers": [
+        "aws",
+        "azure",
+        "gcp"
+      ],
+      "compatibleProvidersCount": 6,
+      "totalRequirements": 65,
+      "passingRequirements": 65,
+      "failingRequirements": 0,
+      "manualRequirements": 0,
+      "score": 100,
+      "isPinned": false,
+      "providerCoverage": [
+        {
+          "provider": "aws",
+          "label": "AWS",
+          "passed": 65,
+          "total": 65,
+          "manual": 0,
+          "score": 100
+        },
+        {
+          "provider": "azure",
+          "label": "Azure",
+          "passed": 65,
+          "total": 65,
+          "manual": 0,
+          "score": 100
+        }
+      ],
+      "topFailedSections": [],
+      "sections": [
+        {
+          "id": "csa-dcs",
+          "number": 1,
+          "title": "DCS: Datacenter & Cloud Infrastructure Security",
+          "requirements": [
+            {
+              "id": "DCS-01",
+              "code": "CSA-DCS-01",
+              "title": "Asset Baseline & Secure Configuration",
+              "description": "Validate hardening standards against CIS benchmarks for all compute nodes.",
+              "status": "pass",
+              "severity": "medium",
+              "providers": [
+                "aws",
+                "azure",
+                "gcp"
+              ]
+            },
+            {
+              "id": "DCS-02",
+              "code": "CSA-DCS-02",
+              "title": "Dual-Region High Availability & Failover",
+              "description": "Validate multi-region database replication and Route53 health check failovers.",
+              "status": "pass",
+              "severity": "high",
+              "providers": [
+                "aws"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "csa-iam",
+          "number": 2,
+          "title": "IAM: Identity & Access Management",
+          "requirements": [
+            {
+              "id": "IAM-01",
+              "code": "CSA-IAM-01",
+              "title": "Segregation of Privileged Roles",
+              "description": "Enforce distinct separation between deployment roles and security auditor roles.",
+              "status": "pass",
+              "severity": "high",
+              "providers": [
+                "aws",
+                "azure",
+                "gcp"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "dora-2022",
+      "name": "DORA - 2022/2554",
+      "shortName": "DORA",
+      "badge": "DORA",
+      "badgeBg": "#1D4ED8",
+      "badgeColor": "#BFDBFE",
+      "version": "2022/2554",
+      "category": "Industry Standard",
+      "description": "EU Digital Operational Resilience Act (DORA) framework for operational resilience and ICT risk management in financial services.",
+      "docUrl": "https://eur-lex.europa.eu/eli/reg/2022/2554/oj",
+      "providers": [
+        "aws",
+        "azure",
+        "gcp"
+      ],
+      "compatibleProvidersCount": 4,
+      "totalRequirements": 18,
+      "passingRequirements": 18,
+      "failingRequirements": 0,
+      "manualRequirements": 0,
+      "score": 100,
+      "isPinned": false,
+      "providerCoverage": [
+        {
+          "provider": "aws",
+          "label": "AWS",
+          "passed": 18,
+          "total": 18,
+          "manual": 0,
+          "score": 100
+        }
+      ],
+      "topFailedSections": [],
+      "sections": [
+        {
+          "id": "dora-ict",
+          "number": 1,
+          "title": "ICT Risk Management & Governance",
+          "requirements": [
+            {
+              "id": "DORA-Art-6",
+              "code": "DORA-06",
+              "title": "ICT Systems Resilience & Real-Time Telemetry",
+              "description": "CloudWatch dashboards and anomaly detection alerts configured across all financial transaction pipelines.",
+              "status": "pass",
+              "severity": "high",
+              "providers": [
+                "aws"
+              ]
+            },
+            {
+              "id": "DORA-Art-9",
+              "code": "DORA-09",
+              "title": "Protection and Prevention Capabilities",
+              "description": "Automated DDoS mitigation with AWS Shield Advanced and WAF rate-limiting rules.",
+              "status": "pass",
+              "severity": "critical",
+              "providers": [
+                "aws"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fedramp-frr",
+      "name": "FedRAMP 20x FRR Gloss Q - 2026.09.14",
+      "shortName": "FedRAMP",
+      "badge": "FedRAMP",
+      "badgeBg": "#B91C1C",
+      "badgeColor": "#FCA5A5",
+      "version": "2026.09.14",
+      "category": "Government & Defense",
+      "description": "Federal Risk and Authorization Management Program High Baseline Security Assessment Framework.",
+      "docUrl": "https://www.fedramp.gov",
+      "providers": [
+        "aws",
+        "azure"
+      ],
+      "compatibleProvidersCount": 2,
+      "totalRequirements": 138,
+      "passingRequirements": 17,
+      "failingRequirements": 0,
+      "manualRequirements": 118,
+      "score": 12,
+      "isPinned": false,
+      "providerCoverage": [
+        {
+          "provider": "aws",
+          "label": "AWS GovCloud",
+          "passed": 17,
+          "total": 17,
+          "manual": 118,
+          "score": 100
+        }
+      ],
+      "topFailedSections": [],
+      "sections": [
+        {
+          "id": "fedramp-au",
+          "number": 1,
+          "title": "AU: Audit and Accountability",
+          "requirements": [
+            {
+              "id": "AU-2",
+              "code": "FedRAMP-AU-2",
+              "title": "Event Logging Across All Cloud Management Plane APIs",
+              "description": "Collect immutable audit records for every IAM and resource provisioning event.",
+              "status": "pass",
+              "severity": "high",
+              "providers": [
+                "aws"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fedramp-ksi",
+      "name": "FedRAMP 20x KSI - 2026.07.14.01",
+      "shortName": "FedRAMP",
+      "badge": "FedRAMP",
+      "badgeBg": "#0369A1",
+      "badgeColor": "#7DD3FC",
+      "version": "2026.07.14",
+      "category": "Government & Defense",
+      "description": "FedRAMP Key Security Indicators (KSI) continuous monitoring benchmark.",
+      "docUrl": "https://www.fedramp.gov",
+      "providers": [
+        "aws",
+        "azure",
+        "gcp"
+      ],
+      "compatibleProvidersCount": 3,
+      "totalRequirements": 45,
+      "passingRequirements": 31,
+      "failingRequirements": 2,
+      "manualRequirements": 12,
+      "score": 67,
+      "isPinned": true,
+      "providerCoverage": [
+        {
+          "provider": "aws",
+          "label": "AWS",
+          "passed": 31,
+          "total": 33,
+          "manual": 12,
+          "score": 94
+        }
+      ],
+      "topFailedSections": [
+        {
+          "sectionId": "ksi-si",
+          "sectionTitle": "SI: System and Information Integrity",
+          "failedCount": 2,
+          "totalCount": 8,
+          "failRate": 25
+        }
+      ],
+      "sections": [
+        {
+          "id": "ksi-si",
+          "number": 1,
+          "title": "SI: System and Information Integrity",
+          "requirements": [
+            {
+              "id": "SI-3",
+              "code": "KSI-SI-3",
+              "title": "Malicious Code Protection for Cloud Storage Buckets",
+              "description": "Automated malware and trojan virus scanning on all user-uploaded S3 objects via GuardDuty S3 Protection.",
+              "status": "fail",
+              "severity": "critical",
+              "providers": [
+                "aws"
+              ],
+              "checkId": "sec-01",
+              "resources": [
+                "arn:aws:s3:::acme-corp-prod-backups-2024"
+              ]
+            },
+            {
+              "id": "SI-4",
+              "code": "KSI-SI-4",
+              "title": "Information System Monitoring with GuardDuty Threat Detection",
+              "description": "Amazon GuardDuty must be enabled across all accounts with automated finding export to Security Hub.",
+              "status": "fail",
+              "severity": "high",
+              "providers": [
+                "aws"
+              ],
+              "checkId": "sec-04"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "soc2-type2",
+      "name": "SOC 2 Type II (2024)",
+      "shortName": "SOC 2",
+      "badge": "SOC 2",
+      "badgeBg": "#4338CA",
+      "badgeColor": "#A5B4FC",
+      "version": "2024",
+      "category": "Industry Standard",
+      "description": "AICPA SOC 2 Type II Trust Services Criteria for Security, Availability, Processing Integrity, and Confidentiality.",
+      "docUrl": "https://www.aicpa.org/soc4so",
+      "providers": [
+        "aws",
+        "azure",
+        "gcp",
+        "github"
+      ],
+      "compatibleProvidersCount": 12,
+      "totalRequirements": 92,
+      "passingRequirements": 84,
+      "failingRequirements": 2,
+      "manualRequirements": 6,
+      "score": 91,
+      "isPinned": true,
+      "providerCoverage": [
+        {
+          "provider": "aws",
+          "label": "AWS Production",
+          "passed": 84,
+          "total": 86,
+          "manual": 6,
+          "score": 98
+        },
+        {
+          "provider": "azure",
+          "label": "Azure Core",
+          "passed": 80,
+          "total": 86,
+          "manual": 6,
+          "score": 93
+        }
+      ],
+      "topFailedSections": [
+        {
+          "sectionId": "soc-cc6",
+          "sectionTitle": "CC6: Logical and Physical Access Controls",
+          "failedCount": 1,
+          "totalCount": 18,
+          "failRate": 6
+        },
+        {
+          "sectionId": "soc-cc7",
+          "sectionTitle": "CC7: System Operations & Incident Response",
+          "failedCount": 1,
+          "totalCount": 14,
+          "failRate": 7
+        }
+      ],
+      "sections": [
+        {
+          "id": "soc-cc6",
+          "number": 1,
+          "title": "CC6: Logical and Physical Access Controls",
+          "requirements": [
+            {
+              "id": "CC6.1",
+              "code": "SOC2-CC6.1",
+              "title": "Logical Access Security & Identity Boundaries",
+              "description": "Enforce IAM role policies prohibiting wildcard administrative access in production VPCs.",
+              "status": "fail",
+              "severity": "high",
+              "providers": [
+                "aws",
+                "azure"
+              ],
+              "checkId": "sec-02",
+              "resources": [
+                "IAM Role (arn:aws:iam::124890123456:role/AdminExecutionRole)"
+              ]
+            },
+            {
+              "id": "CC6.6",
+              "code": "SOC2-CC6.6",
+              "title": "Network Perimeter Boundaries and DMZ Segregation",
+              "description": "Private subnets have no direct IGW routes; NAT Gateways used for egress.",
+              "status": "pass",
+              "severity": "critical",
+              "providers": [
+                "aws"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "soc-cc7",
+          "number": 2,
+          "title": "CC7: System Operations & Incident Response",
+          "requirements": [
+            {
+              "id": "CC7.2",
+              "code": "SOC2-CC7.2",
+              "title": "Automated Vulnerability Alerting & Incident Notification",
+              "description": "Slack/PagerDuty alerts triggered within 5 minutes of critical HRI detection.",
+              "status": "pass",
+              "severity": "high",
+              "providers": [
+                "aws",
+                "github"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "iso-27001",
+      "name": "ISO/IEC 27001:2022",
+      "shortName": "ISO",
+      "badge": "ISO",
+      "badgeBg": "#047857",
+      "badgeColor": "#6EE7B7",
+      "version": "2022",
+      "category": "Universal Security",
+      "description": "International standard for Information Security Management Systems (ISMS) Annex A controls.",
+      "docUrl": "https://www.iso.org/standard/27001",
+      "providers": [
+        "aws",
+        "azure",
+        "gcp"
+      ],
+      "compatibleProvidersCount": 10,
+      "totalRequirements": 114,
+      "passingRequirements": 102,
+      "failingRequirements": 3,
+      "manualRequirements": 9,
+      "score": 89,
+      "isPinned": true,
+      "providerCoverage": [
+        {
+          "provider": "aws",
+          "label": "AWS",
+          "passed": 102,
+          "total": 105,
+          "manual": 9,
+          "score": 97
+        }
+      ],
+      "topFailedSections": [
+        {
+          "sectionId": "iso-a8",
+          "sectionTitle": "A.8: Technological Controls",
+          "failedCount": 2,
+          "totalCount": 34,
+          "failRate": 6
+        }
+      ],
+      "sections": [
+        {
+          "id": "iso-a8",
+          "number": 1,
+          "title": "A.8: Technological Controls",
+          "requirements": [
+            {
+              "id": "A.8.12",
+              "code": "ISO-A8.12",
+              "title": "Data Leakage Prevention (DLP) across Object Storage",
+              "description": "Configure Macie or automated regex scanners for customer data in S3 buckets.",
+              "status": "pass",
+              "severity": "high",
+              "providers": [
+                "aws"
+              ]
+            },
+            {
+              "id": "A.8.24",
+              "code": "ISO-A8.24",
+              "title": "Use of Cryptography & Key Management Lifecycles",
+              "description": "Enforce envelope encryption with AWS KMS CMK across all persistent volumes.",
+              "status": "fail",
+              "severity": "critical",
+              "providers": [
+                "aws"
+              ],
+              "checkId": "sec-01"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "pci-dss-4.0",
+      "name": "PCI-DSS v4.0",
+      "shortName": "PCI",
+      "badge": "PCI",
+      "badgeBg": "#C2410C",
+      "badgeColor": "#FDBA74",
+      "version": "v4.0",
+      "category": "Industry Standard",
+      "description": "Payment Card Industry Data Security Standard v4.0 for cardholder data environments (CDE).",
+      "docUrl": "https://www.pcisecuritystandards.org",
+      "providers": [
+        "aws",
+        "azure"
+      ],
+      "compatibleProvidersCount": 6,
+      "totalRequirements": 78,
+      "passingRequirements": 68,
+      "failingRequirements": 4,
+      "manualRequirements": 6,
+      "score": 87,
+      "isPinned": false,
+      "providerCoverage": [
+        {
+          "provider": "aws",
+          "label": "AWS CDE Account",
+          "passed": 68,
+          "total": 72,
+          "manual": 6,
+          "score": 94
+        }
+      ],
+      "topFailedSections": [
+        {
+          "sectionId": "pci-req3",
+          "sectionTitle": "Requirement 3: Protect Stored Account Data",
+          "failedCount": 2,
+          "totalCount": 16,
+          "failRate": 12
+        }
+      ],
+      "sections": [
+        {
+          "id": "pci-req3",
+          "number": 1,
+          "title": "Requirement 3: Protect Stored Account Data",
+          "requirements": [
+            {
+              "id": "3.4.1",
+              "code": "PCI-3.4.1",
+              "title": "Primary Account Numbers (PAN) Must Be Rendered Unreadable",
+              "description": "Strong cryptographic hash or envelope encryption enforced at all database columns.",
+              "status": "pass",
+              "severity": "critical",
+              "providers": [
+                "aws"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "aws-fsbp",
+      "name": "AWS Foundational Security Best Practices (FSBP)",
+      "shortName": "AWS",
+      "badge": "FSBP",
+      "badgeBg": "#EA580C",
+      "badgeColor": "#FED7AA",
+      "version": "v1.0.0",
+      "category": "Cloud Native",
+      "description": "Curated set of automated AWS Security Hub controls aligning with AWS Security Pillar recommendations.",
+      "docUrl": "https://docs.aws.amazon.com/securityhub/latest/userguide/fsbp-standard.html",
+      "providers": [
+        "aws"
+      ],
+      "compatibleProvidersCount": 1,
+      "totalRequirements": 64,
+      "passingRequirements": 58,
+      "failingRequirements": 6,
+      "manualRequirements": 0,
+      "score": 90,
+      "isPinned": true,
+      "providerCoverage": [
+        {
+          "provider": "aws",
+          "label": "AWS Production (124890123456)",
+          "passed": 58,
+          "total": 64,
+          "manual": 0,
+          "score": 90
+        }
+      ],
+      "topFailedSections": [
+        {
+          "sectionId": "fsbp-s3",
+          "sectionTitle": "Amazon S3 Controls",
+          "failedCount": 2,
+          "totalCount": 12,
+          "failRate": 17
+        },
+        {
+          "sectionId": "fsbp-iam",
+          "sectionTitle": "AWS IAM Controls",
+          "failedCount": 2,
+          "totalCount": 14,
+          "failRate": 14
+        }
+      ],
+      "sections": [
+        {
+          "id": "fsbp-s3",
+          "number": 1,
+          "title": "Amazon S3 Controls",
+          "requirements": [
+            {
+              "id": "S3.4",
+              "code": "AWS-FSBP-S3.4",
+              "title": "S3 Buckets Should Have Default Encryption Enabled",
+              "description": "Checks whether default encryption is configured for S3 buckets.",
+              "status": "fail",
+              "severity": "critical",
+              "providers": [
+                "aws"
+              ],
+              "checkId": "sec-01",
+              "resources": [
+                "arn:aws:s3:::acme-corp-prod-backups-2024"
+              ]
+            },
+            {
+              "id": "S3.5",
+              "code": "AWS-FSBP-S3.5",
+              "title": "S3 Buckets Should Require Requests to Use SSL (HTTPS)",
+              "description": "Checks whether S3 bucket policies enforce secure transport via aws:SecureTransport condition.",
+              "status": "pass",
+              "severity": "high",
+              "providers": [
+                "aws"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "fsbp-iam",
+          "number": 2,
+          "title": "AWS IAM Controls",
+          "requirements": [
+            {
+              "id": "IAM.1",
+              "code": "AWS-FSBP-IAM.1",
+              "title": "IAM Policies Should Not Grant Full Administrative Privileges",
+              "description": "Checks whether IAM policies contain `Action: *` with `Resource: *`.",
+              "status": "fail",
+              "severity": "critical",
+              "providers": [
+                "aws"
+              ],
+              "checkId": "sec-02"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "integrations": {
+    "slack": {
+      "connected": true,
+      "webhookUrl": "https://hooks.slack.com/services/T04A99/B06X11/99248a91283",
+      "channel": "#cloud-security-alerts",
+      "botName": "CloudifyOps WAFR Bot",
+      "notifyCriticalHri": true,
+      "notifyHighHri": true,
+      "notifyScanComplete": true,
+      "notifyScoreDrop": true,
+      "scoreDropThreshold": 80,
+      "notifyRemediationPr": true,
+      "dailyDigest": true,
+      "lastTested": "10m ago (Success)"
+    },
+    "jira": {
+      "connected": true,
+      "host": "cloudifyops.atlassian.net",
+      "projectKey": "WAFR",
+      "issueType": "Security Finding",
+      "userEmail": "devops-bot@cloudifyops.com",
+      "apiToken": "••••••••••••••••••••••••••••••••",
+      "autoCreateCriticalTickets": true,
+      "autoCreateHighTickets": true,
+      "syncResolutions": true,
+      "defaultAssignee": "Lezin VM (Lead Architect)",
+      "priorityMapping": {
+        "critical": "Highest",
+        "high": "High",
+        "medium": "Medium",
+        "low": "Low"
+      },
+      "lastTested": "1h ago (Connected)"
+    },
+    "gchat": {
+      "connected": true,
+      "webhookUrl": "https://chat.googleapis.com/v1/spaces/AAAA12948/messages?key=AIzaSyB...&token=xyz123",
+      "spaceName": "Cloud Architecture & Security Alerts",
+      "notifyCriticalHri": true,
+      "notifyHighHri": true,
+      "notifyScanComplete": true,
+      "notifyScoreDrop": true,
+      "scoreDropThreshold": 80,
+      "notifyRemediationPr": true,
+      "lastTested": "25m ago (Success)"
+    }
+  },
+  "alertLogs": [
+    {
+      "id": "ALT-1092",
+      "timestamp": "2 hours ago",
+      "service": "slack",
+      "title": "Scan Completed: AWS Production — us-east-1 Full Review",
+      "details": "WAFR score: 84%. Found 4 HRIs (Security: 3, Reliability: 1). Dispatched to #cloud-security-alerts.",
+      "status": "delivered",
+      "severity": "info",
+      "assessmentName": "AWS Production — us-east-1 Full Review"
+    },
+    {
+      "id": "ALT-1091",
+      "timestamp": "2 hours ago",
+      "service": "jira",
+      "title": "Auto-Created Jira Ticket: WAFR-142 (S3 Public Access Block Missing)",
+      "details": "Created Security Finding ticket in project WAFR. Assigned to Lezin VM.",
+      "status": "delivered",
+      "severity": "critical",
+      "assessmentName": "AWS Production — us-east-1 Full Review"
+    },
+    {
+      "id": "ALT-1090",
+      "timestamp": "2 hours ago",
+      "service": "gchat",
+      "title": "High Risk Alert Triggered: IAM Wildcard Admin Permissions",
+      "details": "Dispatched alert card to Google Chat space \"Cloud Architecture & Security Alerts\".",
+      "status": "delivered",
+      "severity": "critical",
+      "assessmentName": "AWS Production — us-east-1 Full Review"
+    }
+  ],
+  "orgQuestions": [
+    {
+      "id": "ORG-01",
+      "scope": "organization",
+      "cat": "Security & Governance",
+      "q": "How does the organization enforce Service Control Policies (SCPs) and Landing Zone guardrails?",
+      "desc": "Preventive guardrails across multi-account hierarchy, region restrictions, and root lockouts.",
+      "answered": true,
+      "ans": "AWS Organizations with AWS Control Tower enforces foundational SCPs denying unauthorized regions, root user usage, and public S3 bucket creation across all member accounts.",
+      "info": {
+        "frameworkRef": "AWS WAFR: SEC-02 · Azure Management Groups · GCP Resource Manager",
+        "whyItMatters": "Centralized SCPs prevent member accounts from altering security baselines, enabling programmatic compliance at enterprise scale.",
+        "howToVerify": [
+          "Open AWS Organizations > Policies > Service control policies (or Azure Policy initiative definitions).",
+          "Verify SCPs denying unapproved regions, disabling CloudTrail/Activity Logs, and preventing public storage bucket creation.",
+          "Validate that root user accounts have no active programmatic access keys and hardware MFA is enforced."
+        ],
+        "auditEvidence": "AWS Organizations SCP JSON policy attachments list and Control Tower guardrail status report."
+      },
+      "manualChecks": [
+        {
+          "id": "ORG-01-MC1",
+          "label": "Service Control Policies (SCPs) active across all member accounts enforcing region & service restrictions",
+          "verified": true,
+          "guidance": "Verify SCP attachments in AWS Organizations root / OU levels or Azure Management Group policies"
+        },
+        {
+          "id": "ORG-01-MC2",
+          "label": "Root user account access restricted with hardware MFA and automated security alarm notifications",
+          "verified": true,
+          "guidance": "Inspect IAM Credential Report for root user last activity and verify SNS alarm on root login"
+        }
+      ]
+    },
+    {
+      "id": "ORG-02",
+      "scope": "organization",
+      "cat": "Security & Auditing",
+      "q": "How is centralized audit logging and SIEM integration configured across accounts?",
+      "desc": "Aggregated CloudTrail logs, central Log Archive account, and real-time security alerts.",
+      "answered": true,
+      "ans": "Organization-wide CloudTrail logs and VPC Flow Logs are replicated to a dedicated secure Log Archive account with SIEM ingestion.",
+      "info": {
+        "frameworkRef": "AWS WAFR: SEC-04 · Centralized Audit Architecture",
+        "whyItMatters": "Centralizing audit telemetry in an immutable, restricted-access account prevents tampering during security incidents and enables comprehensive cross-account forensic investigation.",
+        "howToVerify": [
+          "Verify organization trail in master account sending logs to a dedicated Log Archive S3 bucket.",
+          "Confirm destination S3 bucket has Object Lock (WORM compliance) and MFA Delete enabled.",
+          "Check connector status for enterprise SIEM (Datadog, Splunk, Microsoft Sentinel) streaming cross-account audit events."
+        ],
+        "auditEvidence": "Organization CloudTrail configuration export and SIEM ingestion heartbeat dashboard screenshot."
+      },
+      "manualChecks": [
+        {
+          "id": "ORG-02-MC1",
+          "label": "Immutable log archive bucket configured with Object Lock (WORM) & MFA Delete enabled",
+          "verified": true,
+          "guidance": "Inspect central S3 / Blob storage compliance settings in dedicated Log Archive account"
+        },
+        {
+          "id": "ORG-02-MC2",
+          "label": "SIEM connector (Datadog / Splunk / Sentinel) actively streaming cross-account telemetry and alarms",
+          "verified": true,
+          "guidance": "Confirm active data stream ingestion rate and real-time alerting rule triggers"
+        }
+      ]
+    },
+    {
+      "id": "ORG-03",
+      "scope": "organization",
+      "cat": "Cost Optimization",
+      "q": "How does the organization manage centralized budgets, cost allocation tags, and showback/chargeback?",
+      "desc": "Enterprise tagging policies, AWS Cost Categories, and centralized consolidated billing governance.",
+      "answered": true,
+      "ans": "AWS Cost Categories and mandatory Cost Center tagging policies enforced via AWS Organizations with monthly budget threshold alerts sent to Slack.",
+      "info": {
+        "frameworkRef": "AWS WAFR: COST-01 & COST-02 · FinOps Foundation Standards",
+        "whyItMatters": "Standardized cost allocation tags and automated budget notifications foster engineering accountability, eliminate orphaned resource waste, and prevent budget overruns.",
+        "howToVerify": [
+          "Inspect Tag Policies in AWS Organizations for mandatory tags (Environment, Owner, CostCenter, Project).",
+          "Verify AWS Budgets threshold alerts connected to finance and engineering Slack / email distribution channels.",
+          "Review Cost Categories and monthly FinOps unit economics reporting hierarchy."
+        ],
+        "auditEvidence": "AWS Tag Policy compliance report and AWS Budgets threshold notification settings export."
+      },
+      "manualChecks": [
+        {
+          "id": "ORG-03-MC1",
+          "label": "Mandatory organizational cost tags enforced via Tag Policies (Owner, CostCenter, Env, Project)",
+          "verified": true,
+          "guidance": "Inspect Tag Policies under AWS Organizations console or Azure Policy tag governance"
+        },
+        {
+          "id": "ORG-03-MC2",
+          "label": "Consolidated billing budget alerts configured with multi-tiered notification thresholds (80%, 100%)",
+          "verified": true,
+          "guidance": "Verify AWS Budgets or Azure Cost Management threshold alerts routed to finance channels"
+        }
+      ]
+    },
+    {
+      "id": "ORG-04",
+      "scope": "organization",
+      "cat": "Operational Excellence",
+      "q": "How are organization-wide disaster recovery and incident escalation runbooks standardized?",
+      "desc": "Cross-account disaster recovery SLAs, enterprise on-call rotations, and executive post-mortem reviews.",
+      "answered": true,
+      "ans": "P1 disaster recovery runbooks with cross-region replication SLAs (RPO < 15 min, RTO < 1 hour) and bi-weekly PagerDuty on-call drill reviews.",
+      "info": {
+        "frameworkRef": "AWS WAFR: OPS-10 & REL-13 · Enterprise Incident Management",
+        "whyItMatters": "Well-rehearsed disaster recovery procedures and clear escalation hierarchies guarantee predictable, rapid operational response during major enterprise disruptions.",
+        "howToVerify": [
+          "Review the enterprise incident severity matrix (P1–P4) and on-call paging rotations in PagerDuty / Opsgenie.",
+          "Verify cross-region backup replication schedules, RPO/RTO validation tests, and annual DR exercise sign-offs.",
+          "Confirm Post-Incident Review (PIR) template and central repository in Confluence / Notion."
+        ],
+        "auditEvidence": "Annual DR Exercise Signoff document and post-incident review (PIR) archive."
+      },
+      "manualChecks": [
+        {
+          "id": "ORG-04-MC1",
+          "label": "Standardized incident severity matrix (P1–P4) with documented paging rotations and SLAs",
+          "verified": true,
+          "guidance": "Review runbook repository and escalation ladder in on-call management tooling"
+        },
+        {
+          "id": "ORG-04-MC2",
+          "label": "Annual enterprise DR game day or cross-region failover drill conducted and formally documented",
+          "verified": true,
+          "guidance": "Review sign-off report and recovery timeline from the most recent failover drill"
+        }
+      ]
+    },
+    {
+      "id": "ORG-05",
+      "scope": "organization",
+      "cat": "Compliance & Standards",
+      "q": "Which organizational compliance frameworks and data residency standards are mandated across accounts?",
+      "desc": "Enterprise compliance baselines (SOC2, ISO 27001, HIPAA, PCI-DSS) and sovereign boundary controls.",
+      "answered": false,
+      "ans": "SOC 2 Type II and ISO 27001 compliance standards are enforced organization-wide using AWS Security Hub and AWS Config conformance packs across all member accounts.",
+      "info": {
+        "frameworkRef": "AWS WAFR: SEC-01 · Enterprise Compliance & Risk Management",
+        "whyItMatters": "Embedding mandated regulatory standards into automated guardrails early prevents costly compliance remediation and guarantees sovereign data boundaries.",
+        "howToVerify": [
+          "Inspect automated compliance monitoring in AWS Security Hub / Microsoft Defender for Cloud / GCP Security Command Center.",
+          "Confirm continuous compliance scoring against CIS Benchmarks and SOC 2 / ISO 27001 standards.",
+          "Verify data residency boundaries preventing data replication outside designated sovereign jurisdictions."
+        ],
+        "auditEvidence": "Security Hub CIS Benchmark score export or third-party compliance audit certificate."
+      },
+      "manualChecks": [
+        {
+          "id": "ORG-05-MC1",
+          "label": "Automated continuous compliance monitoring enabled (Security Hub / Defender for Cloud / AWS Config)",
+          "verified": false,
+          "guidance": "Check Security Hub standards activation (CIS AWS Foundations Benchmark & AWS Foundational Best Practices)"
+        },
+        {
+          "id": "ORG-05-MC2",
+          "label": "Data sovereignty and geographic boundary restrictions formally documented and enforced",
+          "verified": false,
+          "guidance": "Review SCP region restrictions and database backup replication target regions"
+        }
+      ]
+    }
+  ]
+}

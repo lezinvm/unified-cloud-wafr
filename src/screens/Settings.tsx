@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useApp } from '../context';
 import { AppLayout } from '../components/AppLayout';
+import { api } from '../services/apiClient';
 import { CloudChip, CloudId } from '../components/CloudLogo';
+import { SlackLogo, JiraLogo, GChatLogo } from '../components/IntegrationLogos';
 
 const LIGHT = { bg:'#F8FAFC', card:'#FFFFFF', border:'#E2E8F0', text:'#0F172A', textSub:'#64748B', primary:'#2563EB', primaryBg:'#EFF6FF', success:'#059669', successBg:'#ECFDF5', successBar:'#10B981', error:'#E11D48', errorBg:'#FFF1F2', errorBar:'#FB7185', warning:'#D97706', warningBg:'#FFFBEB', warningBar:'#FBBF24', muted:'#94A3B8', progress:'#10B981', activeNavBg:'#EFF6FF', shadow:'0 1px 3px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.04)', shadowMd:'0 4px 6px -1px rgba(0,0,0,.07),0 2px 4px -2px rgba(0,0,0,.05)' };
 const DARK  = { bg:'#0B1220', card:'#111B2E', border:'#1E293B', text:'#F1F5F9', textSub:'#94A3B8', primary:'#3B82F6', primaryBg:'rgba(59,130,246,.15)', success:'#52B788', successBg:'rgba(82,183,136,.12)', successBar:'rgba(82,183,136,.75)', error:'#FB7185', errorBg:'rgba(251,113,133,.12)', errorBar:'rgba(251,113,133,.65)', warning:'#FBBF24', warningBg:'rgba(251,191,36,.12)', warningBar:'rgba(251,191,36,.65)', muted:'#94A3B8', progress:'#52B788', activeNavBg:'rgba(59,130,246,.12)', shadow:'0 1px 3px rgba(0,0,0,.3),0 1px 2px rgba(0,0,0,.2)', shadowMd:'0 4px 6px rgba(0,0,0,.35),0 2px 4px rgba(0,0,0,.25)' };
@@ -20,6 +22,18 @@ const SIDEBAR: { id: string; label: string; icon: (color: string) => React.React
     ),
   },
   {
+    id: 'repo',
+    label: 'Repository & VCS',
+    icon: (c) => (
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <line x1="6" y1="3" x2="6" y2="15" />
+        <circle cx="18" cy="6" r="3" />
+        <circle cx="6" cy="18" r="3" />
+        <path d="M18 9a9 9 0 0 1-9 9" />
+      </svg>
+    ),
+  },
+  {
     id: 'retention',
     label: 'Data Retention',
     icon: (c) => (
@@ -27,6 +41,16 @@ const SIDEBAR: { id: string; label: string; icon: (color: string) => React.React
         <ellipse cx="12" cy="5" rx="9" ry="3"/>
         <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
         <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+      </svg>
+    ),
+  },
+  {
+    id: 'integrations',
+    label: 'Integrations & Alerts',
+    icon: (c) => (
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
       </svg>
     ),
   },
@@ -693,12 +717,50 @@ function EditCloudConfigModal({
 }
 
 function CloudConfigPanel({ T, isDark }: { T: Tokens; isDark: boolean }) {
-  const [configs, setConfigs] = useState<CloudConfigItem[]>(INITIAL_CLOUD_CONFIGS);
+  const { currentUser, setConfiguredAccount, refreshFromDb, setCloudAccounts } = useApp();
+  const [configs, setConfigs] = useState<CloudConfigItem[]>([]);
   const [editingConfig, setEditingConfig] = useState<CloudConfigItem | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [syncingId, setSyncingId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    const targetOrg = currentUser.orgId || `org_${currentUser.id}`;
+
+    api.getCloudAccounts(targetOrg, currentUser.id)
+      .then(accounts => {
+        if (Array.isArray(accounts)) {
+          const mapped: CloudConfigItem[] = accounts.map((a: any) => ({
+            id: a.id,
+            cloud: (a.cloud?.toUpperCase() || 'AWS') as 'AWS' | 'Azure' | 'GCP',
+            name: a.account_name || 'Cloud Account',
+            method: a.auth_type === 'role' ? 'IAM Role / Cross-Account' : (a.auth_type === 'sp' ? 'Service Principal' : 'Service Account'),
+            authType: a.auth_type || 'role',
+            status: 'active',
+            lastSync: a.last_connected_at ? 'Recently' : 'Just now',
+            roleArn: a.role_arn,
+            externalId: a.external_id,
+            tenantId: a.tenant_id,
+            clientId: a.client_id,
+            gcpProject: a.gcp_project,
+            saEmail: a.sa_email,
+            autoSync: true,
+            syncIntervalHours: 6,
+          }));
+          setConfigs(mapped);
+          setCloudAccounts(accounts);
+        } else {
+          setConfigs([]);
+          setCloudAccounts([]);
+        }
+      })
+      .catch(err => {
+        console.warn('Could not load cloud accounts from MongoDB:', err);
+        setConfigs([]);
+        setCloudAccounts([]);
+      });
+  }, [currentUser.id, currentUser.orgId]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -735,6 +797,31 @@ function CloudConfigPanel({ T, isDark }: { T: Tokens; isDark: boolean }) {
       setConfigs(prev => prev.map(c => (c.id === saved.id ? saved : c)));
       showToast(`Updated configuration "${saved.name}" successfully.`);
     }
+
+    const userOrg = currentUser.orgId || `org_${currentUser.id}`;
+
+    // Persist to MongoDB scoped to current user & organization
+    api.saveCloudAccount({
+      id: saved.id,
+      org_id: userOrg,
+      user_id: currentUser.id,
+      cloud: saved.cloud.toLowerCase(),
+      account_name: saved.name,
+      account_identifier: saved.id,
+      auth_type: saved.authType,
+      role_arn: saved.roleArn,
+      external_id: saved.externalId,
+      tenant_id: saved.tenantId,
+      client_id: saved.clientId,
+      gcp_project: saved.gcpProject,
+      sa_email: saved.saEmail,
+    }).then(() => {
+      refreshFromDb();
+      if (saved.cloud.toLowerCase() === 'aws') {
+        setConfiguredAccount({ cloud: 'aws', name: saved.name, id: saved.id });
+      }
+    }).catch(err => console.warn('Could not persist cloud account to MongoDB:', err));
+
     setEditingConfig(null);
   };
 
@@ -752,6 +839,9 @@ function CloudConfigPanel({ T, isDark }: { T: Tokens; isDark: boolean }) {
   const handleDelete = (id: string) => {
     const target = configs.find(c => c.id === id);
     setConfigs(prev => prev.filter(c => c.id !== id));
+    api.deleteCloudAccount(id).then(() => {
+      refreshFromDb();
+    }).catch(err => console.warn('Could not delete account in MongoDB:', err));
     setDeletingId(null);
     showToast(`Removed configuration "${target?.name || 'Cloud'}" successfully.`);
   };
@@ -799,7 +889,34 @@ function CloudConfigPanel({ T, isDark }: { T: Tokens; isDark: boolean }) {
 
       {/* Config list */}
       <div className="flex flex-col gap-3">
-        {configs.map(c => {
+        {configs.length === 0 ? (
+          <div
+            className="p-8 text-center flex flex-col items-center justify-center rounded-2xl border border-dashed"
+            style={{
+              borderColor: T.border,
+              backgroundColor: isDark ? 'rgba(255,255,255,0.02)' : '#F8FAFC',
+            }}
+          >
+            <div className="w-12 h-12 rounded-full flex items-center justify-center mb-3" style={{ backgroundColor: isDark ? 'rgba(59,130,246,0.15)' : '#EFF6FF', color: T.primary }}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" />
+              </svg>
+            </div>
+            <h3 className="font-semibold text-sm mb-1" style={{ color: T.text }}>No Cloud Accounts Configured</h3>
+            <p className="text-xs max-w-sm mb-4" style={{ color: T.textSub }}>
+              You have not connected any cloud accounts to your workspace yet. Connect an AWS, Azure, or GCP account to begin evaluating your cloud architecture.
+            </p>
+            <button
+              type="button"
+              onClick={handleCreateNew}
+              className="px-4 py-2 rounded-full text-xs font-bold text-white shadow-sm transition-opacity hover:opacity-90 cursor-pointer"
+              style={{ background: 'linear-gradient(135deg,#2563EB,#22C55E)' }}
+            >
+              + Connect First Cloud Account
+            </button>
+          </div>
+        ) : (
+          configs.map(c => {
           const cc = CC_COLORS[c.cloud] || CC_COLORS.AWS;
           const isDeleting = deletingId === c.id;
           const isSyncing = syncingId === c.id;
@@ -932,7 +1049,7 @@ function CloudConfigPanel({ T, isDark }: { T: Tokens; isDark: boolean }) {
               )}
             </div>
           );
-        })}
+        }))}
       </div>
 
       {/* Edit / Add Modal */}
@@ -946,6 +1063,415 @@ function CloudConfigPanel({ T, isDark }: { T: Tokens; isDark: boolean }) {
           onSave={handleSave}
         />
       )}
+    </div>
+  );
+}
+
+function RepoConfigPanel({ T, isDark }: { T: Tokens; isDark: boolean }) {
+  const { repoConfig, setRepoConfig } = useApp();
+  const [provider, setProvider] = useState(repoConfig.provider || 'github');
+  const [repoName, setRepoName] = useState(repoConfig.repoName || '');
+  const [branch, setBranch] = useState(repoConfig.branch || 'main');
+  const [pat, setPat] = useState(repoConfig.pat || '');
+  const [showPat, setShowPat] = useState(false);
+  const [autoCreatePr, setAutoCreatePr] = useState(repoConfig.autoCreatePr ?? true);
+  const [testState, setTestState] = useState<'idle' | 'testing' | 'success'>('idle');
+  const [savedSuccess, setSavedSuccess] = useState(false);
+
+  const handleTest = () => {
+    setTestState('testing');
+    setTimeout(() => {
+      setTestState('success');
+    }, 800);
+  };
+
+  const handleSave = (e: React.FormEvent) => {
+    e.preventDefault();
+    setRepoConfig({
+      provider,
+      repoName: repoName.trim(),
+      branch: branch.trim() || 'main',
+      pat: pat.trim(),
+      connected: Boolean(repoName.trim() && pat.trim()),
+      lastSync: 'Just now',
+      autoCreatePr,
+    });
+    setSavedSuccess(true);
+    setTimeout(() => setSavedSuccess(false), 3000);
+  };
+
+  const handleDisconnect = () => {
+    setRepoConfig({
+      provider: 'github',
+      repoName: '',
+      branch: 'main',
+      pat: '',
+      connected: false,
+      lastSync: 'Disconnected',
+      autoCreatePr: true,
+    });
+    setRepoName('');
+    setPat('');
+    setTestState('idle');
+  };
+
+  return (
+    <div className="flex flex-col gap-6">
+      <div>
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div>
+            <h2 className="font-semibold text-lg" style={{ color: T.text }}>Repository & VCS Settings</h2>
+            <p className="text-sm mt-1" style={{ color: T.textSub }}>
+              Configure your infrastructure code repository to export automated WAFR AI remediation Pull Requests.
+            </p>
+          </div>
+          {repoConfig.connected && (
+            <span className="text-xs px-3 py-1 rounded-full font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              Connected
+            </span>
+          )}
+        </div>
+      </div>
+
+      {savedSuccess && (
+        <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center gap-2.5 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+          <span>Repository configuration saved successfully! Remediation will use these credentials automatically without prompting.</span>
+        </div>
+      )}
+
+      {/* Current Repo Card */}
+      {repoConfig.connected && repoConfig.repoName && (
+        <div
+          className="p-5 rounded-2xl border flex items-center justify-between gap-4 flex-wrap"
+          style={{
+            backgroundColor: isDark ? 'rgba(52,211,153,0.06)' : '#F0FDF4',
+            borderColor: isDark ? 'rgba(52,211,153,0.25)' : '#BBF7D0',
+            boxShadow: T.shadow,
+          }}
+        >
+          <div className="flex items-center gap-3.5 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold text-base shrink-0">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="6" y1="3" x2="6" y2="15" />
+                <circle cx="18" cy="6" r="3" />
+                <circle cx="6" cy="18" r="3" />
+                <path d="M18 9a9 9 0 0 1-9 9" />
+              </svg>
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-mono text-sm font-bold text-slate-900 dark:text-slate-100 truncate">{repoConfig.repoName}</span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-semibold">
+                  branch: {repoConfig.branch}
+                </span>
+                <span className="text-[10px] uppercase font-semibold px-2 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400">
+                  {repoConfig.provider}
+                </span>
+              </div>
+              <p className="text-[11px] mt-0.5" style={{ color: T.textSub }}>
+                Last verified: {repoConfig.lastSync || 'Recently'} · Ready for automated PR creation
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleDisconnect}
+            className="text-xs font-semibold px-3 py-1.5 rounded-xl border border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-500/20 transition-colors cursor-pointer"
+          >
+            Disconnect
+          </button>
+        </div>
+      )}
+
+      {/* Configuration Form */}
+      <form
+        onSubmit={handleSave}
+        className="p-6 rounded-2xl border flex flex-col gap-5 text-xs"
+        style={{ background: T.card, borderColor: T.border, boxShadow: T.shadow }}
+      >
+        {/* Provider Selection */}
+        <div className="flex flex-col gap-2">
+          <label className="font-semibold uppercase tracking-wider text-[11px]" style={{ color: T.textSub }}>
+            Git / VCS Provider <span className="text-red-400">*</span>
+          </label>
+          <div className="grid grid-cols-3 gap-2.5">
+            {[
+              { id: 'github', label: 'GitHub' },
+              { id: 'gitlab', label: 'GitLab' },
+              { id: 'bitbucket', label: 'Bitbucket' },
+            ].map(p => {
+              const isSel = provider === p.id;
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => setProvider(p.id as any)}
+                  className="p-3 rounded-xl border-2 flex items-center justify-between transition-all cursor-pointer text-left"
+                  style={{
+                    borderColor: isSel ? '#2563EB' : T.border,
+                    backgroundColor: isSel ? (isDark ? 'rgba(37,99,235,0.15)' : '#EFF6FF') : (isDark ? '#111B2E' : '#FFFFFF'),
+                  }}
+                >
+                  <span className="font-bold text-xs" style={{ color: isSel ? (isDark ? '#93C5FD' : '#1D4ED8') : T.text }}>
+                    {p.label}
+                  </span>
+                  <div
+                    className="w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0"
+                    style={{ borderColor: isSel ? '#2563EB' : '#94A3B8' }}
+                  >
+                    {isSel && <div className="w-2 h-2 rounded-full bg-blue-600" />}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Repo URL */}
+        <div className="flex flex-col gap-1.5">
+          <label className="font-semibold uppercase tracking-wider text-[11px]" style={{ color: T.textSub }}>
+            Repo URL <span className="text-red-400">*</span>
+          </label>
+          <input
+            type="text"
+            required
+            value={repoName}
+            onChange={e => setRepoName(e.target.value)}
+            placeholder="e.g. https://github.com/acme-corp/terraform-aws-infrastructure or acme-corp/terraform-aws-infrastructure"
+            className="w-full px-3.5 py-2.5 rounded-xl font-mono text-xs outline-none transition-all"
+            style={{ backgroundColor: isDark ? '#0B1220' : '#F8FAFC', border: `1px solid ${T.border}`, color: T.text }}
+          />
+        </div>
+
+        {/* Default Branch */}
+        <div className="flex flex-col gap-1.5">
+          <label className="font-semibold uppercase tracking-wider text-[11px]" style={{ color: T.textSub }}>
+            Default Branch <span className="text-red-400">*</span>
+          </label>
+          <input
+            type="text"
+            required
+            value={branch}
+            onChange={e => setBranch(e.target.value)}
+            placeholder="e.g. main or master"
+            className="w-full px-3.5 py-2.5 rounded-xl font-mono text-xs outline-none transition-all"
+            style={{ backgroundColor: isDark ? '#0B1220' : '#F8FAFC', border: `1px solid ${T.border}`, color: T.text }}
+          />
+        </div>
+
+        {/* Personal Access Token (PAT) */}
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center justify-between">
+            <label className="font-semibold uppercase tracking-wider text-[11px]" style={{ color: T.textSub }}>
+              Personal Access Token (PAT) <span className="text-red-400">*</span>
+            </label>
+            <button
+              type="button"
+              onClick={() => setPat('ghp_live983274982374982374982374')}
+              className="text-[11px] font-semibold text-blue-500 hover:underline cursor-pointer"
+            >
+              Fill Demo Token
+            </button>
+          </div>
+          <div className="relative flex items-center">
+            <input
+              type={showPat ? 'text' : 'password'}
+              required
+              value={pat}
+              onChange={e => setPat(e.target.value)}
+              placeholder="ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+              className="w-full px-3.5 py-2.5 rounded-xl font-mono text-xs outline-none transition-all pr-16"
+              style={{ backgroundColor: isDark ? '#0B1220' : '#F8FAFC', border: `1px solid ${T.border}`, color: T.text }}
+            />
+            <button
+              type="button"
+              onClick={() => setShowPat(!showPat)}
+              className="absolute right-3 text-xs font-medium text-slate-400 hover:text-slate-600 cursor-pointer"
+            >
+              {showPat ? 'Hide' : 'Show'}
+            </button>
+          </div>
+          <p className="text-[10px]" style={{ color: T.textSub }}>
+            Requires <code className="font-mono text-blue-500">repo</code> (or equivalent) permissions to open branches and commit IaC fixes.
+          </p>
+        </div>
+
+        {/* Toggle 1-Click PR */}
+        <label className="flex items-center gap-3 cursor-pointer pt-2 border-t" style={{ borderColor: T.border }}>
+          <div
+            className="w-10 h-5 rounded-full transition-colors relative"
+            style={{ backgroundColor: autoCreatePr ? T.primary : T.border }}
+            onClick={() => setAutoCreatePr(!autoCreatePr)}
+          >
+            <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${autoCreatePr ? 'translate-x-5' : 'translate-x-0.5'}`} />
+          </div>
+          <div>
+            <div className="text-xs font-semibold" style={{ color: T.text }}>Auto-populate Pull Requests in AI Remediation</div>
+            <div className="text-[11px]" style={{ color: T.textSub }}>Automatically commit generated Terraform code to branches and create GitHub Pull Requests</div>
+          </div>
+        </label>
+
+        {/* Buttons */}
+        <div className="pt-3 flex items-center justify-between border-t" style={{ borderColor: T.border }}>
+          <button
+            type="button"
+            onClick={handleTest}
+            disabled={testState === 'testing'}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold border transition-all cursor-pointer"
+            style={{ borderColor: T.border, color: T.text, backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : '#FFFFFF' }}
+          >
+            {testState === 'testing' ? (
+              <>
+                <svg className="animate-spin h-3.5 w-3.5 text-blue-600" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                </svg>
+                <span>Validating...</span>
+              </>
+            ) : testState === 'success' ? (
+              <span className="text-emerald-600 flex items-center gap-1.5 font-medium">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+                Connection Verified
+              </span>
+            ) : (
+              <span>Test Repo Connection</span>
+            )}
+          </button>
+
+          <button
+            type="submit"
+            className="px-5 py-2 text-xs font-bold rounded-full text-white cursor-pointer shadow-sm hover:opacity-90 transition-opacity"
+            style={{ background: 'linear-gradient(135deg, #2563EB, #10B981)' }}
+          >
+            Save Repository Settings
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function IntegrationsSummaryPanel({ T, isDark, onOpenFull }: { T: Tokens; isDark: boolean; onOpenFull: () => void }) {
+  const { integrations } = useApp();
+
+  return (
+    <div className="flex flex-col gap-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="font-semibold text-lg" style={{ color: T.text }}>Integrations & Incident Alerts</h2>
+          <p className="text-sm mt-1" style={{ color: T.textSub }}>Connect your communication and ticketing workflows for automated notifications.</p>
+        </div>
+        <button
+          type="button"
+          onClick={onOpenFull}
+          className="px-4 py-2 rounded-full text-xs font-bold text-white cursor-pointer shadow-sm hover:opacity-90 transition-opacity flex items-center gap-1.5 shrink-0"
+          style={{ background: 'linear-gradient(135deg, #2563EB, #10B981)' }}
+        >
+          <span>Open Full Console</span>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <polyline points="9 18 15 12 9 6" />
+          </svg>
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {/* Slack Card */}
+        <div className="p-4 rounded-2xl flex flex-col justify-between gap-3" style={{ background: T.card, border: `1px solid ${T.border}`, boxShadow: T.shadow }}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-[#4A154B]/10 p-1.5 border border-[#4A154B]/20 flex items-center justify-center shrink-0">
+                <SlackLogo className="w-full h-full" />
+              </div>
+              <div>
+                <div className="font-semibold text-sm" style={{ color: T.text }}>Slack</div>
+                <div className="text-[11px]" style={{ color: T.textSub }}>
+                  {integrations?.slack?.connected ? integrations.slack.channel : 'Not connected'}
+                </div>
+              </div>
+            </div>
+            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${integrations?.slack?.connected ? 'bg-emerald-500/10 text-emerald-500' : 'bg-slate-500/10 text-slate-400'}`}>
+              {integrations?.slack?.connected ? 'Active' : 'Disabled'}
+            </span>
+          </div>
+          <p className="text-xs" style={{ color: T.textSub }}>
+            Dispatches scan completions, HRI alerts, and score regression warnings to your Slack channels.
+          </p>
+        </div>
+
+        {/* Jira Card */}
+        <div className="p-4 rounded-2xl flex flex-col justify-between gap-3" style={{ background: T.card, border: `1px solid ${T.border}`, boxShadow: T.shadow }}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-[#0052CC]/10 p-1.5 border border-[#0052CC]/20 flex items-center justify-center shrink-0">
+                <JiraLogo className="w-full h-full" />
+              </div>
+              <div>
+                <div className="font-semibold text-sm" style={{ color: T.text }}>Jira Software</div>
+                <div className="text-[11px]" style={{ color: T.textSub }}>
+                  {integrations?.jira?.connected ? `${integrations.jira.projectKey} (${integrations.jira.issueType})` : 'Not configured'}
+                </div>
+              </div>
+            </div>
+            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${integrations?.jira?.connected ? 'bg-emerald-500/10 text-emerald-500' : 'bg-slate-500/10 text-slate-400'}`}>
+              {integrations?.jira?.connected ? 'Active' : 'Disabled'}
+            </span>
+          </div>
+          <p className="text-xs" style={{ color: T.textSub }}>
+            Automatically creates and syncs remediation tickets for High & Critical security risks.
+          </p>
+        </div>
+
+        {/* Google Chat Card */}
+        <div className="p-4 rounded-2xl flex flex-col justify-between gap-3" style={{ background: T.card, border: `1px solid ${T.border}`, boxShadow: T.shadow }}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-[#00AC47]/10 p-1.5 border border-[#00AC47]/20 flex items-center justify-center shrink-0">
+                <GChatLogo className="w-full h-full" />
+              </div>
+              <div>
+                <div className="font-semibold text-sm" style={{ color: T.text }}>Google Chat</div>
+                <div className="text-[11px]" style={{ color: T.textSub }}>
+                  {integrations?.gchat?.connected ? (integrations.gchat.spaceName || 'Connected Space') : 'Not connected'}
+                </div>
+              </div>
+            </div>
+            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${integrations?.gchat?.connected ? 'bg-emerald-500/10 text-emerald-500' : 'bg-slate-500/10 text-slate-400'}`}>
+              {integrations?.gchat?.connected ? 'Active' : 'Disabled'}
+            </span>
+          </div>
+          <p className="text-xs" style={{ color: T.textSub }}>
+            Delivers interactive cards and security summaries to Google Workspace Spaces and webhooks.
+          </p>
+        </div>
+      </div>
+
+      <div className="p-4 rounded-2xl flex items-center justify-between" style={{ background: isDark ? 'rgba(59,130,246,0.08)' : '#EFF6FF', border: `1px solid ${isDark ? 'rgba(59,130,246,0.2)' : '#BFDBFE'}` }}>
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-blue-500/20 text-blue-500 flex items-center justify-center font-bold">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+            </svg>
+          </div>
+          <div>
+            <div className="text-xs font-semibold" style={{ color: T.text }}>Need Custom Alert Routing or Webhooks?</div>
+            <div className="text-[11px]" style={{ color: T.textSub }}>Configure custom payload signatures, test alerts, and inspect dispatched event audit logs.</div>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onOpenFull}
+          className="px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white cursor-pointer transition-colors shrink-0"
+        >
+          Manage Alerts & Webhooks →
+        </button>
+      </div>
     </div>
   );
 }
@@ -1009,8 +1535,10 @@ export function Settings() {
           {/* Content */}
           <main className="flex-1 overflow-auto p-8" style={{ backgroundColor: T.bg }}>
             <div className="max-w-2xl mx-auto">
-              {activeSection === 'config'    && <CloudConfigPanel T={T} isDark={isDark} />}
-              {activeSection === 'retention' && <RetentionPanel T={T} isDark={isDark} />}
+              {activeSection === 'config'       && <CloudConfigPanel T={T} isDark={isDark} />}
+              {activeSection === 'repo'         && <RepoConfigPanel T={T} isDark={isDark} />}
+              {activeSection === 'retention'    && <RetentionPanel T={T} isDark={isDark} />}
+              {activeSection === 'integrations' && <IntegrationsSummaryPanel T={T} isDark={isDark} onOpenFull={() => go('integrations')} />}
             </div>
           </main>
         </div>

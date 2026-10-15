@@ -93,6 +93,14 @@ export function OrgQuestions() {
 
   const [activeQuestionId, setActiveQuestionId] = useState<string | null>('ORG-01');
   const [selectedInfoQuestion, setSelectedInfoQuestion] = useState<QuestionnaireItem | null>(null);
+  const [openHints, setOpenHints] = useState<Record<string, boolean>>({});
+
+  const toggleHint = (key: string) => {
+    setOpenHints(prev => ({
+      ...prev,
+      [key]: !prev[key],
+    }));
+  };
 
   // Statistics
   const totalQuestions = orgQuestions.length;
@@ -130,7 +138,7 @@ export function OrgQuestions() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col" style={{ backgroundColor: T.bg, color: T.text }}>
+    <div className="h-screen flex flex-col overflow-hidden" style={{ backgroundColor: T.bg, color: T.text }}>
       {/* ── TOP HEADER BAR ── */}
       <header
         className="h-14 flex items-center px-6 gap-4 shrink-0 z-30 sticky top-0 border-b"
@@ -271,8 +279,9 @@ export function OrgQuestions() {
         </div>
       </div>
 
-      {/* ── MAIN CONTENT AREA ── */}
-      <main className="flex-1 max-w-4xl w-full mx-auto p-6 sm:p-8 flex flex-col gap-6">
+      {/* ── SCROLLABLE MAIN CONTENT AREA ── */}
+      <div className="flex-1 overflow-y-auto overflow-x-hidden">
+        <main className="max-w-4xl w-full mx-auto p-6 sm:p-8 pb-20 flex flex-col gap-6">
         {/* Page Title & Context Header */}
         <div className="flex items-start justify-between flex-wrap gap-4">
           <div>
@@ -288,7 +297,7 @@ export function OrgQuestions() {
             </div>
 
             <h1 className="text-2xl sm:text-3xl font-bold tracking-tight" style={{ color: T.text }}>
-              Organisation-Specific Questions
+              Let us know more about your organisation
             </h1>
             <p className="text-xs sm:text-sm mt-1.5 max-w-2xl leading-relaxed" style={{ color: T.textSub }}>
               These architectural baseline questions apply across all accounts in your organization. Answer them now before choosing your cloud provider to ensure standardized compliance guardrails.
@@ -463,45 +472,75 @@ export function OrgQuestions() {
                         </div>
 
                         <div className="space-y-2">
-                          {q.manualChecks.map(chk => (
-                            <div
-                              key={chk.id}
-                              onClick={() => toggleOrgCheck(q.id, chk.id)}
-                              className="flex items-start gap-3 p-3 rounded-xl border transition-all cursor-pointer"
-                              style={{
-                                borderColor: chk.verified ? (isDark ? 'rgba(52,211,153,0.35)' : '#A7F3D0') : T.border,
-                                backgroundColor: chk.verified ? (isDark ? 'rgba(52,211,153,0.08)' : '#F0FDF4') : (isDark ? 'rgba(255,255,255,0.02)' : '#FFFFFF'),
-                              }}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={chk.verified}
-                                onChange={() => toggleOrgCheck(q.id, chk.id)}
-                                className="mt-0.5 rounded text-emerald-600 h-4 w-4 border-gray-300 cursor-pointer"
-                              />
-                              <div className="flex-1 min-w-0">
-                                <div
-                                  className={`text-xs ${chk.verified ? 'font-semibold text-emerald-700 dark:text-emerald-300' : 'font-medium'}`}
-                                  style={{ color: chk.verified ? undefined : T.text }}
-                                >
-                                  {chk.label}
-                                </div>
-                                {chk.guidance && (
-                                  <div
-                                    className="text-[11px] mt-1 font-mono px-2 py-0.5 rounded border inline-flex items-center gap-1.5"
-                                    style={{
-                                      backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : '#F8FAFC',
-                                      borderColor: T.border,
-                                      color: T.textSub,
-                                    }}
-                                  >
-                                    <span className="font-bold text-blue-600 dark:text-blue-400">Hint:</span>
-                                    <span>{chk.guidance}</span>
+                          {q.manualChecks.map(chk => {
+                            const hintKey = `${q.id}-${chk.id}`;
+                            const isHintOpen = !!openHints[hintKey];
+
+                            return (
+                              <div
+                                key={chk.id}
+                                onClick={() => toggleOrgCheck(q.id, chk.id)}
+                                className="flex items-start gap-3 p-3 rounded-xl border transition-all cursor-pointer"
+                                style={{
+                                  borderColor: chk.verified ? (isDark ? 'rgba(52,211,153,0.35)' : '#A7F3D0') : T.border,
+                                  backgroundColor: chk.verified ? (isDark ? 'rgba(52,211,153,0.08)' : '#F0FDF4') : (isDark ? 'rgba(255,255,255,0.02)' : '#FFFFFF'),
+                                }}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={chk.verified}
+                                  onChange={() => toggleOrgCheck(q.id, chk.id)}
+                                  className="mt-0.5 rounded text-emerald-600 h-4 w-4 border-gray-300 cursor-pointer shrink-0"
+                                />
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div
+                                      className={`text-xs ${chk.verified ? 'font-semibold text-emerald-700 dark:text-emerald-300' : 'font-medium'}`}
+                                      style={{ color: chk.verified ? undefined : T.text }}
+                                    >
+                                      {chk.label}
+                                    </div>
+                                    {chk.guidance && (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          toggleHint(hintKey);
+                                        }}
+                                        className={`w-5 h-5 rounded-md flex items-center justify-center font-serif italic font-bold text-[11px] transition-all cursor-pointer shrink-0 ${
+                                          isHintOpen
+                                            ? 'bg-blue-600 text-white shadow-xs'
+                                            : isDark
+                                            ? 'bg-blue-500/15 text-blue-400 hover:bg-blue-600 hover:text-white border border-blue-500/30'
+                                            : 'bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white border border-blue-200'
+                                        }`}
+                                        title={isHintOpen ? 'Hide verification hint' : 'Click to show verification hint'}
+                                      >
+                                        i
+                                      </button>
+                                    )}
                                   </div>
-                                )}
+
+                                  {isHintOpen && chk.guidance && (
+                                    <div
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="text-[11px] mt-2 font-mono px-2.5 py-1.5 rounded-lg border flex items-start gap-1.5 transition-all"
+                                      style={{
+                                        backgroundColor: isDark ? 'rgba(59,130,246,0.1)' : '#EFF6FF',
+                                        borderColor: isDark ? 'rgba(59,130,246,0.25)' : '#BFDBFE',
+                                        color: isDark ? '#93C5FD' : '#1E40AF',
+                                      }}
+                                    >
+                                      <span className="font-bold shrink-0 text-blue-600 dark:text-blue-400">Hint:</span>
+                                      <span className="leading-relaxed font-sans" style={{ color: isDark ? '#E2E8F0' : '#1E293B' }}>
+                                        {chk.guidance}
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
                               </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       </div>
                     )}
@@ -584,6 +623,7 @@ export function OrgQuestions() {
           </div>
         </div>
       </main>
+      </div>
 
       {/* ── QUESTION INFO MODAL ('i' Button Guidance Popup) ── */}
       {selectedInfoQuestion && (

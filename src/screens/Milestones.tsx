@@ -133,6 +133,7 @@ export function Milestones() {
   const {
     currentAssessment,
     currentMilestones,
+    milestones,
     addMilestone,
     deleteMilestone,
     go,
@@ -142,28 +143,42 @@ export function Milestones() {
   const isDark = theme === 'dark';
   const T: Tokens = isDark ? DARK : LIGHT;
 
-  // Safe fallback for currentAssessment
-  const assessment = currentAssessment || {
-    id: 'A-001',
-    name: 'Production — us-east-1 Full Review',
-    accountName: 'acme-production',
-    accountId: '124890123456',
-    region: 'us-east-1',
-    cloud: 'aws' as const,
-    status: 'complete' as const,
-    score: 84,
-    lastRun: '2h ago',
-    checks: 45,
-    pillars: {
-      reliability: 88,
-      security: 79,
-      cost: 91,
-      operations: 82,
-      performance: 80,
-    },
-  };
+  if (!currentAssessment) {
+    return (
+      <AppLayout>
+        <div className="flex flex-col min-h-screen p-8 max-w-5xl mx-auto" style={{ backgroundColor: T.bg }}>
+          <div
+            className="p-12 text-center rounded-2xl border flex flex-col items-center justify-center gap-3 mt-12"
+            style={{ backgroundColor: T.card, borderColor: T.border, boxShadow: T.shadow }}
+          >
+            <div
+              className="w-12 h-12 rounded-full flex items-center justify-center mb-2"
+              style={{ backgroundColor: isDark ? 'rgba(59,130,246,0.15)' : '#EFF6FF', color: T.primary }}
+            >
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1z" />
+                <line x1="4" y1="22" x2="4" y2="15" />
+              </svg>
+            </div>
+            <h2 className="text-base font-bold" style={{ color: T.text }}>No Active Assessments Found</h2>
+            <p className="text-xs max-w-md" style={{ color: T.textSub }}>
+              Milestones record historical, point-in-time compliance snapshots for a specific cloud assessment. Connect a cloud account or run an assessment to start saving milestones.
+            </p>
+            <button
+              onClick={() => go('dashboard')}
+              className="mt-3 px-5 py-2.5 rounded-full text-xs font-semibold text-white shadow-sm transition-opacity hover:opacity-90 cursor-pointer"
+              style={{ background: 'linear-gradient(135deg, #1B6FC9, #10B981)' }}
+            >
+              Go to Home / Dashboard
+            </button>
+          </div>
+        </div>
+      </AppLayout>
+    );
+  }
 
-  const milestoneList: AssessmentMilestone[] = Array.isArray(currentMilestones) ? currentMilestones : [];
+  const assessment = currentAssessment;
+  const milestoneList = Array.isArray(currentMilestones) ? currentMilestones : [];
 
   // Modal states
   const [saveModalOpen, setSaveModalOpen] = useState(false);
@@ -201,9 +216,15 @@ export function Milestones() {
       version: version.trim() || `v1.${nextNum}`,
       notes: notes.trim(),
       score: assessment.score ?? 84,
-      highRisks: 5,
-      mediumRisks: 5,
-      lowRisks: 2,
+      totalBestPractices: assessment.totalBestPractices ?? 16,
+      passedBps: assessment.passedBps ?? 12,
+      failedBps: assessment.failedBps ?? 4,
+      totalChecks: assessment.totalChecks ?? 46,
+      passedChecks: assessment.passedChecks ?? 36,
+      failedChecks: assessment.failedChecks ?? 10,
+      highRisks: assessment.highRisks ?? 3,
+      mediumRisks: assessment.mediumRisks ?? 5,
+      lowRisks: assessment.lowRisks ?? 2,
       pillarScores: assessment.pillars ?? {
         reliability: 88,
         security: 79,

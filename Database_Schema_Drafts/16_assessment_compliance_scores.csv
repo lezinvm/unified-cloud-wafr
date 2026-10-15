@@ -1,0 +1,2 @@
+id,assessment_id,framework_id,score,passing_controls,failing_controls,total_controls,is_pinned,evaluated_at
+acs_01,ass_01,soc2,92.5,90,5,95,true,2026-10-01

@@ -114,9 +114,9 @@ export function ArchitectureDiagramModal({
             <div
               className="w-9 h-9 rounded-xl flex items-center justify-center font-bold text-sm shrink-0 border"
               style={{
-                backgroundColor: isDark ? 'rgba(225, 29, 72, 0.15)' : '#FFF1F2',
-                borderColor: isDark ? 'rgba(225, 29, 72, 0.4)' : '#FDA4AF',
-                color: '#E11D48',
+                backgroundColor: isDark ? 'rgba(59, 130, 246, 0.15)' : '#EFF6FF',
+                borderColor: isDark ? 'rgba(59, 130, 246, 0.3)' : '#BFDBFE',
+                color: isDark ? '#60A5FA' : '#2563EB',
               }}
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -130,15 +130,15 @@ export function ArchitectureDiagramModal({
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-base font-bold leading-tight">
-                  Architecture Failure Topology — {currentAssessment?.accountName || 'acme-production'}
+                  Architecture Topology — {currentAssessment?.accountName || 'acme-production'}
                 </h2>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full border bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/30 font-bold flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
-                  {failedCount} Failed Resources in Red
+                <span className="text-[10px] font-mono px-2.5 py-0.5 rounded-full border bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700 font-semibold flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                  {failedCount} Non-Compliant Resources
                 </span>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Physical and logical infrastructure graph. Non-compliant components and risky connection paths are highlighted in <span className="font-bold text-rose-600 dark:text-rose-400">RED</span>.
+                Physical and logical infrastructure topology graph. Non-compliant components and risky connection paths are highlighted in the architecture diagram.
               </p>
             </div>
           </div>
@@ -162,11 +162,11 @@ export function ArchitectureDiagramModal({
                 onClick={() => setFilterFailedOnly(true)}
                 className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-medium transition-all cursor-pointer ${
                   filterFailedOnly
-                    ? 'bg-rose-600 text-white shadow-xs font-semibold'
-                    : 'text-rose-600 dark:text-rose-400 hover:text-rose-700'
+                    ? 'bg-slate-900 text-white dark:bg-blue-600 dark:text-white shadow-xs font-semibold'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
-                <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
+                <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
                 Failed Only ({failedCount})
               </button>
             </div>
@@ -434,51 +434,56 @@ export function ArchitectureDiagramModal({
                     <span
                       className="text-xs font-mono font-bold px-2.5 py-0.5 rounded-lg border"
                       style={{
-                        backgroundColor: selectedNode.isFailed
-                          ? (isDark ? 'rgba(225,29,72,0.2)' : '#FFE4E6')
-                          : (isDark ? 'rgba(255,255,255,0.08)' : '#E2E8F0'),
-                        borderColor: selectedNode.isFailed ? '#FDA4AF' : (isDark ? '#334155' : '#CBD5E1'),
-                        color: selectedNode.isFailed ? '#E11D48' : (isDark ? '#F1F5F9' : '#0F172A'),
+                        backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : '#F1F5F9',
+                        borderColor: isDark ? '#334155' : '#CBD5E1',
+                        color: isDark ? '#F1F5F9' : '#0F172A',
                       }}
                     >
                       {TYPE_LABEL[selectedNode.type] || selectedNode.type}
                     </span>
 
                     {selectedNode.isFailed ? (
-                      <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30 flex items-center gap-1">
+                      <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400 border border-rose-200 dark:border-rose-900/60 flex items-center gap-1.5">
                         <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
-                        FAILED (RED)
+                        Non-Compliant
                       </span>
                     ) : (
-                      <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
-                        Healthy
+                      <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-900/60 flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                        Compliant
                       </span>
                     )}
                   </div>
 
-                  <h3 className="font-bold text-base mt-2 text-slate-900 dark:text-white">
+                  <h3 className="font-bold text-base mt-2.5 text-slate-900 dark:text-white">
                     {selectedNode.label}
                   </h3>
 
                   {/* Failure / Health Description Notice */}
                   {selectedNode.isFailed ? (
-                    <div className="mt-3 p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-xs text-rose-700 dark:text-rose-300 flex flex-col gap-1.5">
-                      <div className="font-bold flex items-center gap-1.5 text-rose-800 dark:text-rose-200">
-                        <span>High Risk Issue Identified</span>
+                    <div className="mt-3 p-3.5 rounded-xl border border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-800/60 shadow-2xs text-xs flex flex-col gap-2">
+                      <div className="flex items-center justify-between gap-1.5">
+                        <div className="font-bold flex items-center gap-1.5 text-slate-900 dark:text-white">
+                          <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0" />
+                          <span>High Risk Finding</span>
+                        </div>
                         {selectedNode.findingId && (
-                          <span className="font-mono text-[10px] px-1.5 py-0.2 rounded bg-rose-600 text-white font-bold">
+                          <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-slate-900 dark:bg-slate-700 text-white font-bold">
                             {selectedNode.findingId}
                           </span>
                         )}
                       </div>
-                      <div className="leading-relaxed">
+                      <div className="leading-relaxed text-slate-600 dark:text-slate-300 font-normal">
                         {selectedNode.detail}
                       </div>
                     </div>
                   ) : (
-                    <div className="mt-3 p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-xs text-emerald-800 dark:text-emerald-300">
-                      <div className="font-semibold mb-0.5">Compliant Resource</div>
-                      <div className="text-slate-600 dark:text-slate-300">{selectedNode.detail}</div>
+                    <div className="mt-3 p-3.5 rounded-xl border border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-800/60 shadow-2xs text-xs">
+                      <div className="font-semibold mb-0.5 text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                        <span>Compliant Resource</span>
+                      </div>
+                      <div className="text-slate-600 dark:text-slate-300 leading-relaxed">{selectedNode.detail}</div>
                     </div>
                   )}
 
@@ -504,8 +509,7 @@ export function ArchitectureDiagramModal({
                     <button
                       type="button"
                       onClick={() => handleFixResource(selectedNode.findingId)}
-                      className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-bold transition-opacity hover:opacity-90 cursor-pointer shadow-md text-white"
-                      style={{ background: 'linear-gradient(135deg, #E11D48, #BE123C)' }}
+                      className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-bold transition-all hover:bg-blue-700 cursor-pointer shadow-sm text-white bg-blue-600"
                     >
                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                         <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
@@ -545,7 +549,7 @@ export function ArchitectureDiagramModal({
               <span className="w-3.5 h-3.5 rounded-sm bg-rose-500/20 border-2 border-rose-500 flex items-center justify-center text-[8px] font-bold text-rose-500">
                 !
               </span>
-              <span className="font-bold text-rose-600 dark:text-rose-400">Failed Resource (Red)</span>
+              <span className="text-slate-700 dark:text-slate-300 font-medium">Non-Compliant Resource</span>
             </div>
 
             <div className="flex items-center gap-2">
@@ -555,7 +559,7 @@ export function ArchitectureDiagramModal({
 
             <div className="flex items-center gap-2">
               <span className="w-6 h-0 border-t-2 border-dashed border-rose-500" />
-              <span className="text-rose-600 dark:text-rose-400 text-[11px]">Compromised Path</span>
+              <span className="text-slate-600 dark:text-slate-400 text-[11px]">Compromised Path</span>
             </div>
           </div>
 
@@ -570,7 +574,7 @@ export function ArchitectureDiagramModal({
             <button
               type="button"
               onClick={() => handleFixResource('SEC-047')}
-              className="px-4 py-1.5 rounded-xl text-xs font-bold text-white bg-rose-600 hover:bg-rose-500 transition-colors cursor-pointer shadow-sm flex items-center gap-1.5"
+              className="px-4 py-1.5 rounded-xl text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 transition-colors cursor-pointer shadow-sm flex items-center gap-1.5"
             >
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                 <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>

@@ -17,6 +17,10 @@ import { Admin } from './screens/Admin';
 import { Onboarding } from './screens/Onboarding';
 import { SelectLens } from './screens/SelectLens';
 import { OrgQuestions } from './screens/OrgQuestions';
+import { Integrations } from './screens/Integrations';
+import { Compliance } from './screens/Compliance';
+import { SpotlightTour } from './components/SpotlightTour';
+import { IntegrationToast } from './components/IntegrationToast';
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -86,9 +90,11 @@ function ScreenRouter() {
     case 'report':          return <AssessmentReport />;
     case 'pillar-detail':   return <PillarDetail />;
     case 'milestones':      return <Milestones />;
-    case 'remediation':     return <AIRemediation />;
-    case 'ai-fix':          return <AIFix />;
+    case 'remediation':
+    case 'ai-fix':          return <AIRemediation />;
     case 'diagram':         return <ArchitectureDiagram />;
+    case 'integrations':    return <Integrations />;
+    case 'compliance':      return <Compliance />;
     case 'settings':        return <Settings />;
     case 'admin':           return <Admin />;
     case 'onboarding':      return <Onboarding />;
@@ -99,13 +105,20 @@ function ScreenRouter() {
 
 function AppShell() {
   const { theme } = useApp();
+
+  React.useEffect(() => {
+    document.title = 'L.E.N.S';
+  }, []);
+
   return (
     <div
-      className={`relative h-screen overflow-hidden font-sans ${theme === 'dark' ? 'dark' : ''}`}
+      className={`relative min-h-screen w-full font-sans ${theme === 'dark' ? 'dark' : ''}`}
       style={{ fontFamily: 'Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}
     >
       <AppErrorBoundary>
         <ScreenRouter />
+        <SpotlightTour />
+        <IntegrationToast />
       </AppErrorBoundary>
     </div>
   );

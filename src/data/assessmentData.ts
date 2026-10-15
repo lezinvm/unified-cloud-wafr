@@ -16,6 +16,17 @@ export interface AssessmentInfo {
     operations: number;
     performance: number;
   };
+  totalBestPractices?: number;
+  passedBps?: number;
+  failedBps?: number;
+  totalChecks?: number;
+  passedChecks?: number;
+  failedChecks?: number;
+  highRisks?: number;
+  mediumRisks?: number;
+  lowRisks?: number;
+  rerunCount?: number;
+  isRerun?: boolean;
 }
 
 export interface AssessmentMilestone {

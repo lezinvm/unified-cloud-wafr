@@ -3,6 +3,9 @@ import { useApp, LIGHT, DARK, Tokens } from '../context';
 import { AppLayout } from '../components/AppLayout';
 import { SeverityPill } from '../components/FindingUI';
 import { PILLARS_DATA, BestPractice, PillarData } from '../data/wafrData';
+import { JiraTicketModal } from '../components/JiraTicketModal';
+import { SlackAlertModal } from '../components/SlackAlertModal';
+import { SlackLogo, JiraLogo } from '../components/IntegrationLogos';
 
 /* ── Info Tooltip Component ──────────────────────────────────────────────── */
 
@@ -130,23 +133,47 @@ function PillarScoreGauge({ score, color, T }: { score: number; color: string; T
 }
 
 export function PillarDetail() {
-  const { go, theme, selectedPillarId, setSelectedPillarId, goToAIFix, currentMilestones, currentAssessment } = useApp();
+  const { go, theme, selectedPillarId, setSelectedPillarId, goToAIFix, currentMilestones, currentAssessment, jiraTickets, pillars } = useApp();
   const isDark = theme === 'dark';
   const T = isDark ? DARK : LIGHT;
 
-  const currentPillar: PillarData =
-    PILLARS_DATA.find(p => p.id === selectedPillarId) || PILLARS_DATA[0];
+  const fallbackPillar = PILLARS_DATA.find(p => p.id === selectedPillarId) || PILLARS_DATA[0];
+  const currentPillarRaw: PillarData =
+    pillars.find(p => p.id === selectedPillarId) || pillars[0] || fallbackPillar;
+
+  const currentPillar: PillarData = {
+    ...fallbackPillar,
+    ...currentPillarRaw,
+    bestPractices: Array.isArray(currentPillarRaw.bestPractices) && currentPillarRaw.bestPractices.length > 0 ? currentPillarRaw.bestPractices : fallbackPillar.bestPractices,
+    score: (currentAssessment?.pillars as Record<string, number> | undefined)?.[currentPillarRaw.id] ?? currentPillarRaw.score ?? fallbackPillar.score,
+  };
 
   const [bpFilter, setBpFilter] = useState<'all' | 'fail' | 'pass'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedBps, setExpandedBps] = useState<Record<string, boolean>>({});
 
-  const totalBps = currentPillar.bestPractices.length;
-  const failedBps = currentPillar.bestPractices.filter(bp => bp.status === 'fail').length;
+  // Jira and Slack Modal states
+  const [jiraModalTarget, setJiraModalTarget] = useState<{
+    checkId: string;
+    title: string;
+    severity?: string;
+    description?: string;
+  } | null>(null);
+
+  const [slackModalTarget, setSlackModalTarget] = useState<{
+    title: string;
+    message?: string;
+    severity?: 'critical' | 'high' | 'info';
+    checkId?: string;
+  } | null>(null);
+
+  const bps = Array.isArray(currentPillar.bestPractices) ? currentPillar.bestPractices : [];
+  const totalBps = bps.length;
+  const failedBps = bps.filter(bp => bp?.status === 'fail').length;
   const passedBps = totalBps - failedBps;
-  const allChecksInPillar = currentPillar.bestPractices.flatMap(bp => bp.checks);
+  const allChecksInPillar = bps.flatMap(bp => bp?.checks || []);
   const totalChecks = allChecksInPillar.length;
-  const failedChecksCount = allChecksInPillar.filter(c => c.status === 'fail').length;
+  const failedChecksCount = allChecksInPillar.filter(c => c?.status === 'fail').length;
   const passedChecksCount = totalChecks - failedChecksCount;
 
   const [animatedScore, setAnimatedScore] = useState(0);
@@ -673,7 +700,7 @@ export function PillarDetail() {
                                 </div>
 
                                 {/* Action / Status */}
-                                <div className="flex items-center gap-2.5 shrink-0">
+                                <div className="flex items-center gap-2 shrink-0">
                                   {checkFailed ? (
                                     <>
                                       {check.effort && (
@@ -681,6 +708,77 @@ export function PillarDetail() {
                                           Effort: <span className="font-medium" style={{ color: T.text }}>{check.effort}</span>
                                         </span>
                                       )}
+
+                                      {/* Slack Notification Button */}
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setSlackModalTarget({
+                                            title: `Pillar Alert [${currentPillar.label}]: ${check.title}`,
+                                            message: `Check ${check.id} failed in ${currentPillar.label} pillar (${check.severity?.toUpperCase()} risk).\n\nDescription: ${check.description}`,
+                                            severity: check.severity === 'critical' ? 'critical' : check.severity === 'high' ? 'high' : 'info',
+                                            checkId: check.id,
+                                          })
+                                        }
+                                        className="flex items-center gap-1 px-2 py-1 text-[10px] font-bold rounded-lg border transition-colors cursor-pointer text-[#E01E5A] dark:text-[#ECB22E]"
+                                        style={{
+                                          borderColor: isDark ? 'rgba(236,178,46,0.3)' : 'rgba(224,30,90,0.2)',
+                                          backgroundColor: isDark ? 'rgba(236,178,46,0.1)' : '#FFF5F7',
+                                        }}
+                                        title="Dispatch Slack alert for this check"
+                                      >
+                                        <SlackLogo size={11} />
+                                        <span>Slack</span>
+                                      </button>
+
+                                      {/* Jira Linked Ticket Button */}
+                                      {jiraTickets && jiraTickets[check.id] ? (
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            setJiraModalTarget({
+                                              checkId: check.id,
+                                              title: check.title,
+                                              severity: check.severity,
+                                              description: check.description,
+                                            })
+                                          }
+                                          className="flex items-center gap-1 px-2 py-1 text-[10px] font-bold rounded-lg border transition-colors cursor-pointer text-[#0052CC] dark:text-[#388BFF]"
+                                          style={{
+                                            borderColor: isDark ? 'rgba(56,139,255,0.3)' : 'rgba(0,82,204,0.2)',
+                                            backgroundColor: isDark ? 'rgba(0,82,204,0.15)' : '#EFF6FF',
+                                          }}
+                                          title={`Jira ticket ${jiraTickets[check.id].key} is ${jiraTickets[check.id].status}. Click to view/edit.`}
+                                        >
+                                          <JiraLogo size={11} />
+                                          <span>{jiraTickets[check.id].key}</span>
+                                          <span className="text-[9px] px-1 py-0.2 rounded font-semibold bg-blue-500/20">
+                                            {jiraTickets[check.id].status}
+                                          </span>
+                                        </button>
+                                      ) : (
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            setJiraModalTarget({
+                                              checkId: check.id,
+                                              title: check.title,
+                                              severity: check.severity,
+                                              description: check.description,
+                                            })
+                                          }
+                                          className="flex items-center gap-1 px-2 py-1 text-[10px] font-bold rounded-lg border transition-colors cursor-pointer text-[#0052CC] dark:text-[#388BFF]"
+                                          style={{
+                                            borderColor: isDark ? 'rgba(56,139,255,0.3)' : 'rgba(0,82,204,0.2)',
+                                            backgroundColor: isDark ? 'rgba(0,82,204,0.15)' : '#EFF6FF',
+                                          }}
+                                          title="Create and link Jira ticket for this finding"
+                                        >
+                                          <JiraLogo size={11} />
+                                          <span>+ Jira</span>
+                                        </button>
+                                      )}
+
                                       <button
                                         type="button"
                                         onClick={() => goToAIFix(check.id)}
@@ -718,6 +816,31 @@ export function PillarDetail() {
           </div>
         </div>
       </div>
+
+      {/* Linked Jira Ticket Modal */}
+      {jiraModalTarget && (
+        <JiraTicketModal
+          isOpen={true}
+          onClose={() => setJiraModalTarget(null)}
+          checkId={jiraModalTarget.checkId}
+          checkTitle={jiraModalTarget.title}
+          severity={jiraModalTarget.severity}
+          checkDescription={jiraModalTarget.description}
+          existingTicket={jiraTickets ? jiraTickets[jiraModalTarget.checkId] : undefined}
+        />
+      )}
+
+      {/* Slack Alert Modal */}
+      {slackModalTarget && (
+        <SlackAlertModal
+          isOpen={true}
+          onClose={() => setSlackModalTarget(null)}
+          initialTitle={slackModalTarget.title}
+          initialMessage={slackModalTarget.message}
+          initialSeverity={slackModalTarget.severity}
+          checkId={slackModalTarget.checkId}
+        />
+      )}
     </AppLayout>
   );
 }

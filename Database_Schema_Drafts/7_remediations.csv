@@ -1,0 +1,2 @@
+id,rule_id,cli_command,cli_explanation,iac_templates,manual_steps,risk_summary,created_at,updated_at
+rem_01,rule_s3_encryption,aws s3api,Enables AES256,{},,2026-10-01,2026-10-01

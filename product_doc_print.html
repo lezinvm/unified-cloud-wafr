@@ -1,0 +1,800 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>CloudifyOps Unified Cloud WAFR - Product Documentation</title>
+<style>
+  @page {
+    size: A4 portrait;
+    margin: 14mm 16mm 14mm 16mm;
+    @bottom-right {
+      content: counter(page);
+    }
+  }
+
+  *, *::before, *::after {
+    box-sizing: border-box;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    color: #0F172A;
+    background-color: #FFFFFF;
+    line-height: 1.55;
+    font-size: 10pt;
+    margin: 0;
+    padding: 0;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Headings */
+  h1, h2, h3, h4, h5 {
+    color: #0F172A;
+    font-weight: 700;
+    margin-top: 1.2em;
+    margin-bottom: 0.5em;
+    line-height: 1.25;
+  }
+
+  h1 { font-size: 18pt; color: #1E3A8A; }
+  h2 { font-size: 13.5pt; color: #1E40AF; border-bottom: 1.5pt solid #E2E8F0; padding-bottom: 4px; margin-top: 1.6em; }
+  h3 { font-size: 11pt; color: #0F172A; margin-top: 1.2em; }
+  h4 { font-size: 10pt; color: #334155; margin-top: 1em; }
+
+  p {
+    margin: 0.5em 0;
+    color: #334155;
+    text-align: justify;
+  }
+
+  /* Page Break Utilities */
+  .page-break {
+    page-break-before: always;
+    break-before: page;
+  }
+
+  .avoid-break {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  /* Cover Page */
+  .cover-page {
+    height: 100vh;
+    min-height: 250mm;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 30mm 10mm 15mm 10mm;
+    page-break-after: always;
+    break-after: page;
+    background: linear-gradient(145deg, #0B132B 0%, #1C2541 60%, #1E3A8A 100%);
+    color: #FFFFFF;
+    border-radius: 12px;
+  }
+
+  .cover-logo-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .logo-box {
+    width: 52px;
+    height: 52px;
+    border-radius: 14px;
+    background: linear-gradient(135deg, #2563EB, #06B6D4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 8px 20px rgba(37,99,235,0.4);
+  }
+
+  .cover-tagline {
+    font-size: 9.5pt;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: #38BDF8;
+    font-weight: 600;
+  }
+
+  .cover-main-title {
+    font-size: 26pt;
+    font-weight: 800;
+    line-height: 1.15;
+    margin: 15px 0 10px 0;
+    color: #FFFFFF;
+    letter-spacing: -0.5px;
+  }
+
+  .cover-sub-title {
+    font-size: 13pt;
+    color: #94A3B8;
+    font-weight: 400;
+    line-height: 1.4;
+    max-width: 600px;
+    margin-bottom: 25px;
+  }
+
+  .cover-pills {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 15px;
+  }
+
+  .cover-pill {
+    padding: 5px 12px;
+    border-radius: 20px;
+    background: rgba(255,255,255,0.1);
+    border: 1px solid rgba(255,255,255,0.15);
+    font-size: 8.5pt;
+    color: #E2E8F0;
+    font-weight: 500;
+  }
+
+  .cover-meta {
+    border-top: 1px solid rgba(255,255,255,0.15);
+    padding-top: 15px;
+    display: flex;
+    justify-content: space-between;
+    font-size: 8.5pt;
+    color: #94A3B8;
+  }
+
+  .cover-meta strong {
+    color: #F8FAFC;
+  }
+
+  /* Table styling */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 10px 0 16px 0;
+    font-size: 8.5pt;
+  }
+
+  th, td {
+    padding: 7px 10px;
+    border: 1px solid #E2E8F0;
+    text-align: left;
+    vertical-align: top;
+  }
+
+  th {
+    background-color: #F1F5F9;
+    color: #1E293B;
+    font-weight: 700;
+  }
+
+  tr:nth-child(even) td {
+    background-color: #F8FAFC;
+  }
+
+  /* Callout Boxes */
+  .callout {
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin: 10px 0 14px 0;
+    font-size: 9pt;
+  }
+
+  .callout-blue {
+    background-color: #EFF6FF;
+    border-left: 4px solid #2563EB;
+    color: #1E40AF;
+  }
+
+  .callout-green {
+    background-color: #ECFDF5;
+    border-left: 4px solid #059669;
+    color: #065F46;
+  }
+
+  .callout-amber {
+    background-color: #FFFBEB;
+    border-left: 4px solid #D97706;
+    color: #92400E;
+  }
+
+  .callout-red {
+    background-color: #FFF1F2;
+    border-left: 4px solid #E11D48;
+    color: #9F1239;
+  }
+
+  .callout-title {
+    font-weight: 700;
+    font-size: 9.5pt;
+    margin-bottom: 3px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  /* Grid layouts */
+  .grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin: 10px 0;
+  }
+
+  .grid-3 {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 10px;
+    margin: 10px 0;
+  }
+
+  .feature-card {
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 8px;
+    padding: 10px 12px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  }
+
+  .feature-card h4 {
+    margin-top: 0;
+    margin-bottom: 4px;
+    color: #1E3A8A;
+    font-size: 9.5pt;
+  }
+
+  .feature-card p {
+    font-size: 8.5pt;
+    color: #475569;
+    margin: 0;
+    line-height: 1.45;
+  }
+
+  .badge {
+    display: inline-block;
+    padding: 2px 7px;
+    border-radius: 12px;
+    font-size: 7.5pt;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .badge-blue { background: #DBEAFE; color: #1D4ED8; }
+  .badge-green { background: #D1FAE5; color: #047857; }
+  .badge-purple { background: #F3E8FF; color: #7E22CE; }
+  .badge-amber { background: #FEF3C7; color: #B45309; }
+
+  /* Code snippet box */
+  pre {
+    background-color: #0F172A;
+    color: #F8FAFC;
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-family: "Consolas", "Courier New", monospace;
+    font-size: 7.5pt;
+    overflow-x: auto;
+    margin: 8px 0 12px 0;
+    line-height: 1.4;
+  }
+
+  code {
+    font-family: "Consolas", "Courier New", monospace;
+    font-size: 8.5pt;
+    background: #F1F5F9;
+    padding: 2px 4px;
+    border-radius: 4px;
+    color: #0F172A;
+  }
+
+  pre code {
+    background: transparent;
+    padding: 0;
+    color: inherit;
+  }
+
+  .header-rule {
+    height: 3px;
+    background: linear-gradient(90deg, #2563EB, #06B6D4, #10B981);
+    border: none;
+    margin: 0 0 16px 0;
+  }
+
+  ul, ol {
+    margin: 5px 0 10px 0;
+    padding-left: 20px;
+    font-size: 9pt;
+    color: #334155;
+  }
+
+  li {
+    margin-bottom: 4px;
+  }
+
+  .security-seal {
+    border: 1.5px solid #059669;
+    background: #F0FDF4;
+    border-radius: 10px;
+    padding: 12px 16px;
+    margin: 12px 0;
+  }
+</style>
+</head>
+<body>
+
+<!-- COVER PAGE -->
+<div class="cover-page">
+  <div>
+    <div class="cover-logo-row">
+      <div class="logo-box">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/>
+          <path d="m9 13 2 2 4-4"/>
+        </svg>
+      </div>
+      <div>
+        <div style="font-size: 14pt; font-weight: 800; letter-spacing: 0.5px; color: #FFFFFF;">CloudifyOps</div>
+        <div class="cover-tagline">Architectural Excellence · Continuous Governance</div>
+      </div>
+    </div>
+
+    <div style="margin-top: 50px;">
+      <div class="cover-tagline" style="color: #38BDF8;">ENTERPRISE SOLUTION WHITEPAPER & PRODUCT DOCUMENTATION</div>
+      <h1 class="cover-main-title">Unified Cloud WAFR Platform</h1>
+      <div class="cover-sub-title">
+        Multi-Cloud Well-Architected Framework Reviews (AWS · Azure · GCP) with Agentless Discovery, Interactive Topology, and 1-Click Automated AI Remediation.
+      </div>
+
+      <div class="cover-pills">
+        <span class="cover-pill">AWS Well-Architected</span>
+        <span class="cover-pill">Azure WAF Benchmark</span>
+        <span class="cover-pill">GCP Architecture Framework</span>
+        <span class="cover-pill">Zero-Trust / Read-Only</span>
+        <span class="cover-pill">AES-256 KMS Encryption</span>
+        <span class="cover-pill">Terraform & CFN Generator</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="cover-meta">
+    <div>
+      <div><strong>Document ID:</strong> CO-WAFR-SPEC-2026</div>
+      <div><strong>Classification:</strong> Confidential · Client & Executive Brief</div>
+      <div><strong>Target Audience:</strong> CIO, CISO, VP Engineering, Cloud Architects, SecOps</div>
+    </div>
+    <div style="text-align: right;">
+      <div><strong>Organization:</strong> CloudifyOps Technologies</div>
+      <div><strong>Date:</strong> Q3 2026 · Release v2.4</div>
+      <div><strong>Website:</strong> cloudifyops.com</div>
+    </div>
+  </div>
+</div>
+
+<!-- SECTION 1: EXECUTIVE SUMMARY -->
+<hr class="header-rule">
+<h2>1. Executive Summary & Value Proposition</h2>
+
+<p>
+The <strong>CloudifyOps Unified Cloud WAFR Platform</strong> is an enterprise cloud architecture evaluation, governance, and automated remediation platform. It solves the critical bottleneck between high-level architectural standards and engineering implementation across <strong>Amazon Web Services (AWS)</strong>, <strong>Microsoft Azure</strong>, and <strong>Google Cloud Platform (GCP)</strong>.
+</p>
+
+<p>
+Historically, Well-Architected Framework Reviews have been slow, consultant-heavy, point-in-time assessments. Organizations were presented with static 100-page PDF reports that languished in backlogs without actionable remediation. <strong>CloudifyOps Unified Cloud WAFR</strong> automates this workflow into a continuous, data-driven, and AI-accelerated standard.
+</p>
+
+<div class="avoid-break">
+  <h3>Stakeholder Value Matrix</h3>
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 22%;">Role</th>
+        <th style="width: 38%;">Industry Challenges & Pain Points</th>
+        <th style="width: 40%;">Unified Cloud WAFR Platform Solution</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>C-Suite Leadership<br><span style="font-size: 7.5pt; color: #64748B;">CIO / CISO / CTO</span></strong></td>
+        <td>
+          • Multi-cloud blind spots & audit fatigue.<br>
+          • Inability to quantify architectural risk or progress.<br>
+          • Compliance exposure and data breach liability.
+        </td>
+        <td>
+          • <strong>Unified Multi-Cloud Scorecards</strong> across AWS, Azure, & GCP.<br>
+          • <strong>Milestone Engine</strong> tracking measurable risk burndown over time.<br>
+          • <strong>Compliance Mapping</strong> to CIS Benchmarks, SOC 2, HIPAA, & ISO 27001.
+        </td>
+      </tr>
+      <tr>
+        <td><strong>Finance & FinOps Leaders</strong></td>
+        <td>
+          • Uncontrolled cloud spend & orphaned resources.<br>
+          • Low commitment coverage (Savings Plans / RIs).<br>
+          • Lack of clear workload-level cost attribution.
+        </td>
+        <td>
+          • <strong>Autonomous Waste Sweeper</strong> identifies idle disks, IPs, snapshots.<br>
+          • <strong>Commitment Optimization</strong> models compute baseline to hit &gt;70% coverage.<br>
+          • <strong>Direct ROI calculation</strong> showing dollar-for-dollar monthly savings.
+        </td>
+      </tr>
+      <tr>
+        <td><strong>Cloud Architects & Leads</strong></td>
+        <td>
+          • Subjective, manual survey-based audits.<br>
+          • Lack of visibility into real cross-service dependencies.<br>
+          • Undetected architectural drift after major releases.
+        </td>
+        <td>
+          • <strong>Automated Telemetry Scanner</strong> with 270+ rule checks across 5 pillars.<br>
+          • <strong>Interactive Topology Diagram</strong> showing live failure correlation.<br>
+          • <strong>Dual-Scope Assessment</strong> correlating org policies with workload realities.
+        </td>
+      </tr>
+      <tr>
+        <td><strong>DevOps & SecOps Engineers</strong></td>
+        <td>
+          • "Report Fatigue"—issues flagged with zero code guidance.<br>
+          • Tedious manual writing of Terraform / CFN modules.<br>
+          • Fear of breaking production during remediation.
+        </td>
+        <td>
+          • <strong>1-Click AI Fix</strong> generating syntax-checked Terraform (.tf) & CLI.<br>
+          • <strong>Affected Resource ARNs list</strong> with blast radius & effort estimate.<br>
+          • <strong>Step-by-step console playbooks</strong> with rollback guidance.
+        </td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- SECTION 2: 5 CORE PILLARS -->
+<div class="page-break"></div>
+<hr class="header-rule">
+<h2>2. The Five Foundational Well-Architected Pillars</h2>
+
+<p>
+The platform models real-world configurations against official Well-Architected Framework principles, evaluating environments across five foundational pillars:
+</p>
+
+<div class="grid-2">
+  <div class="feature-card">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+      <h4 style="margin: 0; color: #2563EB;">1. Reliability (R)</h4>
+      <span class="badge badge-blue">Resilience</span>
+    </div>
+    <p>
+      Ensures workloads recover automatically from hardware, network, or application failures.
+    </p>
+    <ul style="margin: 6px 0 0 0; padding-left: 16px; font-size: 8pt; color: #475569;">
+      <li>Multi-AZ standby database failover (RDS / Aurora / Azure SQL).</li>
+      <li>ALB cross-zone load balancing & active health-check verification.</li>
+      <li>SQS Dead Letter Queues (DLQ) preventing poisoned worker queues.</li>
+      <li>Validated Disaster Recovery (RTO &lt; 1h, RPO &lt; 15m) cross-region.</li>
+    </ul>
+  </div>
+
+  <div class="feature-card">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+      <h4 style="margin: 0; color: #E11D48;">2. Security (S)</h4>
+      <span class="badge" style="background: #FFE4E6; color: #BE123C;">Zero-Trust</span>
+    </div>
+    <p>
+      Protects data and assets using defense-in-depth and granular identity perimeters.
+    </p>
+    <ul style="margin: 6px 0 0 0; padding-left: 16px; font-size: 8pt; color: #475569;">
+      <li>IAM least privilege: flags wildcard permissions (<code>Action: *</code>).</li>
+      <li>Zero open public ingress: flags <code>0.0.0.0/0</code> on SSH (22) / RDP (3389).</li>
+      <li>KMS Customer Managed Keys (CMK) with annual rotation.</li>
+      <li>Centralized VPC Flow Logs, AWS WAF, and GuardDuty anomaly detection.</li>
+    </ul>
+  </div>
+
+  <div class="feature-card">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+      <h4 style="margin: 0; color: #059669;">3. Cost Optimization (C)</h4>
+      <span class="badge badge-green">Efficiency</span>
+    </div>
+    <p>
+      Maximizes business throughput per dollar invested by removing unused resources.
+    </p>
+    <ul style="margin: 6px 0 0 0; padding-left: 16px; font-size: 8pt; color: #475569;">
+      <li>Purging detached EBS volumes ($342+/mo waste) and idle Elastic IPs.</li>
+      <li>Snapshot lifecycle management (automatic pruning &gt;90 days).</li>
+      <li>Compute Savings Plans & RI arbitrage to reach &gt;70% coverage.</li>
+      <li>Transition to Graviton3 ARM64 (25% better price-performance).</li>
+    </ul>
+  </div>
+
+  <div class="feature-card">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+      <h4 style="margin: 0; color: #D97706;">4. Operational Excellence (O)</h4>
+      <span class="badge badge-amber">Operations</span>
+    </div>
+    <p>
+      Enables safe code deployment, full telemetry instrumentation, and continuous evolution.
+    </p>
+    <ul style="margin: 6px 0 0 0; padding-left: 16px; font-size: 8pt; color: #475569;">
+      <li>100% Infrastructure as Code (Terraform) to eliminate manual drift.</li>
+      <li>Blue/Green canary deployments on ECS/EKS with rollback alarms.</li>
+      <li>OpenTelemetry distributed tracing across all microservice ingress paths.</li>
+      <li>Structured JSON logging and actionable runbooks linked to alarms.</li>
+    </ul>
+  </div>
+</div>
+
+<div class="feature-card" style="margin-top: 10px;">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+    <h4 style="margin: 0; color: #2563EB;">5. Performance Efficiency (P)</h4>
+    <span class="badge badge-blue">Speed & Scale</span>
+  </div>
+  <p>
+    Sustains sub-second latency and high throughput as workload volume fluctuates.
+  </p>
+  <div class="grid-3" style="margin-top: 8px;">
+    <div style="font-size: 8pt; color: #475569;">• <strong>Edge Acceleration:</strong> CloudFront / Azure Front Door PoP caching with modern TLS 1.3 termination.</div>
+    <div style="font-size: 8pt; color: #475569;">• <strong>In-Memory Caching:</strong> ElastiCache Redis clusters offloading heavy relational queries.</div>
+    <div style="font-size: 8pt; color: #475569;">• <strong>Storage IOPS:</strong> EBS gp3 provisioned IOPS independent of disk volume capacity.</div>
+  </div>
+</div>
+
+<!-- SECTION 3: SPECIALIZED LENSES -->
+<h2>3. Specialized Architecture Lenses</h2>
+<p>
+To address emerging enterprise challenges, the platform extends beyond standard WAFR reviews through specialized plug-and-play lenses:
+</p>
+
+<div class="grid-3">
+  <div class="feature-card" style="border-top: 3px solid #0EA5E9;">
+    <span class="badge badge-blue">Active & Available</span>
+    <h4 style="margin-top: 6px;">WAFR Core Lens</h4>
+    <p>Comprehensive 5-pillar assessment across AWS, Azure, and GCP with automated telemetry scanner, risk gauge, and Terraform fix generation.</p>
+  </div>
+
+  <div class="feature-card" style="border-top: 3px solid #8B5CF6;">
+    <span class="badge badge-purple">Specialized Module</span>
+    <h4 style="margin-top: 6px;">GenAI & LLM Lens</h4>
+    <p>Specialized framework for Large Language Models & RAG pipelines: audits prompt injection exposure, vector database latency/scale, token economics, and AI safety guardrails.</p>
+  </div>
+
+  <div class="feature-card" style="border-top: 3px solid #10B981;">
+    <span class="badge badge-green">Specialized Module</span>
+    <h4 style="margin-top: 6px;">Autonomous FinOps Lens</h4>
+    <p>Unit economic modeling, squad-level cost attribution, automated commitment arbitrage (RIs vs Savings Plans), and real-time spend anomaly detection.</p>
+  </div>
+</div>
+
+<!-- SECTION 4: ENTERPRISE SECURITY & ENCRYPTION -->
+<div class="page-break"></div>
+<hr class="header-rule">
+<h2>4. Enterprise Security, Data Encryption & Privacy</h2>
+
+<div class="security-seal">
+  <div style="display: flex; align-items: center; gap: 8px;">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+    </svg>
+    <strong style="color: #065F46; font-size: 11pt;">Zero-Trust & Bank-Grade Security Guarantees</strong>
+  </div>
+  <p style="font-size: 8.5pt; color: #047857; margin: 4px 0 0 0;">
+    The CloudifyOps Unified Cloud WAFR Platform is engineered with strict read-only least privilege, zero storage of customer application data, hardware-grade cryptographic isolation, and automated data retention purging.
+  </p>
+</div>
+
+<div class="grid-2 avoid-break">
+  <div class="callout callout-blue">
+    <div class="callout-title">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      1. Zero Customer Application Data Access
+    </div>
+    <p style="margin: 0; font-size: 8pt; color: #1E40AF;">
+      The platform <strong>never inspects, queries, or reads customer application data, database records, S3 file contents, or runtime memory</strong>. It interacts exclusively with cloud provider control-plane metadata APIs (e.g., "Is backup encryption enabled?", "What is the security group rule?").
+    </p>
+  </div>
+
+  <div class="callout callout-green">
+    <div class="callout-title">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      2. Strictly Read-Only Least Privilege
+    </div>
+    <p style="margin: 0; font-size: 8pt; color: #065F46;">
+      Authentication uses <strong>AWS STS AssumeRole</strong> with secret <code>ExternalId</code> validation (preventing the Confused Deputy problem), Azure Service Principals, and GCP Service Accounts. Policies are strictly restricted to <code>Get*</code>, <code>List*</code>, and <code>Describe*</code>. The platform has zero technical capability to alter running workloads.
+    </p>
+  </div>
+
+  <div class="callout callout-green">
+    <div class="callout-title">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m4.93 4.93 4.24 4.24"/><path d="m14.83 9.17 4.24-4.24"/><path d="m14.83 14.83 4.24 4.24"/><path d="m9.17 14.83-4.24 4.24"/></svg>
+      3. Ubiquitous Cryptographic Defense
+    </div>
+    <p style="margin: 0; font-size: 8pt; color: #065F46;">
+      <strong>In-Transit:</strong> Mandatory <strong>TLS 1.3</strong> (with TLS 1.2 fallback) with strict modern cipher suites. Legacy SSLv3, TLS 1.0/1.1 are permanently disabled.<br>
+      <strong>At-Rest:</strong> All stored posture data and reports are encrypted using <strong>AES-256 with AWS KMS Customer Managed Keys (CMK)</strong> with annual key rotation.
+    </p>
+  </div>
+
+  <div class="callout callout-blue">
+    <div class="callout-title">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+      4. Configurable Data Retention & Auto-Purge
+    </div>
+    <p style="margin: 0; font-size: 8pt; color: #1E40AF;">
+      Clients retain total data sovereignty. In the Settings console, administrators configure retention windows (7 to 365 days for raw snapshots; 30 to 730 days for reports). An automated background cron job permanently purges expired data daily at 02:00 UTC.
+    </p>
+  </div>
+</div>
+
+<div class="avoid-break">
+  <h3>Regulatory & Industry Standards Mapping</h3>
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 22%;">Framework</th>
+        <th style="width: 48%;">Scope of Assessment</th>
+        <th style="width: 30%;">Audit Artifacts Produced</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>SOC 2 Type II</strong></td>
+        <td>Evaluates Trust Services Criteria for Security, Availability, and Confidentiality across multi-cloud environments.</td>
+        <td>Automated evidence exports, IAM access logs, and encryption verification reports.</td>
+      </tr>
+      <tr>
+        <td><strong>ISO/IEC 27001:2022</strong></td>
+        <td>Annex A controls for asset management, network security, and cryptographic controls.</td>
+        <td>Milestone baseline comparison proving continuous security posture governance.</td>
+      </tr>
+      <tr>
+        <td><strong>CIS Benchmarks L1 & L2</strong></td>
+        <td>Multi-cloud foundation benchmark checks (AWS, Azure, GCP identity and network rules).</td>
+        <td>Point-by-point compliance percentage scorecard with automated pass/fail flags.</td>
+      </tr>
+      <tr>
+        <td><strong>HIPAA & PCI-DSS v4.0</strong></td>
+        <td>Data encryption at rest/transit, audit log multi-region immutability, and boundary segmentation.</td>
+        <td>Readiness checklists verifying KMS encryption and network perimeters.</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- SECTION 5: TECHNICAL CAPABILITIES -->
+<div class="page-break"></div>
+<hr class="header-rule">
+<h2>5. Technical Architecture & Core Workflows</h2>
+
+<div class="grid-2 avoid-break">
+  <div>
+    <h3>1. Dual-Scope Intelligent Questionnaire</h3>
+    <p>
+      Unlike superficial tools that only query APIs, the platform correlates technical checks with organizational realities across two distinct scopes:
+    </p>
+    <ul>
+      <li><strong>Organizational Scope:</strong> Central IT governance, SOC 2 compliance goals, FinOps tagging policies, root MFA hardware enforcement, and enterprise DR SLAs.</li>
+      <li><strong>Account Scope:</strong> Workload-specific telemetry, multi-AZ database topologies, CI/CD canary automation, and KMS key access.</li>
+      <li><strong>Embedded Auditor Guidance:</strong> Every question includes <em>Why It Matters</em>, <em>How to Verify (CLI commands)</em>, and <em>Audit Evidence Requirements</em>.</li>
+    </ul>
+  </div>
+
+  <div>
+    <h3>2. Interactive Architecture Topology</h3>
+    <p>
+      An interactive SVG topology graph maps real cloud resource relationships from the edge down to backend databases:
+    </p>
+    <ul>
+      <li><strong>Visual VPC Subnet Grouping:</strong> Public Ingress, Private Compute, and Private Data layers.</li>
+      <li><strong>Live Status Indicators:</strong> Healthy resources show crisp borders; nodes with active vulnerabilities pulse in high-visibility alerts.</li>
+      <li><strong>Click-to-Finding Drilldown:</strong> Clicking any node (e.g., ALB or RDS) opens the exact finding details and remediation code.</li>
+    </ul>
+  </div>
+</div>
+
+<div class="avoid-break" style="margin-top: 15px;">
+  <h3>3. AI-Powered Remediation Engine (IaC-Ready)</h3>
+  <p>
+    To eliminate the "Assessment-to-Remediation" gap, every failing finding is automatically paired with ready-to-deploy, syntax-validated Infrastructure as Code:
+  </p>
+
+  <div class="grid-2">
+    <div>
+      <div style="font-size: 8pt; font-weight: 700; color: #1E3A8A; margin-bottom: 2px;">Terraform (.tf) Output Example (ALB Health Checks)</div>
+      <pre><code>resource "aws_lb_target_group" "prod_api" {
+  name     = "prod-api-tg"
+  port     = 80
+  protocol = "HTTP"
+  vpc_id   = var.vpc_id
+
+  health_check {
+    path                = "/healthz"
+    protocol            = "HTTP"
+    matcher             = "200"
+    interval            = 15
+    timeout             = 5
+    healthy_threshold   = 3
+    unhealthy_threshold = 2
+  }
+
+  tags = {
+    Environment = "production"
+    ManagedBy   = "Terraform"
+  }
+}</code></pre>
+    </div>
+
+    <div>
+      <div style="font-size: 8pt; font-weight: 700; color: #1E3A8A; margin-bottom: 2px;">AWS CLI & Console Playbook</div>
+      <pre><code># 1. Update Target Group Health Check via CLI
+aws elbv2 modify-target-group \
+  --target-group-arn "arn:aws:elasticloadbalancing:..." \
+  --health-check-protocol HTTP \
+  --health-check-port 80 \
+  --health-check-path "/healthz" \
+  --health-check-interval-seconds 15
+
+# Console Path:
+# EC2 Console > Target Groups > Select prod-api-tg 
+# > Health Checks tab > Edit > Set Path: /healthz</code></pre>
+    </div>
+  </div>
+</div>
+
+<div class="avoid-break" style="margin-top: 12px;">
+  <h3>4. Milestone Versioning & Drift Tracking</h3>
+  <p>
+    The platform allows architects to save versioned milestone snapshots (e.g., <code>v1.0 Initial Baseline</code>, <code>v1.1 Sprint 1 Fixes</code>, <code>v2.0 Production Hardening</code>).
+  </p>
+  <ul>
+    <li><strong>Delta Analysis:</strong> Quantifies High-Risk Items (HRI) resolved, pillar score improvements (+12% Security, +9% Reliability), and newly introduced risks.</li>
+    <li><strong>Executive Proof of ROI:</strong> Generates executive trend charts demonstrating architectural progress and audit compliance to leadership.</li>
+  </ul>
+</div>
+
+<!-- SECTION 6: STRATEGIC PERSPECTIVES -->
+<div class="page-break"></div>
+<hr class="header-rule">
+<h2>6. Strategic Perspectives & Industry Recommendations</h2>
+
+<div class="feature-card" style="margin-bottom: 12px;">
+  <h4 style="color: #1E3A8A; margin-top: 0;">1. Closing the "Shelf-Ware" Dilemma</h4>
+  <p>
+    The single greatest failure mode of cloud architecture reviews across the industry is the <strong>Assessment-to-Remediation Gap</strong>. Organizations spend significant capital on audit assessments, only for 100-page reports to gather dust because developers lack the time to draft remediation code from scratch.
+    <br><br>
+    <strong>The Solution:</strong> By pairing every failing check with production-grade Terraform modules, CloudFormation templates, and step-by-step console playbooks, the platform compresses remediation time from months to minutes.
+  </p>
+</div>
+
+<div class="feature-card" style="margin-bottom: 12px;">
+  <h4 style="color: #1E3A8A; margin-top: 0;">2. Shift from Annual Audits to Continuous Milestone Posture</h4>
+  <p>
+    Annual reviews foster an unhealthy cycle of "drift, panic, audit, scramble, and decay." Modern cloud applications undergo daily deployments; architectural governance must be continuous.
+    <br><br>
+    <strong>The Solution:</strong> Establish automated monthly or sprint-based WAFR milestones. Use the Milestone Versioning Engine to demonstrate continuous risk burndown sprint-over-sprint, transforming architecture into an ongoing engineering KPI.
+  </p>
+</div>
+
+<div class="feature-card" style="margin-bottom: 12px;">
+  <h4 style="color: #1E3A8A; margin-top: 0;">3. Shifting Architecture Left into CI/CD</h4>
+  <p>
+    While control-plane scanning detects runtime misconfigurations, the ideal architectural practice prevents defects from ever reaching production environments.
+    <br><br>
+    <strong>The Solution:</strong> Integrate the WAFR rule catalog into pre-merge pull-request linters. If an engineer commits Terraform containing an open security group or an unencrypted database, automated guardrails flag it before deployment.
+  </p>
+</div>
+
+<div class="feature-card">
+  <h4 style="color: #1E3A8A; margin-top: 0;">4. Future-Proofing for AI Workloads (The GenAI Lens)</h4>
+  <p>
+    As enterprise applications incorporate Large Language Models (LLMs) and vector search, traditional Well-Architected frameworks fail to evaluate emerging AI risks: prompt injection vulnerabilities, vector database retrieval bottlenecks, and runaway token expenses.
+    <br><br>
+    <strong>The Solution:</strong> The upcoming <strong>GenAI Lens</strong> equips architects with targeted benchmarks to ensure foundation model workloads remain secure, compliant, and cost-efficient.
+  </p>
+</div>
+
+<div style="margin-top: 30px; padding-top: 15px; border-top: 1px solid #E2E8F0; text-align: center; font-size: 8pt; color: #94A3B8;">
+  CloudifyOps Unified Cloud WAFR Platform · Product Documentation & Architecture Specification · Confidential & Proprietary
+</div>
+
+</body>
+</html>

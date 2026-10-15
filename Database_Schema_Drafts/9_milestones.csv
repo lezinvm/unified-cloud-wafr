@@ -1,0 +1,2 @@
+id,assessment_id,milestone_number,milestone_name,version,score,metrics,pillar_scores,pillar_high_risks,notes,recorded_by,recorded_at
+mil_01,ass_01,1,Pre-Audit Baseline,v1.0.0,85.00,{},{},{},Initial run,usr_01,2026-10-01T12:00:00Z

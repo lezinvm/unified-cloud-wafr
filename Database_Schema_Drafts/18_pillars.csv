@@ -1,0 +1,3 @@
+id,label,short_code,theme_color,display_order
+security,Security,S,#dc2626,1
+cost,Cost Optimization,C,#16a34a,2

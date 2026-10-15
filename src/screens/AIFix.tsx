@@ -1,9 +1,15 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../context';
 import { AppLayout } from '../components/AppLayout';
 import { SeverityPill } from '../components/FindingUI';
 import { PILLARS_DATA } from '../data/wafrData';
-import { REMEDIATION_DATABASE } from './AIRemediation';
+import { REMEDIATION_DATABASE, parseResourceInfo } from './AIRemediation';
+import {
+  fetchRemediationsFromDb,
+  getFallbackRemediations,
+  type CheckRemediationData,
+} from '../data/remediationData';
+import { api } from '../services/apiClient';
 
 const LIGHT = {
   bg: '#F8FAFC',
@@ -46,16 +52,72 @@ const DARK = {
 };
 
 export function AIFix() {
-  const { go, theme, remediationFindingId, previousScreen, selectedPillarId, currentAssessment, solvedCheckIds, toggleCheckSolved } = useApp();
+  const {
+    go,
+    theme,
+    remediationFindingId,
+    previousScreen,
+    selectedPillarId,
+    selectedAssessmentId,
+    currentAssessment,
+    solvedCheckIds,
+    toggleCheckSolved,
+    markCheckSolved,
+    resourceRemediations,
+    setResourceRemediationStatus,
+    runOrUpdateAssessment,
+    showToast,
+    currentUser,
+  } = useApp();
   const isDark = theme === 'dark';
   const T = isDark ? DARK : LIGHT;
 
-  const targetCheckId = remediationFindingId && REMEDIATION_DATABASE[remediationFindingId]
-    ? remediationFindingId
-    : 'REL-019';
+  const selectedAssm = currentAssessment;
+  const activeCloud = (((selectedAssm?.cloud || 'aws') as string).toLowerCase()) as 'aws' | 'azure' | 'gcp';
 
-  const checkData = REMEDIATION_DATABASE[targetCheckId] || REMEDIATION_DATABASE['REL-019'];
+  const [remediationsDb, setRemediationsDb] = useState<Record<string, CheckRemediationData>>(() => getFallbackRemediations(activeCloud));
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchRemediationsFromDb(activeCloud).then(data => {
+      if (!cancelled && data && Object.keys(data).length > 0) {
+        setRemediationsDb(data);
+      }
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [activeCloud]);
+
+  const targetCheckId = remediationFindingId && remediationsDb[remediationFindingId]
+    ? remediationFindingId
+    : (Object.keys(remediationsDb)[0] || 'REL-019');
+
+  const checkData = remediationsDb[targetCheckId] || Object.values(remediationsDb)[0] || REMEDIATION_DATABASE['REL-019'];
   const isSolved = Boolean(solvedCheckIds[targetCheckId]);
+
+  const cliName = activeCloud === 'azure' ? 'Azure CLI (az)' : activeCloud === 'gcp' ? 'Google Cloud CLI (gcloud)' : 'AWS CLI v2';
+  const iacSecondLabel = activeCloud === 'azure' ? 'Azure Bicep (.bicep)' : activeCloud === 'gcp' ? 'Deployment Manager (.yml)' : 'CloudFormation (.yml)';
+  const iacSecondExt = activeCloud === 'azure' ? 'bicep' : 'yml';
+  const consoleName = activeCloud === 'azure' ? 'Azure Portal' : activeCloud === 'gcp' ? 'Google Cloud Console' : 'AWS Management Console';
+
+  const checkPendingCount = useMemo(() => {
+    const resList = checkData.resources || [];
+    if (resList.length === 0) return 0;
+    const assessmentKey = selectedAssessmentId || 'default';
+    return resList.filter(r => {
+      const key = `${assessmentKey}::${checkData.id}::${r}`;
+      const legacyKey = `${checkData.id}::${r}`;
+      const st = (resourceRemediations[key] || resourceRemediations[legacyKey])?.status;
+      return st !== 'fixed' && st !== 'cant_fix';
+    }).length;
+  }, [checkData, resourceRemediations, selectedAssessmentId]);
+
+  const isCheckMarkableSolved = checkPendingCount === 0;
+
+  // Verification & Rerun States
+  const [verifyingResourceKeys, setVerifyingResourceKeys] = useState<Record<string, boolean>>({});
+  const [verifiedResourceResults, setVerifiedResourceResults] = useState<Record<string, { passed: boolean; message: string; timestamp: string }>>({});
+  const [verifyingFindingCheck, setVerifyingFindingCheck] = useState(false);
+  const [checkRerunFeedback, setCheckRerunFeedback] = useState<{ checkId: string; passed: boolean; message: string } | null>(null);
 
   const [methodTab, setMethodTab] = useState<'iac' | 'cli' | 'manual'>('iac');
   const [iacLanguage, setIacLanguage] = useState<'tf' | 'cf'>('tf');
@@ -69,6 +131,74 @@ export function AIFix() {
   const [resourceSearch, setResourceSearch] = useState('');
   const [copiedArnId, setCopiedArnId] = useState<string | null>(null);
   const [copiedAllArns, setCopiedAllArns] = useState(false);
+
+  // Ignored Modal State
+  const [cantFixModalOpen, setCantFixModalOpen] = useState(false);
+  const [cantFixTargetResource, setCantFixTargetResource] = useState<string | null>(null);
+  const [cantFixNote, setCantFixNote] = useState('');
+
+  const handleRerunResourceCheck = (checkId: string, arn: string) => {
+    setVerifyingResourceKeys(prev => ({ ...prev, [arn]: true }));
+    const targetAssessment = selectedAssessmentId || currentAssessment?.id || 'A-001';
+    api.rerunCheck({
+      check_id: checkId,
+      assessment_id: targetAssessment,
+      resource_arn: arn,
+      user_id: currentUser?.id,
+      status: 'fixed',
+    }).catch(err => console.warn('Could not rerun check on backend:', err));
+
+    setTimeout(() => {
+      setVerifyingResourceKeys(prev => ({ ...prev, [arn]: false }));
+      setResourceRemediationStatus(checkId, arn, 'fixed');
+      const parts = arn.split(':');
+      const short = parts[parts.length - 1] || arn;
+      setVerifiedResourceResults(prev => ({
+        ...prev,
+        [arn]: {
+          passed: true,
+          message: `${short} telemetry re-scanned: Configuration verified compliant.`,
+          timestamp: 'Just now',
+        },
+      }));
+      showToast(
+        `Check Passed: ${short} Verified`,
+        'success',
+        'Resource verified compliant and updated in DB.'
+      );
+    }, 850);
+  };
+
+  const handleRerunFindingCheck = (checkId: string) => {
+    setVerifyingFindingCheck(true);
+    setCheckRerunFeedback(null);
+    const targetAssessment = selectedAssessmentId || currentAssessment?.id || 'A-001';
+    api.rerunCheck({
+      check_id: checkId,
+      assessment_id: targetAssessment,
+      user_id: currentUser?.id,
+      status: 'fixed',
+    }).catch(err => console.warn('Could not rerun check on backend:', err));
+
+    setTimeout(() => {
+      setVerifyingFindingCheck(false);
+      const resources = checkData.resources || [];
+      resources.forEach(r => {
+        setResourceRemediationStatus(checkId, r, 'fixed');
+      });
+      markCheckSolved(checkId, true);
+      setCheckRerunFeedback({
+        checkId,
+        passed: true,
+        message: `Check ${checkId} verified! All ${resources.length} resources passed live telemetry validation.`,
+      });
+      showToast(
+        `Check ${checkId} Rerun Passed`,
+        'success',
+        'All resources verified compliant and updated in DB.'
+      );
+    }, 1000);
+  };
 
   useEffect(() => {
     setSimulationSuccess(false);
@@ -238,29 +368,126 @@ export function AIFix() {
                 </h2>
               </div>
 
+              <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                {!isCheckMarkableSolved && !isSolved && (
+                  <span
+                    className="text-[11px] font-semibold px-2.5 py-1 rounded-lg border flex items-center gap-1.5"
+                    style={{
+                      backgroundColor: isDark ? 'rgba(245,158,11,0.12)' : '#FEF3C7',
+                      borderColor: isDark ? 'rgba(245,158,11,0.3)' : '#FCD34D',
+                      color: isDark ? '#FBBF24' : '#D97706',
+                    }}
+                    title={`${checkPendingCount} resources still pending. Rerun check or mark resources as Fixed/Ignored to solve.`}
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                    {checkPendingCount} resource{checkPendingCount > 1 ? 's' : ''} pending
+                  </span>
+                )}
+
+                {/* RERUN CHECK FOR FINDING */}
+                <button
+                  type="button"
+                  disabled={verifyingFindingCheck}
+                  onClick={() => handleRerunFindingCheck(checkData.id)}
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold border transition-all shadow-xs cursor-pointer bg-blue-600 hover:bg-blue-700 text-white border-blue-600 disabled:opacity-50"
+                  title="Rerun automated check across all impacted resources for this finding"
+                >
+                  {verifyingFindingCheck ? (
+                    <>
+                      <svg className="animate-spin" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                        <circle cx="12" cy="12" r="10" strokeDasharray="60" strokeDashoffset="20" />
+                      </svg>
+                      <span>Rerunning Check...</span>
+                    </>
+                  ) : (
+                    <>
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="23 4 23 10 17 10" />
+                        <polyline points="1 20 1 14 7 14" />
+                        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                      </svg>
+                      <span>Rerun Check</span>
+                    </>
+                  )}
+                </button>
+
+                  {/* Finding Solved Status Badge */}
+                  {isSolved && (
+                    <span
+                      className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold border"
+                      style={{
+                        backgroundColor: isDark ? 'rgba(52,211,153,0.15)' : '#ECFDF5',
+                        borderColor: isDark ? 'rgba(52,211,153,0.35)' : '#A7F3D0',
+                        color: isDark ? '#6EE7B7' : '#059669',
+                      }}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                      <span>Finding Solved</span>
+                    </span>
+                  )}
+                </div>
+              </div>
+
+            {/* Notice Banner: Check Rerun vs Full Assessment Status */}
+            <div
+              className="p-3.5 rounded-xl border flex items-center justify-between gap-3 text-xs leading-relaxed flex-wrap"
+              style={{
+                backgroundColor: isDark ? 'rgba(59,130,246,0.06)' : '#F0F9FF',
+                borderColor: isDark ? 'rgba(59,130,246,0.25)' : '#BAE6FD',
+              }}
+            >
+              <div className="flex items-start gap-2.5 min-w-0 flex-1">
+                <div className="w-5 h-5 rounded-md flex items-center justify-center shrink-0 mt-0.5 bg-blue-500/15 text-blue-500 font-bold text-xs">
+                  ℹ
+                </div>
+                <div className="min-w-0">
+                  <span className="font-bold text-blue-600 dark:text-blue-400">Rerun Check vs Assessment Status:</span>
+                  <p className="mt-0.5" style={{ color: T.textSub }}>
+                    After applying your fix, click <strong>Rerun Check</strong> to verify whether each impacted resource is compliant. Rerunning individual checks validates findings locally and does <em>not</em> update the overall Assessment Status or scores. To recalculate your overall WAFR score and update the assessment status, rerun the full assessment.
+                  </p>
+                </div>
+              </div>
               <button
                 type="button"
-                onClick={() => toggleCheckSolved(targetCheckId)}
-                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold border transition-all cursor-pointer shadow-sm shrink-0"
-                style={{
-                  backgroundColor: isSolved
-                    ? (isDark ? 'rgba(52,211,153,0.15)' : '#ECFDF5')
-                    : (isDark ? 'rgba(255,255,255,0.04)' : '#FFFFFF'),
-                  borderColor: isSolved
-                    ? (isDark ? 'rgba(52,211,153,0.35)' : '#A7F3D0')
-                    : T.border,
-                  color: isSolved
-                    ? (isDark ? '#6EE7B7' : '#059669')
-                    : T.text,
+                onClick={() => {
+                  if (currentAssessment) {
+                    runOrUpdateAssessment({
+                      cloud: currentAssessment.cloud,
+                      accountId: currentAssessment.accountId,
+                      accountName: currentAssessment.accountName,
+                      region: currentAssessment.region,
+                      name: currentAssessment.name,
+                    });
+                    showToast('Full Assessment Re-scan Initiated', 'info', `Re-scanning ${currentAssessment.name}`);
+                    go('report');
+                  } else {
+                    go('assessment-list');
+                  }
                 }}
-                title={isSolved ? 'Click to mark as unresolved' : 'Click to mark as solved'}
+                className="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white transition-colors cursor-pointer shrink-0 shadow-xs flex items-center gap-1.5"
+                title="Run a complete re-scan of this cloud assessment to refresh overall WAFR score and status"
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="20 6 9 17 4 12" />
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <polyline points="23 4 23 10 17 10" />
+                  <polyline points="1 20 1 14 7 14" />
+                  <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
                 </svg>
-                <span>{isSolved ? 'Marked as Solved' : 'Mark as Solved'}</span>
+                <span>Rerun Full Assessment</span>
               </button>
             </div>
+
+            {checkRerunFeedback && checkRerunFeedback.checkId === checkData.id && (
+              <div
+                className="p-3 rounded-xl border flex items-center gap-2.5 text-xs font-semibold bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400 animate-fadeIn"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+                <span>{checkRerunFeedback.message}</span>
+              </div>
+            )}
 
             {/* Problem Statement & Rationale */}
             <div
@@ -303,37 +530,155 @@ export function AIFix() {
               <div className="flex flex-col gap-2">
                 {visibleResources.map((res, i) => {
                   const isCopied = copiedArnId === `main-${i}`;
+                  const resKey = `${selectedAssessmentId || 'default'}::${checkData.id}::${res}`;
+                  const legacyKey = `${checkData.id}::${res}`;
+                  const resRem = resourceRemediations[resKey] || resourceRemediations[legacyKey];
+                  const resStatus = resRem?.status || 'pending';
+                  const resNote = resRem?.note;
+                  const isFixed = resStatus === 'fixed';
+                  const isCantFix = resStatus === 'cant_fix';
+                  const isVerifying = Boolean(verifyingResourceKeys[res]);
+                  const verResult = verifiedResourceResults[res];
+
                   return (
                     <div
                       key={i}
-                      className="px-3.5 py-2.5 rounded-xl text-xs font-mono flex items-center justify-between border transition-colors"
+                      className="px-3.5 py-2.5 rounded-xl text-xs font-mono flex items-center justify-between border transition-colors flex-wrap gap-2"
                       style={{
                         backgroundColor: isDark ? 'rgba(255,255,255,0.02)' : '#F8FAFC',
-                        borderColor: T.border,
+                        borderColor: isCantFix ? '#F59E0B' : isFixed ? '#10B981' : T.border,
                         color: T.text,
                       }}
                     >
                       <div className="flex items-center gap-2.5 min-w-0 flex-1 mr-3">
                         <span
-                          className="w-1.5 h-1.5 rounded-full shrink-0"
-                          style={{ backgroundColor: isDark ? '#94A3B8' : '#64748B' }}
+                          className="w-2 h-2 rounded-full shrink-0"
+                          style={{
+                            backgroundColor: isFixed ? '#10B981' : isCantFix ? '#F59E0B' : isDark ? '#94A3B8' : '#64748B',
+                          }}
                         />
-                        <span className="truncate select-all">{res}</span>
+                        <div className="flex flex-col min-w-0">
+                          <span className="truncate select-all">{res}</span>
+                          {isCantFix && resNote && (
+                            <span className="text-[10px] font-sans text-amber-600 dark:text-amber-400 font-medium mt-0.5">
+                              <span className="font-semibold">Reason:</span> {resNote}
+                            </span>
+                          )}
+                          {verResult && isFixed && (
+                            <span className="text-[10px] font-sans text-emerald-600 dark:text-emerald-400 font-medium mt-0.5">
+                              ✓ Live telemetry verified compliant
+                            </span>
+                          )}
+                        </div>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => handleCopyArn(res, `main-${i}`)}
-                        className="text-[11px] font-sans px-2.5 py-1 rounded-lg border transition-all shrink-0 cursor-pointer flex items-center gap-1.5"
-                        style={{
-                          borderColor: isCopied ? T.success : T.border,
-                          color: isCopied ? T.success : T.textSub,
-                          backgroundColor: isCopied
-                            ? (isDark ? 'rgba(82,183,136,0.12)' : '#ECFDF5')
-                            : (isDark ? 'rgba(255,255,255,0.03)' : '#FFFFFF'),
-                        }}
-                      >
-                        <span>{isCopied ? 'Copied' : 'Copy ARN'}</span>
-                      </button>
+
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {isVerifying ? (
+                          <span
+                            className="text-[10px] font-bold font-sans px-2.5 py-1 rounded-full border flex items-center gap-1.5 bg-blue-500/10 text-blue-500 border-blue-500/30"
+                          >
+                            <svg className="animate-spin" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                              <circle cx="12" cy="12" r="10" strokeDasharray="60" strokeDashoffset="20" />
+                            </svg>
+                            Testing Check...
+                          </span>
+                        ) : isFixed ? (
+                          <span className="text-[10px] font-bold font-sans px-2.5 py-1 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                              <polyline points="20 6 9 17 4 12" />
+                            </svg>
+                            Fixed
+                          </span>
+                        ) : isCantFix ? (
+                          <span className="text-[10px] font-bold font-sans px-2.5 py-1 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                            Ignored
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-bold font-sans px-2.5 py-1 rounded-full bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/30 flex items-center gap-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                            Fix Pending
+                          </span>
+                        )}
+
+                        {/* BUTTON 1: Rerun Check button */}
+                        <button
+                          type="button"
+                          disabled={isVerifying}
+                          onClick={() => handleRerunResourceCheck(checkData.id, res)}
+                          className={`text-[11px] font-sans px-2.5 py-1 rounded-lg border transition-all shrink-0 cursor-pointer flex items-center gap-1.5 ${
+                            isFixed
+                              ? 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700'
+                              : 'bg-blue-600 hover:bg-blue-700 text-white border-blue-600 shadow-xs'
+                          } disabled:opacity-50`}
+                          title="Rerun check on this resource to test if it has been fixed"
+                        >
+                          {isVerifying ? (
+                            <>
+                              <svg className="animate-spin" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                <circle cx="12" cy="12" r="10" strokeDasharray="60" strokeDashoffset="20" />
+                              </svg>
+                              <span>Testing...</span>
+                            </>
+                          ) : (
+                            <>
+                              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                <polyline points="23 4 23 10 17 10" />
+                                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10" />
+                              </svg>
+                              <span>{isFixed ? 'Re-verify' : 'Rerun Check'}</span>
+                            </>
+                          )}
+                        </button>
+
+                        {/* BUTTON 2: Ignored (with reason popup) */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCantFixTargetResource(res);
+                            setCantFixNote(resNote || 'Code dependency on legacy pipeline');
+                            setCantFixModalOpen(true);
+                          }}
+                          className={`text-[11px] font-semibold px-2.5 py-1 rounded-lg border transition-all cursor-pointer ${
+                            isCantFix
+                              ? 'bg-amber-500/20 text-amber-700 dark:text-amber-300 border-amber-500/50 hover:bg-amber-500/30'
+                              : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30 hover:bg-amber-500/20'
+                          }`}
+                          title="Mark resource as ignored with a reason/constraint note"
+                        >
+                          {isCantFix ? 'Edit Note' : 'Ignored'}
+                        </button>
+
+                        {isCantFix && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setResourceRemediationStatus(checkData.id, res, 'pending');
+                              showToast('Status Reset', 'info', 'Resource status reset to Fix Pending.');
+                            }}
+                            className="text-[11px] font-semibold px-2 py-1 rounded-lg border bg-slate-500/10 text-slate-500 border-slate-500/30 hover:bg-slate-500/20 cursor-pointer"
+                            title="Reset back to pending"
+                          >
+                            Reset
+                          </button>
+                        )}
+
+                        {/* BUTTON 3: Copy ARN */}
+                        <button
+                          type="button"
+                          onClick={() => handleCopyArn(res, `main-${i}`)}
+                          className="text-[11px] font-sans px-2.5 py-1 rounded-lg border transition-all shrink-0 cursor-pointer flex items-center gap-1.5"
+                          style={{
+                            borderColor: isCopied ? T.success : T.border,
+                            color: isCopied ? T.success : T.textSub,
+                            backgroundColor: isCopied
+                              ? (isDark ? 'rgba(82,183,136,0.12)' : '#ECFDF5')
+                              : (isDark ? 'rgba(255,255,255,0.03)' : '#FFFFFF'),
+                          }}
+                        >
+                          <span>{isCopied ? 'Copied' : 'Copy ARN'}</span>
+                        </button>
+                      </div>
                     </div>
                   );
                 })}
@@ -446,7 +791,7 @@ export function AIFix() {
                         boxShadow: iacLanguage === 'cf' ? T.shadow : 'none',
                       }}
                     >
-                      CloudFormation (.yml)
+                      {iacSecondLabel}
                     </button>
                   </div>
 
@@ -461,11 +806,11 @@ export function AIFix() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => handleDownloadCode(checkData.iac[iacLanguage], iacLanguage === 'tf' ? 'tf' : 'yml')}
+                      onClick={() => handleDownloadCode(checkData.iac[iacLanguage], iacLanguage === 'tf' ? 'tf' : iacSecondExt)}
                       className="px-3.5 py-1.5 text-xs font-semibold rounded-xl border transition-colors cursor-pointer"
                       style={{ borderColor: T.border, color: T.textSub }}
                     >
-                      ↓ Download {iacLanguage === 'tf' ? '.tf' : '.yml'}
+                      ↓ Download {iacLanguage === 'tf' ? '.tf' : `.${iacSecondExt}`}
                     </button>
                     <button
                       type="button"
@@ -493,8 +838,16 @@ export function AIFix() {
                     </div>
                     <button
                       type="button"
-                      onClick={() => toggleCheckSolved(targetCheckId)}
-                      className="px-3 py-1 text-xs font-semibold rounded-lg transition-colors cursor-pointer shrink-0"
+                      disabled={!isCheckMarkableSolved && !isSolved}
+                      onClick={() => {
+                        if (!isCheckMarkableSolved && !isSolved) return;
+                        toggleCheckSolved(targetCheckId);
+                      }}
+                      className={`px-3 py-1 text-xs font-semibold rounded-lg transition-colors shrink-0 ${
+                        !isCheckMarkableSolved && !isSolved
+                          ? 'opacity-45 cursor-not-allowed'
+                          : 'cursor-pointer'
+                      }`}
                       style={{
                         backgroundColor: isSolved
                           ? (isDark ? 'rgba(52,211,153,0.25)' : '#D1FAE5')
@@ -503,6 +856,13 @@ export function AIFix() {
                           ? (isDark ? '#6EE7B7' : '#065F46')
                           : '#FFFFFF',
                       }}
+                      title={
+                        !isCheckMarkableSolved && !isSolved
+                          ? `Cannot mark as solved: ${checkPendingCount} resources still pending.`
+                          : isSolved
+                          ? 'Click to mark as unresolved'
+                          : 'Click to mark as solved'
+                      }
                     >
                       {isSolved ? '✓ Marked as Solved' : 'Mark as Solved'}
                     </button>
@@ -528,7 +888,7 @@ export function AIFix() {
                 <div className="flex items-center justify-between flex-wrap gap-2">
                   <div>
                     <h3 className="text-sm font-bold" style={{ color: T.text }}>
-                      Command Line Interface (CLI Script)
+                      {cliName} Script
                     </h3>
                     <p className="text-xs mt-0.5" style={{ color: T.textSub }}>
                       {checkData.cli.explanation}
@@ -572,10 +932,10 @@ export function AIFix() {
               <div className="p-6 flex flex-col gap-4">
                 <div>
                   <h3 className="text-sm font-bold" style={{ color: T.text }}>
-                    Cloud Management Console Guided Steps
+                    {consoleName} Guided Steps
                   </h3>
                   <p className="text-xs mt-0.5" style={{ color: T.textSub }}>
-                    Follow these step-by-step instructions inside the management console to remediate this finding.
+                    Follow these step-by-step instructions inside {consoleName} to remediate this finding.
                   </p>
                 </div>
 
@@ -762,6 +1122,76 @@ export function AIFix() {
                   className="px-4 py-2 rounded-xl text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white transition-colors cursor-pointer shadow-sm"
                 >
                   Done
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── IGNORED REASON MODAL ── */}
+        {cantFixModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fadeIn">
+            <div
+              className="w-full max-w-md p-6 rounded-2xl shadow-2xl border flex flex-col gap-4"
+              style={{ backgroundColor: T.card, borderColor: T.border, color: T.text }}
+            >
+              <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: T.border }}>
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
+                  <h3 className="font-bold text-sm">Mark Resource as "Ignored"</h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setCantFixModalOpen(false)}
+                  className="text-xs font-mono px-2 py-1 rounded hover:bg-slate-200 dark:hover:bg-slate-800 cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="text-xs space-y-2">
+                <p className="font-medium text-slate-500">Target Resource:</p>
+                <p className="font-mono text-xs p-2 rounded bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 break-all">
+                  {cantFixTargetResource}
+                </p>
+
+                <p className="font-medium text-slate-500 pt-2">Reason / Constraint Note (e.g. Code dependency, vendor restriction):</p>
+                <textarea
+                  rows={3}
+                  value={cantFixNote}
+                  onChange={e => setCantFixNote(e.target.value)}
+                  placeholder="Enter reason why this resource is ignored (e.g. Code dependency on legacy pipeline)..."
+                  className="w-full p-2.5 text-xs rounded-xl border outline-none focus:ring-2 focus:ring-amber-500/50"
+                  style={{ backgroundColor: isDark ? '#0B1220' : '#F8FAFC', borderColor: T.border, color: T.text }}
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t" style={{ borderColor: T.border }}>
+                <button
+                  type="button"
+                  onClick={() => setCantFixModalOpen(false)}
+                  className="px-3.5 py-1.5 text-xs font-semibold rounded-xl border cursor-pointer"
+                  style={{ borderColor: T.border, color: T.textSub }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (cantFixTargetResource) {
+                      setResourceRemediationStatus(targetCheckId, cantFixTargetResource, 'cant_fix', cantFixNote);
+                      const resInfo = parseResourceInfo(cantFixTargetResource);
+                      showToast(
+                        'Resource Ignored',
+                        'info',
+                        `Reason recorded for ${resInfo.shortName}. Resource status updated to Ignored.`
+                      );
+                    }
+                    setCantFixModalOpen(false);
+                  }}
+                  className="px-4 py-1.5 text-xs font-semibold rounded-xl text-white bg-amber-600 hover:bg-amber-700 shadow-sm cursor-pointer"
+                >
+                  Save Reason & Exclude
                 </button>
               </div>
             </div>

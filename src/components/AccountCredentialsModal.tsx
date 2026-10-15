@@ -1,13 +1,22 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { CloudChip, CloudId } from './CloudLogo';
 import { LIGHT, DARK } from '../context';
 
 interface Props {
   isOpen: boolean;
   onClose?: () => void;
-  onSave: (account: { cloud: CloudId; name: string; id: string }) => void;
+  onSave: (account: {
+    cloud: CloudId;
+    name: string;
+    id: string;
+    authType?: string;
+    roleArn?: string;
+    tenantId?: string;
+    projectId?: string;
+  }) => void;
   isDark: boolean;
   canDismiss?: boolean;
+  initialCloud?: CloudId;
 }
 
 export function AccountCredentialsModal({
@@ -16,10 +25,11 @@ export function AccountCredentialsModal({
   onSave,
   isDark,
   canDismiss = true,
+  initialCloud = 'aws',
 }: Props) {
   const T = isDark ? DARK : LIGHT;
 
-  const [selectedCloud, setSelectedCloud] = useState<CloudId>('aws');
+  const [selectedCloud, setSelectedCloud] = useState<CloudId>(initialCloud || 'aws');
   const [authType, setAuthType] = useState<'role' | 'keys'>('role');
   
   // AWS Fields
@@ -44,8 +54,6 @@ export function AccountCredentialsModal({
   // Test state
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
 
-  if (!isOpen) return null;
-
   const handleCloudChange = (c: CloudId) => {
     setSelectedCloud(c);
     setTestStatus('idle');
@@ -60,6 +68,12 @@ export function AccountCredentialsModal({
       setAccountId('proj-gcp-prod-9941');
     }
   };
+
+  useEffect(() => {
+    if (initialCloud && isOpen) {
+      handleCloudChange(initialCloud);
+    }
+  }, [initialCloud, isOpen]);
 
   const handleTestConnection = () => {
     setTestStatus('testing');
@@ -76,6 +90,8 @@ export function AccountCredentialsModal({
       id: accountId || (selectedCloud === 'aws' ? '124890123456' : selectedCloud === 'azure' ? 'sub-4891-2394' : 'proj-gcp-9941'),
     });
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">

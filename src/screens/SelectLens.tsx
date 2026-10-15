@@ -103,7 +103,7 @@ export function SelectLens() {
 
   return (
     <div
-      className="min-h-screen flex flex-col relative overflow-hidden select-none"
+      className="min-h-screen flex flex-col relative overflow-y-auto"
       style={{
         background: 'linear-gradient(135deg, #0284c7 0%, #0d9488 40%, #059669 75%, #10b981 100%)',
       }}
@@ -182,14 +182,16 @@ export function SelectLens() {
                 key={lens.id}
                 onClick={() => handleLensClick(lens)}
                 className={`flex flex-col justify-between rounded-2xl p-6 transition-all duration-200 backdrop-blur-xl relative overflow-hidden cursor-pointer ${
-                  isSelected
+                  isComingSoon
+                    ? 'opacity-50 cursor-not-allowed bg-[#0e1626]/50 border-slate-800'
+                    : isSelected
                     ? `${lens.activeBorderColor} bg-[#0e1626]/95 scale-[1.02]`
                     : `${lens.borderColor} bg-[#0e1626]/85 hover:bg-[#0e1626]/95 hover:border-slate-500`
                 } border shadow-xl`}
               >
                 {/* Top Badge */}
                 <div className="flex items-center justify-between gap-2 mb-4">
-                  <div className={`w-10 h-10 rounded-xl ${lens.iconBg} border border-white/10 ${lens.iconColor} flex items-center justify-center shadow-inner`}>
+                  <div className={`w-10 h-10 rounded-xl ${isComingSoon ? 'bg-slate-800/60 text-slate-500 border-slate-700/50' : `${lens.iconBg} ${lens.iconColor}`} border border-white/10 flex items-center justify-center shadow-inner`}>
                     {lens.id === 'wafr' && (
                       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
@@ -211,23 +213,23 @@ export function SelectLens() {
                   <span
                     className={`text-[10px] font-bold px-2.5 py-1 rounded-full border ${
                       isComingSoon
-                        ? 'bg-purple-500/20 text-purple-300 border-purple-500/40'
+                        ? 'bg-slate-800 text-slate-400 border-slate-700/60'
                         : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
                     }`}
                   >
-                    {lens.badge}
+                    {isComingSoon ? 'Disabled' : lens.badge}
                   </span>
                 </div>
 
                 {/* Card Title & Desc */}
                 <div className="mb-5">
-                  <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                  <h2 className={`text-lg font-bold flex items-center gap-2 ${isComingSoon ? 'text-slate-400' : 'text-white'}`}>
                     <span>{lens.title}</span>
-                    {isSelected && (
+                    {isSelected && !isComingSoon && (
                       <span className="w-2 h-2 rounded-full bg-cyan-400" />
                     )}
                   </h2>
-                  <p className="text-xs text-slate-300 mt-2 leading-relaxed line-clamp-3">
+                  <p className={`text-xs mt-2 leading-relaxed line-clamp-3 ${isComingSoon ? 'text-slate-500' : 'text-slate-300'}`}>
                     {lens.desc}
                   </p>
                 </div>
@@ -235,13 +237,13 @@ export function SelectLens() {
                 {/* Features List */}
                 <div className="space-y-2 mb-6 pt-4 border-t border-slate-800">
                   {lens.features.map((f, i) => (
-                    <div key={i} className="flex items-start gap-2 text-[11px] text-slate-300">
+                    <div key={i} className={`flex items-start gap-2 text-[11px] ${isComingSoon ? 'text-slate-500' : 'text-slate-300'}`}>
                       <svg
                         width="14"
                         height="14"
                         viewBox="0 0 24 24"
                         fill="none"
-                        stroke={isComingSoon ? '#c084fc' : '#34d399'}
+                        stroke={isComingSoon ? '#64748b' : '#34d399'}
                         strokeWidth="2.5"
                         className="shrink-0 mt-0.5"
                       >
@@ -264,11 +266,11 @@ export function SelectLens() {
                   }}
                   className={`w-full py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-md ${
                     isComingSoon
-                      ? 'bg-slate-800/80 text-purple-300 border border-purple-500/30 hover:bg-slate-800'
+                      ? 'bg-slate-900/90 text-slate-500 border border-slate-800 cursor-not-allowed'
                       : 'bg-gradient-to-r from-blue-600 to-emerald-600 hover:from-blue-500 hover:to-emerald-500 text-white shadow-emerald-950/40'
                   }`}
                 >
-                  <span>{isComingSoon ? 'Explore Preview' : 'Select WAFR Lens'}</span>
+                  <span>{isComingSoon ? 'Coming Soon (Unavailable)' : 'Select WAFR Lens'}</span>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                     <polyline points="9 18 15 12 9 6" />
                   </svg>
@@ -342,35 +344,21 @@ export function SelectLens() {
               </p>
             </div>
 
-            {/* Email notification sign-up */}
+            {/* Notification alert */}
             {!notified ? (
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  if (notifyEmail.trim()) {
-                    setNotified(true);
-                  }
-                }}
-                className="mb-5 flex gap-2"
-              >
-                <input
-                  type="email"
-                  value={notifyEmail}
-                  onChange={(e) => setNotifyEmail(e.target.value)}
-                  placeholder="Get notified: enter your email"
-                  required
-                  className="flex-1 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-purple-500"
-                />
+              <div className="mb-5 flex items-center justify-between p-3 rounded-xl bg-slate-900 border border-slate-700">
+                <span className="text-xs text-slate-300">Get notified via Slack & Google Chat alerts when available</span>
                 <button
-                  type="submit"
-                  className="px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-xs font-semibold text-white transition-colors cursor-pointer shrink-0"
+                  type="button"
+                  onClick={() => setNotified(true)}
+                  className="px-3.5 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-xs font-semibold text-white transition-colors cursor-pointer shrink-0"
                 >
                   Notify Me
                 </button>
-              </form>
+              </div>
             ) : (
               <div className="p-2.5 rounded-xl bg-emerald-950/40 border border-emerald-500/30 text-emerald-400 text-xs mb-5 text-center font-medium">
-                You will be notified when early access opens!
+                ✓ Alert subscribed! You will be notified when early access opens.
               </div>
             )}
 

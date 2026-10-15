@@ -1,0 +1,2 @@
+id,org_id,cloud,account_name,account_identifier,default_region,sts_role_arn,sts_external_id,is_active,last_connected_at,created_at,updated_at
+acc_01,org_01,aws,Production-AWS,123456789012,us-east-1,arn:aws:iam::123456789012:role/wafr-role,ext-123,true,2026-10-01,2026-10-01,2026-10-01

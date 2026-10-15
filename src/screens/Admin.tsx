@@ -1,6 +1,7 @@
-import { useState } from 'react';
-import { useApp } from '../context';
+import { useState, useEffect } from 'react';
+import { useApp, LIGHT, DARK, Tokens } from '../context';
 import { AppLayout } from '../components/AppLayout';
+import { api } from '../services/apiClient';
 
 export interface AdminUser {
   id: string;
@@ -16,29 +17,25 @@ export interface AdminUser {
   lastActive: string;
 }
 
-const INITIAL_USERS: AdminUser[] = [
-  { id: 'usr-01', name: 'Jagan Gurugubelli', email: 'jagan.gurugubelli@cloudifyops.com', organization: 'CloudifyOps', status: 'Active', plan: 'Enterprise', costUsage: 14.85, tokenUsage: 2410500, projects: ['WAFR Review - 1', 'PROD Modernization', 'AWS Assessment'], createdAt: 'Sep 01, 2024', lastActive: '5 mins ago' },
-  { id: 'usr-02', name: 'Thiruvengadam Raju', email: 'thiruvengadam.raju@cloudifyops.com', organization: 'Acme Corp', status: 'Active', plan: 'Enterprise', costUsage: 8.40, tokenUsage: 1380200, projects: ['Azure Migrations', 'Security Audit'], createdAt: 'Sep 01, 2024', lastActive: '12 mins ago' },
-  { id: 'usr-03', name: 'Vais Afeefa', email: 'vais.afeefa@cloudifyops.com', organization: 'CloudifyOps', status: 'Active', plan: 'Enterprise', costUsage: 6.20, tokenUsage: 940000, projects: ['Governance Portal'], createdAt: 'Sep 01, 2024', lastActive: '1 hour ago' },
-  { id: 'usr-04', name: 'Mariyam Qurashi', email: 'mariyam.qurashi@cloudifyops.com', organization: 'Contoso Tech', status: 'Active', plan: 'Enterprise', costUsage: 4.50, tokenUsage: 720000, projects: ['Multi-Cloud WAFR'], createdAt: 'Sep 01, 2024', lastActive: '3 hours ago' },
-  { id: 'usr-05', name: 'Dhernis Tiwari', email: 'dhernis.tiwari@cloudifyops.com', organization: 'FinTech Cloud', status: 'Active', plan: 'Pro', costUsage: 3.80, tokenUsage: 610000, projects: ['Cost Optimizer'], createdAt: 'Sep 01, 2024', lastActive: 'Yesterday' },
-  { id: 'usr-06', name: 'Jabin Sebastian', email: 'jabin.sebastian@cloudifyops.com', organization: 'CloudifyOps', status: 'Active', plan: 'Enterprise', costUsage: 5.10, tokenUsage: 830000, projects: ['AWS Lens 2026'], createdAt: 'Sep 01, 2024', lastActive: '2 days ago' },
-  { id: 'usr-07', name: 'Cloudn 836 Hub', email: 'cloudn-836-hub@cloudifyops.com', organization: 'Global Hub Ltd', status: 'Inactive', plan: 'Starter', costUsage: 0.20, tokenUsage: 35000, projects: [], createdAt: 'Aug 15, 2024', lastActive: '18 days ago' },
-  { id: 'usr-08', name: 'Vishal Agrawal', email: 'vishal.agrawal@cloudifyops.com', organization: 'DataCorp Enterprise', status: 'Active', plan: 'Pro', costUsage: 7.30, tokenUsage: 1190000, projects: ['SecOps Automation'], createdAt: 'Sep 01, 2024', lastActive: '30 mins ago' },
-  { id: 'usr-09', name: 'Lezin VM', email: 'lezin.menath@cloudifyops.com', organization: 'CloudifyOps', status: 'Active', plan: 'Enterprise', costUsage: 12.90, tokenUsage: 2150000, projects: ['Unified Cloud Lens', 'AI Fix Assistant'], createdAt: 'Sep 01, 2024', lastActive: 'Just now' },
-  { id: 'usr-10', name: 'Karthick Duraiswamy', email: 'karthickduraiswamy@cloudifyops.com', organization: 'CloudifyOps', status: 'Active', plan: 'Enterprise', costUsage: 9.60, tokenUsage: 1540000, projects: ['WAFR Review - 1', 'FinOps Insights'], createdAt: 'Sep 01, 2024', lastActive: '45 mins ago' },
-  { id: 'usr-11', name: 'Kiran K', email: 'kiran.k@cloudifyops.com', organization: 'Apex Solutions', status: 'Active', plan: 'Pro', costUsage: 4.90, tokenUsage: 780000, projects: ['GCP Compliance'], createdAt: 'Sep 01, 2024', lastActive: '4 hours ago' },
-  { id: 'usr-12', name: 'Akshay VM', email: 'akshay.vm@cloudifyops.com', organization: 'CloudifyOps', status: 'Active', plan: 'Pro', costUsage: 5.70, tokenUsage: 910000, projects: ['IaC Remediation'], createdAt: 'Sep 01, 2024', lastActive: '1 day ago' },
-  { id: 'usr-13', name: 'Jayasharma Alagupandhy', email: 'jayasharma.alagupandhy@cloudifyops.com', organization: 'Alpha Cloud Ltd', status: 'Active', plan: 'Enterprise', costUsage: 8.10, tokenUsage: 1300000, projects: ['PROD Modernization'], createdAt: 'Sep 01, 2024', lastActive: '2 hours ago' },
-  { id: 'usr-14', name: 'Abhijith Sasidharan', email: 'abhijith.sasidharan@cloudifyops.com', organization: 'CloudifyOps', status: 'Active', plan: 'Enterprise', costUsage: 6.90, tokenUsage: 1120000, projects: ['Security Posture'], createdAt: 'Sep 01, 2024', lastActive: '5 hours ago' },
-  { id: 'usr-15', name: 'Manoj Chalapaka', email: 'manoj.chalapaka@cloudifyops.com', organization: 'CyberSec Shield', status: 'Inactive', plan: 'Starter', costUsage: 0.50, tokenUsage: 85000, projects: [], createdAt: 'Aug 20, 2024', lastActive: '25 days ago' },
-];
+const INITIAL_USERS: AdminUser[] = [];
 
 export function Admin() {
   const { theme, adminTab, setAdminTab } = useApp();
   const isDark = theme === 'dark';
+  const T: Tokens = isDark ? DARK : LIGHT;
 
-  const [users, setUsers] = useState<AdminUser[]>(INITIAL_USERS);
+  const [users, setUsers] = useState<AdminUser[]>([]);
+
+  // Sync users with MongoDB on mount
+  useEffect(() => {
+    api.getUsers()
+      .then(dbUsers => {
+        if (Array.isArray(dbUsers)) {
+          setUsers(dbUsers);
+        }
+      })
+      .catch(err => console.warn('Could not load users from MongoDB:', err));
+  }, []);
 
   // Filters for User Management tab
   const [searchQuery, setSearchQuery] = useState('');
@@ -92,6 +89,7 @@ export function Admin() {
     };
 
     setUsers([newUserObj, ...users]);
+    api.saveUser(newUserObj).catch(err => console.warn('Could not persist user to MongoDB:', err));
     setNewEmail('');
     setNewName('');
     setNewOrganization('CloudifyOps');
@@ -103,12 +101,14 @@ export function Admin() {
     if (e) e.preventDefault();
     if (!editingUser) return;
     setUsers(users.map(u => u.id === editingUser.id ? editingUser : u));
+    api.saveUser(editingUser).catch(err => console.warn('Could not update user in MongoDB:', err));
     setEditingUser(null);
   };
 
   const handleConfirmOffboard = () => {
     if (!offboardUser) return;
     setUsers(users.filter(u => u.id !== offboardUser.id));
+    api.deleteUser(offboardUser.id).catch(err => console.warn('Could not delete user from MongoDB:', err));
     setOffboardUser(null);
     setActiveMenuUserId(null);
   };
@@ -216,8 +216,8 @@ export function Admin() {
       <div
         className="flex flex-col h-full overflow-y-auto"
         style={{
-          backgroundColor: isDark ? '#0A0E17' : '#F8FAFC',
-          color: isDark ? '#F1F5F9' : '#0F172A',
+          backgroundColor: T.bg,
+          color: T.text,
           fontFamily: 'Inter, system-ui, sans-serif',
         }}
       >
@@ -225,7 +225,7 @@ export function Admin() {
 
           {/* Reset password notification toast */}
           {resetNotification && (
-            <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-semibold flex items-center justify-between shadow-lg animate-fadeIn">
+            <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-xs font-semibold flex items-center justify-between shadow-lg animate-fadeIn">
               <div className="flex items-center gap-2">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="20 6 9 17 4 12" />
@@ -235,7 +235,7 @@ export function Admin() {
               <button
                 type="button"
                 onClick={() => setResetNotification(null)}
-                className="text-emerald-400 hover:text-white cursor-pointer"
+                className="text-emerald-600 dark:text-emerald-400 hover:opacity-80 cursor-pointer"
               >
                 ✕
               </button>
@@ -243,14 +243,16 @@ export function Admin() {
           )}
 
           {/* ── TAB SELECTOR: Users vs Token Usage vs Settings vs Audit ── */}
-          <div className="flex items-center gap-2 border-b border-slate-800 pb-2 flex-wrap">
+          <div className="flex items-center gap-2 border-b pb-2 flex-wrap" style={{ borderColor: T.border }}>
             <button
               type="button"
               onClick={() => setAdminTab('users')}
               className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
                 adminTab === 'users'
                   ? 'bg-blue-600 text-white shadow-md'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
+                  : isDark
+                  ? 'text-slate-400 hover:text-white hover:bg-slate-800/40'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
               }`}
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -266,7 +268,9 @@ export function Admin() {
               className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
                 adminTab === 'tokens'
                   ? 'bg-blue-600 text-white shadow-md'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
+                  : isDark
+                  ? 'text-slate-400 hover:text-white hover:bg-slate-800/40'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
               }`}
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -287,19 +291,19 @@ export function Admin() {
                 <div
                   className="p-5 rounded-2xl border flex items-center justify-between"
                   style={{
-                    backgroundColor: isDark ? '#111827' : '#FFFFFF',
-                    borderColor: isDark ? '#1F2937' : '#E5E7EB',
-                    boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)',
+                    backgroundColor: T.card,
+                    borderColor: T.border,
+                    boxShadow: T.shadow,
                   }}
                 >
                   <div>
-                    <div className="text-xs font-semibold text-slate-400 mb-1">
+                    <div className="text-xs font-semibold mb-1" style={{ color: T.textSub }}>
                       Total Clients & Users
                     </div>
-                    <div className="text-2xl font-bold font-mono text-white">
+                    <div className="text-2xl font-bold font-mono" style={{ color: T.text }}>
                       {totalUsersCount}
                     </div>
-                    <div className="text-[11px] text-slate-400 mt-0.5">
+                    <div className="text-[11px] mt-0.5" style={{ color: T.muted }}>
                       Registered accounts in tenant
                     </div>
                   </div>
@@ -317,20 +321,20 @@ export function Admin() {
                 <div
                   className="p-5 rounded-2xl border flex items-center justify-between"
                   style={{
-                    backgroundColor: isDark ? '#111827' : '#FFFFFF',
-                    borderColor: isDark ? '#1F2937' : '#E5E7EB',
-                    boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)',
+                    backgroundColor: T.card,
+                    borderColor: T.border,
+                    boxShadow: T.shadow,
                   }}
                 >
                   <div>
-                    <div className="text-xs font-semibold text-slate-400 mb-1">
+                    <div className="text-xs font-semibold mb-1" style={{ color: T.textSub }}>
                       Active Accounts
                     </div>
-                    <div className="text-2xl font-bold font-mono text-emerald-400 flex items-baseline gap-2">
+                    <div className="text-2xl font-bold font-mono text-emerald-500 flex items-baseline gap-2">
                       <span>{activeUsersCount}</span>
-                      <span className="text-xs font-normal text-slate-400">active ({inactiveUsersCount} inactive)</span>
+                      <span className="text-xs font-normal" style={{ color: T.muted }}>active ({inactiveUsersCount} inactive)</span>
                     </div>
-                    <div className="text-[11px] text-emerald-500 mt-0.5">
+                    <div className="text-[11px] text-emerald-600 dark:text-emerald-400 mt-0.5 font-medium">
                       {Math.round((activeUsersCount / (totalUsersCount || 1)) * 100)}% active platform engagement
                     </div>
                   </div>
@@ -347,19 +351,19 @@ export function Admin() {
                 <div
                   className="p-5 rounded-2xl border flex items-center justify-between"
                   style={{
-                    backgroundColor: isDark ? '#111827' : '#FFFFFF',
-                    borderColor: isDark ? '#1F2937' : '#E5E7EB',
-                    boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)',
+                    backgroundColor: T.card,
+                    borderColor: T.border,
+                    boxShadow: T.shadow,
                   }}
                 >
                   <div>
-                    <div className="text-xs font-semibold text-slate-400 mb-1">
+                    <div className="text-xs font-semibold mb-1" style={{ color: T.textSub }}>
                       Subscription Tiers
                     </div>
-                    <div className="text-2xl font-bold font-mono text-white">
-                      {enterpriseCount + proCount} <span className="text-xs font-normal text-purple-400">Pro/Enterprise</span>
+                    <div className="text-2xl font-bold font-mono" style={{ color: T.text }}>
+                      {enterpriseCount + proCount} <span className="text-xs font-normal text-purple-500">Pro/Enterprise</span>
                     </div>
-                    <div className="text-[11px] text-slate-400 mt-0.5">
+                    <div className="text-[11px] mt-0.5" style={{ color: T.muted }}>
                       {enterpriseCount} Enterprise · {proCount} Pro · {starterCount} Starter
                     </div>
                   </div>
@@ -374,19 +378,19 @@ export function Admin() {
                 <div
                   className="p-5 rounded-2xl border flex items-center justify-between"
                   style={{
-                    backgroundColor: isDark ? '#111827' : '#FFFFFF',
-                    borderColor: isDark ? '#1F2937' : '#E5E7EB',
-                    boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)',
+                    backgroundColor: T.card,
+                    borderColor: T.border,
+                    boxShadow: T.shadow,
                   }}
                 >
                   <div>
-                    <div className="text-xs font-semibold text-slate-400 mb-1">
+                    <div className="text-xs font-semibold mb-1" style={{ color: T.textSub }}>
                       Client Organizations
                     </div>
-                    <div className="text-2xl font-bold font-mono text-white">
+                    <div className="text-2xl font-bold font-mono" style={{ color: T.text }}>
                       {uniqueOrganizationsCount} Organizations
                     </div>
-                    <div className="text-[11px] text-slate-400 mt-0.5">
+                    <div className="text-[11px] mt-0.5" style={{ color: T.muted }}>
                       Active multi-tenant client accounts
                     </div>
                   </div>
@@ -402,8 +406,8 @@ export function Admin() {
               <div
                 className="rounded-2xl border flex flex-col overflow-hidden shadow-xl"
                 style={{
-                  backgroundColor: isDark ? '#111827' : '#FFFFFF',
-                  borderColor: isDark ? '#1F2937' : '#E5E7EB',
+                  backgroundColor: T.card,
+                  borderColor: T.border,
                 }}
               >
                 {/* Filter Controls Bar */}
@@ -411,7 +415,7 @@ export function Admin() {
                   className="p-4 border-b flex items-center justify-between gap-3 flex-wrap"
                   style={{
                     backgroundColor: isDark ? '#141D2E' : '#F9FAFB',
-                    borderColor: isDark ? '#1F2937' : '#E5E7EB',
+                    borderColor: T.border,
                   }}
                 >
                   <div className="flex items-center gap-2.5 flex-wrap flex-1 min-w-[280px]">
@@ -428,17 +432,27 @@ export function Admin() {
                         value={searchQuery}
                         onChange={e => setSearchQuery(e.target.value)}
                         placeholder="Search users by name, email..."
-                        className="w-full pl-9 pr-3 py-1.5 rounded-xl text-xs bg-[#1C2638] border border-slate-700/70 text-slate-200 placeholder-slate-500 outline-none"
+                        className="w-full pl-9 pr-3 py-1.5 rounded-xl text-xs border outline-none transition-colors"
+                        style={{
+                          backgroundColor: isDark ? '#1C2638' : '#FFFFFF',
+                          borderColor: isDark ? '#334155' : '#D1D5DB',
+                          color: T.text,
+                        }}
                       />
                     </div>
 
                     {/* Status Dropdown */}
                     <div className="flex items-center gap-1.5">
-                      <span className="text-[11px] font-semibold text-slate-400">Status:</span>
+                      <span className="text-[11px] font-semibold" style={{ color: T.textSub }}>Status:</span>
                       <select
                         value={statusFilter}
                         onChange={e => setStatusFilter(e.target.value as any)}
-                        className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-[#1C2638] border border-slate-700/70 text-slate-200 outline-none cursor-pointer"
+                        className="px-3 py-1.5 rounded-xl text-xs font-semibold border outline-none cursor-pointer transition-colors"
+                        style={{
+                          backgroundColor: isDark ? '#1C2638' : '#FFFFFF',
+                          borderColor: isDark ? '#334155' : '#D1D5DB',
+                          color: T.text,
+                        }}
                       >
                         <option value="All">All Statuses ({users.length})</option>
                         <option value="Active">Active ({activeUsersCount})</option>
@@ -449,11 +463,16 @@ export function Admin() {
 
                     {/* Plan Dropdown */}
                     <div className="flex items-center gap-1.5">
-                      <span className="text-[11px] font-semibold text-slate-400">Plan:</span>
+                      <span className="text-[11px] font-semibold" style={{ color: T.textSub }}>Plan:</span>
                       <select
                         value={planFilter}
                         onChange={e => setPlanFilter(e.target.value as any)}
-                        className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-[#1C2638] border border-slate-700/70 text-slate-200 outline-none cursor-pointer"
+                        className="px-3 py-1.5 rounded-xl text-xs font-semibold border outline-none cursor-pointer transition-colors"
+                        style={{
+                          backgroundColor: isDark ? '#1C2638' : '#FFFFFF',
+                          borderColor: isDark ? '#334155' : '#D1D5DB',
+                          color: T.text,
+                        }}
                       >
                         <option value="All">All Plans</option>
                         <option value="Enterprise">Enterprise</option>
@@ -474,7 +493,7 @@ export function Admin() {
                       <line x1="12" y1="5" x2="12" y2="19" />
                       <line x1="5" y1="12" x2="19" y2="12" />
                     </svg>
-                    <span>+ Onboard New User</span>
+                    <span>Onboard New User</span>
                   </button>
                 </div>
 
@@ -483,10 +502,11 @@ export function Admin() {
                   <table className="w-full text-left text-xs border-collapse">
                     <thead>
                       <tr
-                        className="border-b text-slate-400 font-semibold"
+                        className="border-b font-semibold"
                         style={{
-                          backgroundColor: isDark ? '#141D2E' : '#F9FAFB',
-                          borderColor: isDark ? '#1F2937' : '#E5E7EB',
+                          backgroundColor: isDark ? '#141D2E' : '#F8FAFC',
+                          borderColor: T.border,
+                          color: T.textSub,
                         }}
                       >
                         <th className="py-3 px-4">User</th>
@@ -498,10 +518,13 @@ export function Admin() {
                         <th className="py-3 px-4 text-right">Actions</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-800">
+                    <tbody
+                      className="divide-y"
+                      style={{ borderColor: T.border }}
+                    >
                       {filteredUsers.length === 0 ? (
                         <tr>
-                          <td colSpan={7} className="py-8 text-center text-slate-400">
+                          <td colSpan={7} className="py-8 text-center" style={{ color: T.muted }}>
                             No users found matching your filters.
                           </td>
                         </tr>
@@ -511,7 +534,8 @@ export function Admin() {
                           return (
                             <tr
                               key={user.id}
-                              className="hover:bg-slate-800/30 transition-colors"
+                              className={`transition-colors ${isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'}`}
+                              style={{ borderColor: T.border }}
                             >
                               <td className="py-3.5 px-4">
                                 <div className="flex items-center gap-2.5">
@@ -519,10 +543,10 @@ export function Admin() {
                                     {user.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
                                   </div>
                                   <div>
-                                    <div className="font-semibold text-white">
+                                    <div className="font-semibold" style={{ color: T.text }}>
                                       {user.name}
                                     </div>
-                                    <div className="text-[11px] font-mono text-slate-400">{user.email}</div>
+                                    <div className="text-[11px] font-mono" style={{ color: T.muted }}>{user.email}</div>
                                   </div>
                                 </div>
                               </td>
@@ -531,12 +555,12 @@ export function Admin() {
                                 <span
                                   className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
                                     user.plan === 'Enterprise'
-                                      ? 'bg-purple-500/15 text-purple-300 border-purple-500/30'
+                                      ? isDark ? 'bg-purple-500/15 text-purple-300 border-purple-500/30' : 'bg-purple-100 text-purple-700 border-purple-200'
                                       : user.plan === 'Pro'
-                                      ? 'bg-blue-500/15 text-blue-300 border-blue-500/30'
+                                      ? isDark ? 'bg-blue-500/15 text-blue-300 border-blue-500/30' : 'bg-blue-100 text-blue-700 border-blue-200'
                                       : user.plan === 'Custom'
-                                      ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
-                                      : 'bg-slate-500/15 text-slate-300 border-slate-500/30'
+                                      ? isDark ? 'bg-amber-500/15 text-amber-300 border-amber-500/30' : 'bg-amber-100 text-amber-700 border-amber-200'
+                                      : isDark ? 'bg-slate-500/15 text-slate-300 border-slate-500/30' : 'bg-slate-100 text-slate-700 border-slate-200'
                                   }`}
                                 >
                                   {user.plan}
@@ -547,49 +571,60 @@ export function Admin() {
                                 <span
                                   className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-md border ${
                                     isActive
-                                      ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-                                      : 'bg-slate-500/10 text-slate-400 border-slate-500/30'
+                                      ? isDark ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                      : isDark ? 'bg-slate-500/10 text-slate-400 border-slate-500/30' : 'bg-slate-100 text-slate-600 border-slate-200'
                                   }`}
                                 >
-                                  <span className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-emerald-400' : 'bg-slate-400'}`} />
+                                  <span className={`w-1.5 h-1.5 rounded-full ${isActive ? (isDark ? 'bg-emerald-400' : 'bg-emerald-600') : (isDark ? 'bg-slate-400' : 'bg-slate-500')}`} />
                                   {user.status}
                                 </span>
                               </td>
 
                               <td className="py-3.5 px-4">
-                                <div className="flex items-center gap-1.5 font-medium text-slate-200">
-                                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-blue-400 shrink-0">
+                                <div className="flex items-center gap-1.5 font-medium" style={{ color: T.textSub }}>
+                                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-blue-500 shrink-0">
                                     <path d="M3 21h18M3 7v14M21 7v14M6 7V3h12v4M9 21v-4h6v4M9 7h6M9 11h6M9 15h6"/>
                                   </svg>
                                   <span>{user.organization}</span>
                                 </div>
                               </td>
 
-                              <td className="py-3.5 px-4 text-slate-300">
+                              <td className="py-3.5 px-4" style={{ color: T.textSub }}>
                                 {user.projects.length > 0 ? (
                                   <div className="flex items-center gap-1 flex-wrap">
-                                    <span className="text-xs text-blue-400 font-medium">{user.projects[0]}</span>
+                                    <span className="text-xs text-blue-500 font-medium">{user.projects[0]}</span>
                                     {user.projects.length > 1 && (
-                                      <span className="text-[10px] text-slate-400 bg-slate-800 px-1.5 py-0.5 rounded">
+                                      <span
+                                        className="text-[10px] px-1.5 py-0.5 rounded border"
+                                        style={{
+                                          backgroundColor: isDark ? '#1C2638' : '#F1F5F9',
+                                          color: T.muted,
+                                          borderColor: T.border,
+                                        }}
+                                      >
                                         +{user.projects.length - 1} more
                                       </span>
                                     )}
                                   </div>
                                 ) : (
-                                  <span className="text-slate-500 text-[11px] italic">No active reviews</span>
+                                  <span className="text-[11px] italic" style={{ color: T.muted }}>No active reviews</span>
                                 )}
                               </td>
 
-                              <td className="py-3.5 px-4 text-slate-400 font-mono text-[11px]">
-                                <div>{user.createdAt}</div>
-                                <div className="text-[10px] text-slate-500">Active: {user.lastActive}</div>
+                              <td className="py-3.5 px-4 font-mono text-[11px]" style={{ color: T.muted }}>
+                                <div style={{ color: T.textSub }}>{user.createdAt}</div>
+                                <div className="text-[10px]">Active: {user.lastActive}</div>
                               </td>
 
                               <td className="py-3.5 px-4 text-right relative">
                                 <button
                                   type="button"
                                   onClick={() => setActiveMenuUserId(activeMenuUserId === user.id ? null : user.id)}
-                                  className="w-8 h-8 rounded-lg inline-flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-700/50 cursor-pointer transition-colors"
+                                  className={`w-8 h-8 rounded-lg inline-flex items-center justify-center cursor-pointer transition-colors ${
+                                    isDark
+                                      ? 'text-slate-400 hover:text-white hover:bg-slate-700/50'
+                                      : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
+                                  }`}
                                   title="Actions menu"
                                   aria-label="User actions"
                                 >
@@ -605,8 +640,9 @@ export function Admin() {
                                   <div
                                     className="absolute right-4 top-10 w-48 rounded-xl border p-1 shadow-2xl z-30 flex flex-col text-left text-xs animate-fadeIn"
                                     style={{
-                                      backgroundColor: '#162032',
-                                      borderColor: '#283347',
+                                      backgroundColor: isDark ? '#162032' : '#FFFFFF',
+                                      borderColor: T.border,
+                                      boxShadow: T.shadow,
                                     }}
                                   >
                                     <button
@@ -615,7 +651,9 @@ export function Admin() {
                                         setResetModalUser(user);
                                         setActiveMenuUserId(null);
                                       }}
-                                      className="px-3 py-2 rounded-lg text-slate-200 hover:bg-slate-700/60 text-left cursor-pointer flex items-center gap-2"
+                                      className={`px-3 py-2 rounded-lg text-left cursor-pointer flex items-center gap-2 transition-colors ${
+                                        isDark ? 'text-slate-200 hover:bg-slate-700/60' : 'text-slate-700 hover:bg-slate-100'
+                                      }`}
                                     >
                                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                         <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
@@ -627,7 +665,9 @@ export function Admin() {
                                     <button
                                       type="button"
                                       onClick={() => handleToggleStatus(user.id)}
-                                      className="px-3 py-2 rounded-lg text-slate-200 hover:bg-slate-700/60 text-left cursor-pointer flex items-center gap-2"
+                                      className={`px-3 py-2 rounded-lg text-left cursor-pointer flex items-center gap-2 transition-colors ${
+                                        isDark ? 'text-slate-200 hover:bg-slate-700/60' : 'text-slate-700 hover:bg-slate-100'
+                                      }`}
                                     >
                                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                         <path d="M18.36 6.64a9 9 0 1 1-12.73 0"/>
@@ -643,7 +683,9 @@ export function Admin() {
                                         setAdminTab('tokens');
                                         setActiveMenuUserId(null);
                                       }}
-                                      className="px-3 py-2 rounded-lg text-slate-200 hover:bg-slate-700/60 text-left cursor-pointer flex items-center gap-2"
+                                      className={`px-3 py-2 rounded-lg text-left cursor-pointer flex items-center gap-2 transition-colors ${
+                                        isDark ? 'text-slate-200 hover:bg-slate-700/60' : 'text-slate-700 hover:bg-slate-100'
+                                      }`}
                                     >
                                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                         <line x1="12" y1="1" x2="12" y2="23" />
@@ -658,7 +700,9 @@ export function Admin() {
                                         setEditingUser(user);
                                         setActiveMenuUserId(null);
                                       }}
-                                      className="px-3 py-2 rounded-lg text-slate-200 hover:bg-slate-700/60 text-left cursor-pointer flex items-center gap-2"
+                                      className={`px-3 py-2 rounded-lg text-left cursor-pointer flex items-center gap-2 transition-colors ${
+                                        isDark ? 'text-slate-200 hover:bg-slate-700/60' : 'text-slate-700 hover:bg-slate-100'
+                                      }`}
                                     >
                                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                         <path d="M12 20h9"/>
@@ -667,7 +711,7 @@ export function Admin() {
                                       <span>Edit User & Plan</span>
                                     </button>
 
-                                    <div className="h-px bg-slate-700/60 my-1" />
+                                    <div className="h-px my-1" style={{ backgroundColor: T.border }} />
 
                                     <button
                                       type="button"
@@ -675,7 +719,7 @@ export function Admin() {
                                         setOffboardUser(user);
                                         setActiveMenuUserId(null);
                                       }}
-                                      className="px-3 py-2 rounded-lg text-rose-400 hover:bg-rose-500/10 text-left cursor-pointer font-semibold flex items-center gap-2"
+                                      className="px-3 py-2 rounded-lg text-rose-500 hover:bg-rose-500/10 text-left cursor-pointer font-semibold flex items-center gap-2 transition-colors"
                                     >
                                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                         <polyline points="3 6 5 6 21 6" />
@@ -703,34 +747,39 @@ export function Admin() {
 
               {/* Header with User Filter Selector */}
               <div
-                className="p-6 rounded-2xl border shadow-xl flex flex-col gap-5"
+                className="p-6 rounded-2xl border shadow-sm flex flex-col gap-5"
                 style={{
-                  backgroundColor: isDark ? '#111827' : '#FFFFFF',
-                  borderColor: isDark ? '#1F2937' : '#E5E7EB',
+                  backgroundColor: T.card,
+                  borderColor: T.border,
                 }}
               >
                 <div className="flex items-center justify-between flex-wrap gap-4">
                   <div>
-                    <h2 className="text-base font-bold text-white flex items-center gap-2">
+                    <h2 className="text-base font-bold flex items-center gap-2" style={{ color: T.text }}>
                       <span>AI Token Consumption & Cost Overview</span>
                       {tokenTargetUser && (
-                        <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30">
+                        <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-blue-500/15 text-blue-500 border border-blue-500/30">
                           Viewing: {tokenTargetUser.name}
                         </span>
                       )}
                     </h2>
-                    <p className="text-xs text-slate-400 mt-0.5">
+                    <p className="text-xs mt-0.5" style={{ color: T.textSub }}>
                       Monitor multi-model token throughput, per-user cost allocation, and automated remediation spend.
                     </p>
                   </div>
 
                   {/* Filter by User Dropdown */}
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold text-slate-400">Filter by User:</span>
+                    <span className="text-xs font-semibold" style={{ color: T.textSub }}>Filter by User:</span>
                     <select
                       value={selectedTokenUser}
                       onChange={e => setSelectedTokenUser(e.target.value)}
-                      className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-[#1C2638] border border-slate-700 text-white outline-none cursor-pointer"
+                      className="px-3.5 py-2 rounded-xl text-xs font-semibold border outline-none cursor-pointer transition-colors"
+                      style={{
+                        backgroundColor: isDark ? '#1C2638' : '#FFFFFF',
+                        borderColor: isDark ? '#334155' : '#CBD5E1',
+                        color: T.text,
+                      }}
                       aria-label="Filter token usage by user"
                     >
                       <option value="all">All Users & Clients ({users.length})</option>
@@ -745,7 +794,12 @@ export function Admin() {
                       <button
                         type="button"
                         onClick={() => setSelectedTokenUser('all')}
-                        className="px-2.5 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-white bg-slate-800 border border-slate-700 cursor-pointer"
+                        className="px-2.5 py-2 rounded-xl text-xs font-semibold border cursor-pointer transition-colors"
+                        style={{
+                          backgroundColor: isDark ? '#1E293B' : '#F1F5F9',
+                          borderColor: T.border,
+                          color: T.textSub,
+                        }}
                         title="Reset to all users"
                       >
                         Reset
@@ -756,36 +810,60 @@ export function Admin() {
 
                 {/* Tab 2 Dedicated KPI Cards: Strictly AI, Tokens & Spend */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-2">
-                  <div className="p-4 rounded-xl border bg-[#162032] border-slate-700/70 flex flex-col gap-1">
-                    <span className="text-xs font-semibold text-slate-400">Total Tokens Consumed</span>
-                    <span className="text-xl font-bold font-mono text-white">
+                  <div
+                    className="p-4 rounded-xl border flex flex-col gap-1"
+                    style={{
+                      backgroundColor: isDark ? '#162032' : '#F8FAFC',
+                      borderColor: T.border,
+                    }}
+                  >
+                    <span className="text-xs font-semibold" style={{ color: T.textSub }}>Total Tokens Consumed</span>
+                    <span className="text-xl font-bold font-mono" style={{ color: T.text }}>
                       {(targetTotalTokens / 1000000).toFixed(2)}M
                     </span>
-                    <span className="text-[11px] text-slate-400">{targetTotalTokens.toLocaleString()} tokens</span>
+                    <span className="text-[11px]" style={{ color: T.muted }}>{targetTotalTokens.toLocaleString()} tokens</span>
                   </div>
 
-                  <div className="p-4 rounded-xl border bg-[#162032] border-slate-700/70 flex flex-col gap-1">
-                    <span className="text-xs font-semibold text-slate-400">Total AI Spend</span>
-                    <span className="text-xl font-bold font-mono text-emerald-400">
+                  <div
+                    className="p-4 rounded-xl border flex flex-col gap-1"
+                    style={{
+                      backgroundColor: isDark ? '#162032' : '#F8FAFC',
+                      borderColor: T.border,
+                    }}
+                  >
+                    <span className="text-xs font-semibold" style={{ color: T.textSub }}>Total AI Spend</span>
+                    <span className="text-xl font-bold font-mono text-emerald-500">
                       ${targetTotalCost.toFixed(2)}
                     </span>
-                    <span className="text-[11px] text-slate-400">
+                    <span className="text-[11px]" style={{ color: T.muted }}>
                       {tokenTargetUser ? 'Selected user consumption' : `Avg $${avgCostPerUser} / user`}
                     </span>
                   </div>
 
-                  <div className="p-4 rounded-xl border bg-[#162032] border-slate-700/70 flex flex-col gap-1">
-                    <span className="text-xs font-semibold text-slate-400">Active LLM Routing</span>
-                    <span className="text-xl font-bold font-mono text-blue-400">3 Models</span>
-                    <span className="text-[11px] text-slate-400">GPT-4o (56%) · Claude (32%) · Gemini (12%)</span>
+                  <div
+                    className="p-4 rounded-xl border flex flex-col gap-1"
+                    style={{
+                      backgroundColor: isDark ? '#162032' : '#F8FAFC',
+                      borderColor: T.border,
+                    }}
+                  >
+                    <span className="text-xs font-semibold" style={{ color: T.textSub }}>Active LLM Routing</span>
+                    <span className="text-xl font-bold font-mono text-blue-500">3 Models</span>
+                    <span className="text-[11px]" style={{ color: T.muted }}>GPT-4o (56%) · Claude (32%) · Gemini (12%)</span>
                   </div>
 
-                  <div className="p-4 rounded-xl border bg-[#162032] border-slate-700/70 flex flex-col gap-1">
-                    <span className="text-xs font-semibold text-slate-400">Monthly Quota Budget</span>
-                    <span className="text-xl font-bold font-mono text-emerald-400">
+                  <div
+                    className="p-4 rounded-xl border flex flex-col gap-1"
+                    style={{
+                      backgroundColor: isDark ? '#162032' : '#F8FAFC',
+                      borderColor: T.border,
+                    }}
+                  >
+                    <span className="text-xs font-semibold" style={{ color: T.textSub }}>Monthly Quota Budget</span>
+                    <span className="text-xl font-bold font-mono text-emerald-500">
                       ${(500 - targetTotalCost).toFixed(2)} Left
                     </span>
-                    <span className="text-[11px] text-slate-400">Cap: $500.00 / month ({( (targetTotalCost / 500) * 100 ).toFixed(1)}% used)</span>
+                    <span className="text-[11px]" style={{ color: T.muted }}>Cap: $500.00 / month ({( (targetTotalCost / 500) * 100 ).toFixed(1)}% used)</span>
                   </div>
                 </div>
               </div>
@@ -795,15 +873,15 @@ export function Admin() {
 
                 {/* Model Specific Breakdown (5 Cols) */}
                 <div
-                  className="lg:col-span-5 p-6 rounded-2xl border shadow-xl flex flex-col gap-4"
+                  className="lg:col-span-5 p-6 rounded-2xl border shadow-sm flex flex-col gap-4"
                   style={{
-                    backgroundColor: isDark ? '#111827' : '#FFFFFF',
-                    borderColor: isDark ? '#1F2937' : '#E5E7EB',
+                    backgroundColor: T.card,
+                    borderColor: T.border,
                   }}
                 >
                   <div>
-                    <h3 className="text-sm font-bold text-white">AI Model-Specific Consumption</h3>
-                    <p className="text-xs text-slate-400 mt-0.5">
+                    <h3 className="text-sm font-bold" style={{ color: T.text }}>AI Model-Specific Consumption</h3>
+                    <p className="text-xs mt-0.5" style={{ color: T.textSub }}>
                       Token utilization and billing split by LLM provider.
                     </p>
                   </div>
@@ -812,24 +890,28 @@ export function Admin() {
                     {modelBreakdown.map((m, idx) => (
                       <div
                         key={idx}
-                        className="p-3.5 rounded-xl border bg-[#141D2E] border-slate-800 flex flex-col gap-2"
+                        className="p-3.5 rounded-xl border flex flex-col gap-2"
+                        style={{
+                          backgroundColor: isDark ? '#141D2E' : '#F8FAFC',
+                          borderColor: T.border,
+                        }}
                       >
                         <div className="flex items-center justify-between">
                           <div>
-                            <div className="font-semibold text-xs text-white flex items-center gap-1.5">
+                            <div className="font-semibold text-xs flex items-center gap-1.5" style={{ color: T.text }}>
                               <span className="w-2 h-2 rounded-full" style={{ backgroundColor: m.color }} />
                               <span>{m.model}</span>
                             </div>
-                            <div className="text-[10px] text-slate-400">{m.provider} · {m.purpose}</div>
+                            <div className="text-[10px]" style={{ color: T.muted }}>{m.provider} · {m.purpose}</div>
                           </div>
                           <div className="text-right">
-                            <div className="text-xs font-mono font-bold text-white">${m.cost.toFixed(2)}</div>
-                            <div className="text-[10px] text-slate-400 font-mono">{(m.tokens / 1000).toFixed(0)}K tokens</div>
+                            <div className="text-xs font-mono font-bold" style={{ color: T.text }}>${m.cost.toFixed(2)}</div>
+                            <div className="text-[10px] font-mono" style={{ color: T.muted }}>{(m.tokens / 1000).toFixed(0)}K tokens</div>
                           </div>
                         </div>
 
                         {/* Progress Bar */}
-                        <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                        <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: isDark ? '#1E293B' : '#E2E8F0' }}>
                           <div className="h-full rounded-full transition-all" style={{ width: `${m.share}%`, backgroundColor: m.color }} />
                         </div>
                       </div>
@@ -839,30 +921,39 @@ export function Admin() {
 
                 {/* Weekly & Monthly Usage Graph (7 Cols) */}
                 <div
-                  className="lg:col-span-7 p-6 rounded-2xl border shadow-xl flex flex-col justify-between gap-4"
+                  className="lg:col-span-7 p-6 rounded-2xl border shadow-sm flex flex-col justify-between gap-4"
                   style={{
-                    backgroundColor: isDark ? '#111827' : '#FFFFFF',
-                    borderColor: isDark ? '#1F2937' : '#E5E7EB',
+                    backgroundColor: T.card,
+                    borderColor: T.border,
                   }}
                 >
                   <div className="flex items-center justify-between flex-wrap gap-2">
                     <div>
-                      <h3 className="text-sm font-bold text-white">Consumption Over Time</h3>
-                      <p className="text-xs text-slate-400 mt-0.5">
+                      <h3 className="text-sm font-bold" style={{ color: T.text }}>Consumption Over Time</h3>
+                      <p className="text-xs mt-0.5" style={{ color: T.textSub }}>
                         Historical token throughput and automated fix volume.
                       </p>
                     </div>
 
                     {/* Timeframe Toggle: Weekly vs Monthly */}
-                    <div className="flex items-center bg-[#1C2638] p-1 rounded-xl border border-slate-700/80 text-xs">
+                    <div
+                      className="flex items-center p-1 rounded-xl border text-xs"
+                      style={{
+                        backgroundColor: isDark ? '#1C2638' : '#F1F5F9',
+                        borderColor: T.border,
+                      }}
+                    >
                       <button
                         type="button"
                         onClick={() => setTokenTimeframe('weekly')}
                         className={`px-3 py-1 rounded-lg font-semibold transition-all cursor-pointer ${
                           tokenTimeframe === 'weekly'
                             ? 'bg-blue-600 text-white shadow-sm'
-                            : 'text-slate-400 hover:text-white'
+                            : ''
                         }`}
+                        style={{
+                          color: tokenTimeframe === 'weekly' ? '#FFFFFF' : T.textSub,
+                        }}
                       >
                         Weekly Usage
                       </button>
@@ -872,8 +963,11 @@ export function Admin() {
                         className={`px-3 py-1 rounded-lg font-semibold transition-all cursor-pointer ${
                           tokenTimeframe === 'monthly'
                             ? 'bg-blue-600 text-white shadow-sm'
-                            : 'text-slate-400 hover:text-white'
+                            : ''
                         }`}
+                        style={{
+                          color: tokenTimeframe === 'monthly' ? '#FFFFFF' : T.textSub,
+                        }}
                       >
                         Monthly Usage
                       </button>
@@ -882,7 +976,7 @@ export function Admin() {
 
                   {/* SVG Bar Chart */}
                   <div className="pt-4 flex flex-col gap-2">
-                    <div className="h-44 flex items-end justify-between gap-3 px-2 pt-2 border-b border-slate-800">
+                    <div className="h-44 flex items-end justify-between gap-3 px-2 pt-2 border-b" style={{ borderColor: T.border }}>
                       {currentChartData.map((d, idx) => {
                         const heightPct = Math.max(10, Math.round((d.tokens / maxChartTokens) * 100));
                         return (
@@ -892,7 +986,7 @@ export function Admin() {
                               {(d.tokens / 1000).toFixed(0)}K tokens · ${d.cost.toFixed(2)}
                             </div>
                             <div
-                              className="w-full max-w-[42px] rounded-t-lg transition-all duration-300 group-hover:brightness-125"
+                              className="w-full max-w-[42px] rounded-t-lg transition-all duration-300 group-hover:brightness-110"
                               style={{
                                 height: `${heightPct}%`,
                                 background: 'linear-gradient(180deg, #3B82F6 0%, #1D4ED8 100%)',
@@ -904,7 +998,7 @@ export function Admin() {
                     </div>
 
                     {/* X-Axis Labels */}
-                    <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono px-2">
+                    <div className="flex items-center justify-between text-[11px] font-mono px-2" style={{ color: T.muted }}>
                       {currentChartData.map((d, idx) => (
                         <span key={idx} className="flex-1 text-center truncate">
                           {d.label}
@@ -914,30 +1008,50 @@ export function Admin() {
                   </div>
 
                   {/* Quota Cap Reminder */}
-                  <div className="p-3 rounded-xl bg-blue-500/10 border border-blue-500/20 text-slate-300 text-xs flex items-center justify-between">
+                  <div
+                    className="p-3 rounded-xl border text-xs flex items-center justify-between"
+                    style={{
+                      backgroundColor: isDark ? 'rgba(59, 130, 246, 0.1)' : '#EFF6FF',
+                      borderColor: isDark ? 'rgba(59, 130, 246, 0.2)' : '#BFDBFE',
+                      color: T.text,
+                    }}
+                  >
                     <span>Active Plan Limit: <strong>$500.00 / month</strong></span>
-                    <span className="text-emerald-400 font-mono font-bold">${(500 - targetTotalCost).toFixed(2)} Remaining</span>
+                    <span className="text-emerald-500 font-mono font-bold">${(500 - targetTotalCost).toFixed(2)} Remaining</span>
                   </div>
                 </div>
               </div>
 
               {/* Per-User AI Consumption Table */}
               <div
-                className="rounded-2xl border flex flex-col overflow-hidden shadow-xl"
+                className="rounded-2xl border flex flex-col overflow-hidden shadow-sm"
                 style={{
-                  backgroundColor: isDark ? '#111827' : '#FFFFFF',
-                  borderColor: isDark ? '#1F2937' : '#E5E7EB',
+                  backgroundColor: T.card,
+                  borderColor: T.border,
                 }}
               >
-                <div className="p-4 border-b border-slate-800 bg-[#141D2E] flex items-center justify-between">
-                  <h3 className="text-sm font-bold text-white">Client & User Token Consumption Leaderboard</h3>
-                  <span className="text-xs text-slate-400">Sorted by AI spend</span>
+                <div
+                  className="p-4 border-b flex items-center justify-between"
+                  style={{
+                    backgroundColor: isDark ? '#141D2E' : '#F8FAFC',
+                    borderColor: T.border,
+                  }}
+                >
+                  <h3 className="text-sm font-bold" style={{ color: T.text }}>Client & User Token Consumption Leaderboard</h3>
+                  <span className="text-xs" style={{ color: T.muted }}>Sorted by AI spend</span>
                 </div>
 
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs border-collapse">
                     <thead>
-                      <tr className="border-b border-slate-800 text-slate-400 font-semibold bg-[#141D2E]">
+                      <tr
+                        className="border-b font-semibold"
+                        style={{
+                          backgroundColor: isDark ? '#141D2E' : '#F8FAFC',
+                          borderColor: T.border,
+                          color: T.textSub,
+                        }}
+                      >
                         <th className="py-3 px-4">User</th>
                         <th className="py-3 px-4">Plan</th>
                         <th className="py-3 px-4">Total Tokens</th>
@@ -947,36 +1061,54 @@ export function Admin() {
                         <th className="py-3 px-4 text-right">Quick Filter</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-800">
+                    <tbody
+                      className="divide-y"
+                      style={{ borderColor: T.border }}
+                    >
                       {[...users].sort((a, b) => b.costUsage - a.costUsage).map(u => {
                         const quotaPct = Math.min(100, Math.round((u.costUsage / 50) * 100));
                         return (
-                          <tr key={u.id} className="hover:bg-slate-800/30 transition-colors">
-                            <td className="py-3.5 px-4 font-semibold text-white">
+                          <tr
+                            key={u.id}
+                            className={`transition-colors ${isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50'}`}
+                            style={{ borderColor: T.border }}
+                          >
+                            <td className="py-3.5 px-4 font-semibold" style={{ color: T.text }}>
                               <div>{u.name}</div>
-                              <div className="text-[11px] font-mono text-slate-400">{u.email}</div>
+                              <div className="text-[11px] font-mono" style={{ color: T.muted }}>{u.email}</div>
                             </td>
                             <td className="py-3.5 px-4">
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
+                              <span
+                                className="text-[10px] font-bold px-2 py-0.5 rounded-full border"
+                                style={{
+                                  backgroundColor: isDark ? '#1E293B' : '#F1F5F9',
+                                  borderColor: T.border,
+                                  color: T.textSub,
+                                }}
+                              >
                                 {u.plan}
                               </span>
                             </td>
-                            <td className="py-3.5 px-4 font-mono text-slate-300">
+                            <td className="py-3.5 px-4 font-mono" style={{ color: T.textSub }}>
                               {u.tokenUsage.toLocaleString()}
                             </td>
-                            <td className="py-3.5 px-4 font-mono font-bold text-emerald-400">
+                            <td className="py-3.5 px-4 font-mono font-bold text-emerald-500">
                               ${u.costUsage.toFixed(2)}
                             </td>
                             <td className="py-3.5 px-4">
                               <div className="flex items-center gap-2">
-                                <div className="w-24 bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                                <div className="w-24 h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: isDark ? '#1E293B' : '#E2E8F0' }}>
                                   <div className="bg-blue-500 h-full rounded-full" style={{ width: `${quotaPct}%` }} />
                                 </div>
-                                <span className="text-[10px] text-slate-400 font-mono">{quotaPct}%</span>
+                                <span className="text-[10px] font-mono" style={{ color: T.muted }}>{quotaPct}%</span>
                               </div>
                             </td>
                             <td className="py-3.5 px-4">
-                              <span className="text-[10px] font-semibold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                              <span
+                                className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${
+                                  isDark ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' : 'text-emerald-700 bg-emerald-50 border-emerald-200'
+                                }`}
+                              >
                                 Within Limit
                               </span>
                             </td>
@@ -984,7 +1116,7 @@ export function Admin() {
                               <button
                                 type="button"
                                 onClick={() => setSelectedTokenUser(u.id)}
-                                className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 transition-colors cursor-pointer border border-blue-500/30"
+                                className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-blue-600/15 text-blue-500 hover:bg-blue-600/25 transition-colors cursor-pointer border border-blue-500/30"
                               >
                                 Filter Usage
                               </button>
@@ -1007,23 +1139,25 @@ export function Admin() {
             <div
               className="w-full max-w-lg rounded-2xl flex flex-col overflow-hidden shadow-2xl border"
               style={{
-                backgroundColor: '#121927',
-                borderColor: '#243046',
-                color: '#F1F5F9',
+                backgroundColor: T.card,
+                borderColor: T.border,
+                color: T.text,
               }}
             >
               {/* Header */}
-              <div className="px-6 py-4 border-b flex items-center justify-between shrink-0" style={{ borderColor: '#243046' }}>
+              <div className="px-6 py-4 border-b flex items-center justify-between shrink-0" style={{ borderColor: T.border }}>
                 <div>
-                  <h3 className="text-base font-bold text-white">Onboard New User / Client</h3>
-                  <p className="text-xs text-slate-400 mt-0.5">
+                  <h3 className="text-base font-bold" style={{ color: T.text }}>Onboard New User / Client</h3>
+                  <p className="text-xs mt-0.5" style={{ color: T.textSub }}>
                     Configure account access, subscription tier, and monthly AI token quota.
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={() => setAddUserModalOpen(false)}
-                  className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-white cursor-pointer ml-2 shrink-0"
+                  className={`w-7 h-7 rounded-lg flex items-center justify-center cursor-pointer ml-2 shrink-0 transition-colors ${
+                    isDark ? 'text-slate-400 hover:text-white hover:bg-slate-700/50' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
+                  }`}
                 >
                   ✕
                 </button>
@@ -1033,7 +1167,7 @@ export function Admin() {
               <form onSubmit={handleCreateUser} className="p-6 flex flex-col gap-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-200 mb-1">
+                    <label className="block text-xs font-semibold mb-1" style={{ color: T.textSub }}>
                       Full Name
                     </label>
                     <input
@@ -1042,12 +1176,17 @@ export function Admin() {
                       value={newName}
                       onChange={e => setNewName(e.target.value)}
                       placeholder="e.g. Sarah Connor"
-                      className="w-full px-3.5 py-2 rounded-xl text-xs text-white placeholder-slate-500 bg-[#1C2638] border border-slate-700 outline-none focus:border-blue-500"
+                      className="w-full px-3.5 py-2 rounded-xl text-xs border outline-none focus:border-blue-500 transition-colors"
+                      style={{
+                        backgroundColor: isDark ? '#1C2638' : '#FFFFFF',
+                        borderColor: isDark ? '#334155' : '#CBD5E1',
+                        color: T.text,
+                      }}
                     />
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-slate-200 mb-1">
+                    <label className="block text-xs font-semibold mb-1" style={{ color: T.textSub }}>
                       Email Address
                     </label>
                     <input
@@ -1056,18 +1195,28 @@ export function Admin() {
                       value={newEmail}
                       onChange={e => setNewEmail(e.target.value)}
                       placeholder="sarah@company.com"
-                      className="w-full px-3.5 py-2 rounded-xl text-xs text-white placeholder-slate-500 bg-[#1C2638] border border-slate-700 outline-none focus:border-blue-500"
+                      className="w-full px-3.5 py-2 rounded-xl text-xs border outline-none focus:border-blue-500 transition-colors"
+                      style={{
+                        backgroundColor: isDark ? '#1C2638' : '#FFFFFF',
+                        borderColor: isDark ? '#334155' : '#CBD5E1',
+                        color: T.text,
+                      }}
                     />
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-slate-200 mb-1">
+                    <label className="block text-xs font-semibold mb-1" style={{ color: T.textSub }}>
                       Subscription Plan
                     </label>
                     <select
                       value={newPlan}
                       onChange={e => setNewPlan(e.target.value as any)}
-                      className="w-full px-3.5 py-2 rounded-xl text-xs text-white bg-[#1C2638] border border-slate-700 outline-none cursor-pointer"
+                      className="w-full px-3.5 py-2 rounded-xl text-xs border outline-none cursor-pointer transition-colors"
+                      style={{
+                        backgroundColor: isDark ? '#1C2638' : '#FFFFFF',
+                        borderColor: isDark ? '#334155' : '#CBD5E1',
+                        color: T.text,
+                      }}
                     >
                       <option value="Enterprise">Enterprise ($500 quota)</option>
                       <option value="Pro">Pro ($100 quota)</option>
@@ -1077,7 +1226,7 @@ export function Admin() {
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-slate-200 mb-1">
+                    <label className="block text-xs font-semibold mb-1" style={{ color: T.textSub }}>
                       Organization
                     </label>
                     <input
@@ -1086,12 +1235,17 @@ export function Admin() {
                       value={newOrganization}
                       onChange={e => setNewOrganization(e.target.value)}
                       placeholder="e.g. Acme Corp, CloudifyOps"
-                      className="w-full px-3.5 py-2 rounded-xl text-xs text-white placeholder-slate-500 bg-[#1C2638] border border-slate-700 outline-none focus:border-blue-500"
+                      className="w-full px-3.5 py-2 rounded-xl text-xs border outline-none focus:border-blue-500 transition-colors"
+                      style={{
+                        backgroundColor: isDark ? '#1C2638' : '#FFFFFF',
+                        borderColor: isDark ? '#334155' : '#CBD5E1',
+                        color: T.text,
+                      }}
                     />
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-slate-200 mb-1">
+                    <label className="block text-xs font-semibold mb-1" style={{ color: T.textSub }}>
                       Monthly AI Spend Limit ($)
                     </label>
                     <input
@@ -1099,13 +1253,18 @@ export function Admin() {
                       value={newBudget}
                       onChange={e => setNewBudget(e.target.value)}
                       placeholder="50.00"
-                      className="w-full px-3.5 py-2 rounded-xl text-xs bg-[#1C2638] border border-slate-700 text-white outline-none font-mono"
+                      className="w-full px-3.5 py-2 rounded-xl text-xs border outline-none font-mono transition-colors"
+                      style={{
+                        backgroundColor: isDark ? '#1C2638' : '#FFFFFF',
+                        borderColor: isDark ? '#334155' : '#CBD5E1',
+                        color: T.text,
+                      }}
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-200 mb-1">
+                  <label className="block text-xs font-semibold mb-1" style={{ color: T.textSub }}>
                     Temporary Password (Optional)
                   </label>
                   <div className="relative flex items-center">
@@ -1114,12 +1273,17 @@ export function Admin() {
                       value={newPassword}
                       onChange={e => setNewPassword(e.target.value)}
                       placeholder="Leave blank to auto-generate invite token"
-                      className="w-full pl-3.5 pr-10 py-2 rounded-xl text-xs text-white placeholder-slate-500 bg-[#1C2638] border border-slate-700 outline-none focus:border-blue-500"
+                      className="w-full pl-3.5 pr-10 py-2 rounded-xl text-xs border outline-none focus:border-blue-500 transition-colors"
+                      style={{
+                        backgroundColor: isDark ? '#1C2638' : '#FFFFFF',
+                        borderColor: isDark ? '#334155' : '#CBD5E1',
+                        color: T.text,
+                      }}
                     />
                     <button
                       type="button"
                       onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 text-slate-400 hover:text-slate-200 cursor-pointer"
+                      className={`absolute right-3 cursor-pointer ${isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-400 hover:text-slate-600'}`}
                     >
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
@@ -1131,17 +1295,22 @@ export function Admin() {
 
                 <div className="flex items-center gap-2 pt-1">
                   <input type="checkbox" id="sendInvite" defaultChecked className="rounded text-blue-600 cursor-pointer" />
-                  <label htmlFor="sendInvite" className="text-xs text-slate-300 cursor-pointer">
+                  <label htmlFor="sendInvite" className="text-xs cursor-pointer" style={{ color: T.textSub }}>
                     Send onboarding welcome email with login credentials and WAFR guide
                   </label>
                 </div>
 
                 {/* Footer Buttons */}
-                <div className="flex items-center justify-end gap-2.5 pt-4 border-t border-slate-800">
+                <div className="flex items-center justify-end gap-2.5 pt-4 border-t" style={{ borderColor: T.border }}>
                   <button
                     type="button"
                     onClick={() => setAddUserModalOpen(false)}
-                    className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-white border border-slate-700 hover:bg-slate-800 transition-colors cursor-pointer"
+                    className="px-4 py-2 rounded-xl text-xs font-semibold border transition-colors cursor-pointer"
+                    style={{
+                      backgroundColor: isDark ? '#1E293B' : '#F1F5F9',
+                      borderColor: T.border,
+                      color: T.textSub,
+                    }}
                   >
                     Cancel
                   </button>
@@ -1163,13 +1332,13 @@ export function Admin() {
             <div
               className="w-full max-w-md rounded-2xl flex flex-col overflow-hidden shadow-2xl border"
               style={{
-                backgroundColor: '#121927',
-                borderColor: '#243046',
-                color: '#F1F5F9',
+                backgroundColor: T.card,
+                borderColor: T.border,
+                color: T.text,
               }}
             >
               <div className="p-6 flex flex-col gap-4">
-                <div className="w-12 h-12 rounded-2xl bg-amber-500/15 text-amber-400 flex items-center justify-center border border-amber-500/30">
+                <div className="w-12 h-12 rounded-2xl bg-amber-500/15 text-amber-500 flex items-center justify-center border border-amber-500/30">
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
                     <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
@@ -1177,17 +1346,22 @@ export function Admin() {
                 </div>
 
                 <div>
-                  <h3 className="text-base font-bold text-white">Reset Password for {resetModalUser.name}?</h3>
-                  <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                    This will invalidate all current active sessions for <strong className="text-slate-200">{resetModalUser.email}</strong> and send an encrypted password reset link valid for 24 hours.
+                  <h3 className="text-base font-bold" style={{ color: T.text }}>Reset Password for {resetModalUser.name}?</h3>
+                  <p className="text-xs mt-1 leading-relaxed" style={{ color: T.textSub }}>
+                    This will invalidate all current active sessions for <strong style={{ color: T.text }}>{resetModalUser.email}</strong> and send an encrypted password reset link valid for 24 hours.
                   </p>
                 </div>
 
-                <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-800">
+                <div className="flex items-center justify-end gap-2.5 pt-3 border-t" style={{ borderColor: T.border }}>
                   <button
                     type="button"
                     onClick={() => setResetModalUser(null)}
-                    className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-white border border-slate-700 hover:bg-slate-800 transition-colors cursor-pointer"
+                    className="px-4 py-2 rounded-xl text-xs font-semibold border transition-colors cursor-pointer"
+                    style={{
+                      backgroundColor: isDark ? '#1E293B' : '#F1F5F9',
+                      borderColor: T.border,
+                      color: T.textSub,
+                    }}
                   >
                     Cancel
                   </button>
@@ -1210,13 +1384,13 @@ export function Admin() {
             <div
               className="w-full max-w-md rounded-2xl flex flex-col overflow-hidden shadow-2xl border"
               style={{
-                backgroundColor: '#121927',
-                borderColor: '#243046',
-                color: '#F1F5F9',
+                backgroundColor: T.card,
+                borderColor: T.border,
+                color: T.text,
               }}
             >
               <div className="p-6 flex flex-col gap-4">
-                <div className="w-12 h-12 rounded-2xl bg-rose-500/15 text-rose-400 flex items-center justify-center border border-rose-500/30">
+                <div className="w-12 h-12 rounded-2xl bg-rose-500/15 text-rose-500 flex items-center justify-center border border-rose-500/30">
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
                     <circle cx="9" cy="7" r="4" />
@@ -1226,33 +1400,45 @@ export function Admin() {
                 </div>
 
                 <div>
-                  <h3 className="text-base font-bold text-white">Offboard and Delete {offboardUser.name}?</h3>
-                  <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                    You are about to permanently offboard <strong className="text-slate-200">{offboardUser.email}</strong>.
+                  <h3 className="text-base font-bold" style={{ color: T.text }}>Offboard and Delete {offboardUser.name}?</h3>
+                  <p className="text-xs mt-1 leading-relaxed" style={{ color: T.textSub }}>
+                    You are about to permanently offboard <strong style={{ color: T.text }}>{offboardUser.email}</strong>.
                   </p>
                 </div>
 
-                <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-300 flex flex-col gap-2">
-                  <span className="font-semibold text-slate-200">Automated Offboarding Sequence:</span>
-                  <div className="flex items-center gap-2 text-slate-400">
-                    <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
+                <div
+                  className="p-3.5 rounded-xl border text-xs flex flex-col gap-2"
+                  style={{
+                    backgroundColor: isDark ? '#0B0F17' : '#F8FAFC',
+                    borderColor: T.border,
+                    color: T.textSub,
+                  }}
+                >
+                  <span className="font-semibold" style={{ color: T.text }}>Automated Offboarding Sequence:</span>
+                  <div className="flex items-center gap-2" style={{ color: T.textSub }}>
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
                     <span>Revoke active SSO & API tokens</span>
                   </div>
-                  <div className="flex items-center gap-2 text-slate-400">
-                    <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
+                  <div className="flex items-center gap-2" style={{ color: T.textSub }}>
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
                     <span>Archive personal WAFR reports and scans</span>
                   </div>
-                  <div className="flex items-center gap-2 text-slate-400">
-                    <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
+                  <div className="flex items-center gap-2" style={{ color: T.textSub }}>
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
                     <span>Reclaim unspent AI quota (${offboardUser.costUsage.toFixed(2)} usage)</span>
                   </div>
                 </div>
 
-                <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-800">
+                <div className="flex items-center justify-end gap-2.5 pt-3 border-t" style={{ borderColor: T.border }}>
                   <button
                     type="button"
                     onClick={() => setOffboardUser(null)}
-                    className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-white border border-slate-700 hover:bg-slate-800 transition-colors cursor-pointer"
+                    className="px-4 py-2 rounded-xl text-xs font-semibold border transition-colors cursor-pointer"
+                    style={{
+                      backgroundColor: isDark ? '#1E293B' : '#F1F5F9',
+                      borderColor: T.border,
+                      color: T.textSub,
+                    }}
                   >
                     Cancel
                   </button>
@@ -1275,17 +1461,19 @@ export function Admin() {
             <div
               className="w-full max-w-md rounded-2xl flex flex-col overflow-hidden shadow-2xl border"
               style={{
-                backgroundColor: '#121927',
-                borderColor: '#243046',
-                color: '#F1F5F9',
+                backgroundColor: T.card,
+                borderColor: T.border,
+                color: T.text,
               }}
             >
-              <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between">
-                <h3 className="text-base font-bold text-white">Edit User: {editingUser.name}</h3>
+              <div className="px-6 py-4 border-b flex items-center justify-between" style={{ borderColor: T.border }}>
+                <h3 className="text-base font-bold" style={{ color: T.text }}>Edit User: {editingUser.name}</h3>
                 <button
                   type="button"
                   onClick={() => setEditingUser(null)}
-                  className="text-slate-400 hover:text-white cursor-pointer"
+                  className={`w-7 h-7 rounded-lg flex items-center justify-center cursor-pointer transition-colors ${
+                    isDark ? 'text-slate-400 hover:text-white hover:bg-slate-700/50' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
+                  }`}
                 >
                   ✕
                 </button>
@@ -1293,22 +1481,32 @@ export function Admin() {
 
               <form onSubmit={handleSaveEditUser} className="p-6 flex flex-col gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-200 mb-1">Full Name</label>
+                  <label className="block text-xs font-semibold mb-1" style={{ color: T.textSub }}>Full Name</label>
                   <input
                     type="text"
                     required
                     value={editingUser.name}
                     onChange={e => setEditingUser({ ...editingUser, name: e.target.value })}
-                    className="w-full px-3.5 py-2 rounded-xl text-xs text-white bg-[#1C2638] border border-slate-700 outline-none"
+                    className="w-full px-3.5 py-2 rounded-xl text-xs border outline-none focus:border-blue-500 transition-colors"
+                    style={{
+                      backgroundColor: isDark ? '#1C2638' : '#FFFFFF',
+                      borderColor: isDark ? '#334155' : '#CBD5E1',
+                      color: T.text,
+                    }}
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-200 mb-1">Plan</label>
+                  <label className="block text-xs font-semibold mb-1" style={{ color: T.textSub }}>Plan</label>
                   <select
                     value={editingUser.plan}
                     onChange={e => setEditingUser({ ...editingUser, plan: e.target.value as any })}
-                    className="w-full px-3.5 py-2 rounded-xl text-xs text-white bg-[#1C2638] border border-slate-700 outline-none cursor-pointer"
+                    className="w-full px-3.5 py-2 rounded-xl text-xs border outline-none cursor-pointer transition-colors"
+                    style={{
+                      backgroundColor: isDark ? '#1C2638' : '#FFFFFF',
+                      borderColor: isDark ? '#334155' : '#CBD5E1',
+                      color: T.text,
+                    }}
                   >
                     <option value="Enterprise">Enterprise</option>
                     <option value="Pro">Pro</option>
@@ -1318,22 +1516,32 @@ export function Admin() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-200 mb-1">Organization</label>
+                  <label className="block text-xs font-semibold mb-1" style={{ color: T.textSub }}>Organization</label>
                   <input
                     type="text"
                     required
                     value={editingUser.organization}
                     onChange={e => setEditingUser({ ...editingUser, organization: e.target.value })}
-                    className="w-full px-3.5 py-2 rounded-xl text-xs text-white bg-[#1C2638] border border-slate-700 outline-none"
+                    className="w-full px-3.5 py-2 rounded-xl text-xs border outline-none focus:border-blue-500 transition-colors"
+                    style={{
+                      backgroundColor: isDark ? '#1C2638' : '#FFFFFF',
+                      borderColor: isDark ? '#334155' : '#CBD5E1',
+                      color: T.text,
+                    }}
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-200 mb-1">Status</label>
+                  <label className="block text-xs font-semibold mb-1" style={{ color: T.textSub }}>Status</label>
                   <select
                     value={editingUser.status}
                     onChange={e => setEditingUser({ ...editingUser, status: e.target.value as any })}
-                    className="w-full px-3.5 py-2 rounded-xl text-xs text-white bg-[#1C2638] border border-slate-700 outline-none cursor-pointer"
+                    className="w-full px-3.5 py-2 rounded-xl text-xs border outline-none cursor-pointer transition-colors"
+                    style={{
+                      backgroundColor: isDark ? '#1C2638' : '#FFFFFF',
+                      borderColor: isDark ? '#334155' : '#CBD5E1',
+                      color: T.text,
+                    }}
                   >
                     <option value="Active">Active</option>
                     <option value="Inactive">Inactive</option>
@@ -1341,17 +1549,22 @@ export function Admin() {
                   </select>
                 </div>
 
-                <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-800">
+                <div className="flex items-center justify-end gap-2.5 pt-3 border-t" style={{ borderColor: T.border }}>
                   <button
                     type="button"
                     onClick={() => setEditingUser(null)}
-                    className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-white border border-slate-700 hover:bg-slate-800 cursor-pointer"
+                    className="px-4 py-2 rounded-xl text-xs font-semibold border transition-colors cursor-pointer"
+                    style={{
+                      backgroundColor: isDark ? '#1E293B' : '#F1F5F9',
+                      borderColor: T.border,
+                      color: T.textSub,
+                    }}
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
-                    className="px-5 py-2 rounded-xl text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 cursor-pointer shadow-md"
+                    className="px-5 py-2 rounded-xl text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 transition-colors cursor-pointer shadow-md"
                   >
                     Save Changes
                   </button>
