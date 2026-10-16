@@ -429,10 +429,28 @@ function saveUserData(userId: string, data: UserDataStore) {
   }
 }
 
+// Keys used to persist the active session across full-page reloads so a browser
+// refresh does not drop the user back onto the Login screen.
+const ACTIVE_USER_KEY = 'lens_active_user';
+const ACTIVE_SCREEN_KEY = 'lens_active_screen';
+const KEYCLOAK_TOKEN_KEY = 'lens_keycloak_token';
+
+// A session exists only if we have a persisted user. The Keycloak token is an
+// additional signal but may be absent for mock/local logins, so the user record
+// is the authoritative marker.
+function hasPersistedSession(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return !!localStorage.getItem(ACTIVE_USER_KEY);
+  } catch {
+    return false;
+  }
+}
+
 export function AppProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<UserProfile>(() => {
     try {
-      const savedUser = typeof window !== 'undefined' ? localStorage.getItem('lens_active_user') : null;
+      const savedUser = typeof window !== 'undefined' ? localStorage.getItem(ACTIVE_USER_KEY) : null;
       if (savedUser) return JSON.parse(savedUser);
     } catch {}
     return PRESET_USERS[0];
@@ -440,9 +458,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const initialData = loadUserData(currentUser.id);
 
-  const [screen, setScreen] = useState<Screen>('login');
+  // Restore the last screen on refresh instead of forcing 'login'. We only
+  // restore a non-login screen when a session is actually persisted; otherwise
+  // we fall back to the login screen.
+  const [screen, setScreen] = useState<Screen>(() => {
+    if (typeof window === 'undefined') return 'login';
+    if (!hasPersistedSession()) return 'login';
+    try {
+      const savedScreen = localStorage.getItem(ACTIVE_SCREEN_KEY) as Screen | null;
+      if (savedScreen && savedScreen !== 'login') return savedScreen;
+    } catch {}
+    // Session exists but no stored screen (e.g. older sessions) — land on dashboard.
+    return 'dashboard';
+  });
   const [previousScreen, setPreviousScreen] = useState<Screen>('dashboard');
-  const [cloud, setCloud] = useState<Cloud | null>(null);
+  // Seed `cloud` from the first assessment so a refresh directly onto an
+  // assessment-scoped screen (report, pillar-detail, remediation) still has a
+  // cloud context instead of null.
+  const [cloud, setCloud] = useState<Cloud | null>(initialData.assessments[0]?.cloud || null);
   const [selectedLens, setSelectedLens] = useState<LensType>('wafr');
   const [selectedAssessmentId, setSelectedAssessmentId] = useState<string>(
     initialData.assessments[0]?.id || 'A-001'
@@ -1088,9 +1121,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       theme,
     });
     try {
-      localStorage.setItem('lens_active_user', JSON.stringify(currentUser));
+      // Do not re-persist the active user while on the login screen (e.g. right
+      // after logout), otherwise a refresh would silently restore the session.
+      if (screen !== 'login') {
+        localStorage.setItem(ACTIVE_USER_KEY, JSON.stringify(currentUser));
+      }
     } catch {}
   }, [
+    screen,
     currentUser,
     assessments,
     milestones,
@@ -1229,6 +1267,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const logoutUser = () => {
+    // Clear the persisted session so a refresh after logout stays on Login.
+    try {
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem(ACTIVE_USER_KEY);
+        localStorage.removeItem(ACTIVE_SCREEN_KEY);
+        localStorage.removeItem(KEYCLOAK_TOKEN_KEY);
+      }
+    } catch {}
     setUserRole('user');
     navigate('login');
   };
@@ -1370,6 +1416,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setPreviousScreen(screen);
     setScreen(nextScreen);
   };
+
+  // Persist the active screen so a full-page refresh returns the user to the
+  // same place rather than bouncing them to Login. We never persist 'login'
+  // itself as a restore target.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      if (screen === 'login') {
+        localStorage.removeItem(ACTIVE_SCREEN_KEY);
+      } else {
+        localStorage.setItem(ACTIVE_SCREEN_KEY, screen);
+      }
+    } catch {}
+  }, [screen]);
 
   const selectAssessment = (id: string, targetScreen: Screen = 'report') => {
     setSelectedAssessmentId(id);

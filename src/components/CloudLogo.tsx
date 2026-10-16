@@ -90,9 +90,9 @@ export const GcpMark = ({
     src={GCP_LOGO_DATA_URI}
     alt="Google Cloud"
     width={size}
-    height={Math.round(size * 0.85)}
+    height={size}
     className={`shrink-0 object-contain ${className}`}
-    style={{ width: size, height: Math.round(size * 0.85) }}
+    style={{ width: size, height: size }}
     loading="eager"
   />
 );
@@ -114,11 +114,14 @@ export function CloudChip({
   isDark?: boolean;
   className?: string;
 }) {
+  // Each tile defines a square inner area (`inner`) that all three marks share.
+  // object-contain centers every logo inside that area regardless of the logo's
+  // intrinsic aspect ratio, so AWS, Azure, and GCP get identical breathing room.
   const sizeMap = {
-    xs: { box: 'w-7 h-7 rounded-lg p-1', imgW: 20, imgH: 14, azSize: 16, gcpSize: 16 },
-    sm: { box: 'w-10 h-10 rounded-xl p-1.5', imgW: 28, imgH: 22, azSize: 24, gcpSize: 24 },
-    md: { box: 'w-12 h-12 rounded-2xl p-2', imgW: 36, imgH: 26, azSize: 30, gcpSize: 30 },
-    lg: { box: 'w-16 h-16 rounded-2xl p-2.5', imgW: 48, imgH: 34, azSize: 40, gcpSize: 40 },
+    xs: { box: 'w-7 h-7 rounded-lg p-1', inner: 18, awsW: 24, awsH: 16 },
+    sm: { box: 'w-10 h-10 rounded-xl p-1.5', inner: 24, awsW: 32, awsH: 20 },
+    md: { box: 'w-12 h-12 rounded-2xl p-2', inner: 28, awsW: 38, awsH: 24 },
+    lg: { box: 'w-16 h-16 rounded-2xl p-2.5', inner: 38, awsW: 50, awsH: 32 },
   };
 
   const config = sizeMap[size] || sizeMap.sm;
@@ -151,9 +154,9 @@ export function CloudChip({
             : '0 1px 3px rgba(0,0,0,0.06)',
       }}
     >
-      {id === 'aws' && <AwsWordmark width={config.imgW} height={config.imgH} isDark={isDark} />}
-      {id === 'azure' && <AzureMark size={config.azSize} />}
-      {id === 'gcp' && <GcpMark size={config.gcpSize} />}
+      {id === 'aws' && <AwsWordmark width={config.awsW} height={config.awsH} isDark={isDark} />}
+      {id === 'azure' && <AzureMark size={config.inner} />}
+      {id === 'gcp' && <GcpMark size={config.inner} />}
     </span>
   );
 }
