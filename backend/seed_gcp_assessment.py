@@ -7,8 +7,9 @@ import asyncio
 from datetime import datetime, timezone
 from motor.motor_asyncio import AsyncIOMotorClient
 
-MONGO_URI = "mongodb://127.0.0.1:27017"
-DB_NAME = "wafr_db"
+import os
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://127.0.0.1:27017")
+DB_NAME = os.getenv("DB_NAME", "wafr_db")
 
 ASSESSMENT_ID = "A-GCP-001"
 PROJECT_ID = "proj-gcp-prod-9941"
