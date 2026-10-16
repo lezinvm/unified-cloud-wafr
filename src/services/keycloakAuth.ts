@@ -51,7 +51,7 @@ const TOKEN_KEY = 'lens_keycloak_token';
 const MOCK_USERS_KEY = 'lens_mock_registered_users';
 
 export const DEFAULT_KEYCLOAK_CONFIG: KeycloakConfig = {
-  serverUrl: 'http://localhost:8080',
+  serverUrl: (import.meta.env.VITE_KEYCLOAK_URL as string) || 'http://localhost:8080',
   realm: 'lens-realm',
   clientId: 'lens-app',
   adminUsername: 'admin',
