@@ -15,28 +15,15 @@ const CLOUD_META: Record<CloudId, { label: string; accent: string }> = {
   gcp:   { label: 'Google Cloud',        accent: '#4285F4' },
 };
 
-const CLOUD_STATS: { id: CloudId; avg: number; pass: number; warn: number; fail: number; accounts: number; resources: string }[] = [
-  { id: 'aws',   avg: 79, pass: 9,  warn: 4, fail: 5, accounts: 12, resources: '1.2k' },
-  { id: 'azure', avg: 66, pass: 5,  warn: 3, fail: 2, accounts: 8,  resources: '487'  },
-  { id: 'gcp',   avg: 91, pass: 3,  warn: 1, fail: 0, accounts: 4,  resources: '312'  },
-];
-
-type AssessmentStatus = 'completed' | 'running' | 'failed';
-
-const ASSESSMENTS: {
-  id: string; cloud: CloudId; name: string;
-  accountName: string; accountId: string; region: string;
-  status: AssessmentStatus;
-  score: number; lastRun: string;
-}[] = [
-  { id:'A-001', cloud:'aws',   name:'Production — us-east-1 Full Review',  accountName:'acme-production',  accountId:'124890123456', region:'us-east-1',    status:'completed', score:84, lastRun:'2h ago'   },
-  { id:'A-002', cloud:'aws',   name:'Staging — us-west-2 Review',          accountName:'acme-staging',     accountId:'987654321098', region:'us-west-2',    status:'running',   score:0,  lastRun:'Running'  },
-  { id:'A-003', cloud:'azure', name:'Azure Data Platform Review',          accountName:'AcmeCorp-DataSub', accountId:'sub-4891-2394', region:'eastus',       status:'completed', score:78, lastRun:'1d ago'   },
-  { id:'A-004', cloud:'aws',   name:'Dev Baseline Review',                 accountName:'acme-dev',         accountId:'456789012345', region:'us-east-2',    status:'completed', score:67, lastRun:'3d ago'   },
-  { id:'A-005', cloud:'gcp',   name:'GKE Production Review',               accountName:'acme-gcp-prod',    accountId:'proj-gcp-9941', region:'us-central1', status:'completed', score:91, lastRun:'4d ago'   },
-  { id:'A-006', cloud:'aws',   name:'Cost Optimisation Review',            accountName:'acme-production',  accountId:'124890123456', region:'eu-west-1',    status:'completed', score:92, lastRun:'5d ago'   },
-  { id:'A-007', cloud:'azure', name:'AKS Security Hardening Review',       accountName:'AcmeCorp-CoreSub', accountId:'sub-7712-9901', region:'westeurope',   status:'failed',    score:54, lastRun:'1wk ago'  },
-];
+interface CloudStatItem {
+  id: CloudId;
+  avg: number;
+  pass: number;
+  warn: number;
+  fail: number;
+  accounts: number;
+  resources: string;
+}
 
 /* ── Sub-components ──────────────────────────────────────────────────────────── */
 
@@ -54,7 +41,7 @@ function StatCard({ value, label, color, T }: { value: string; label: string; co
 function ProviderCard({
   stat, active, onClick, T, isDark, accountsCount, disabled,
 }: {
-  stat: typeof CLOUD_STATS[0];
+  stat: CloudStatItem;
   active: boolean;
   onClick: () => void;
   T: Tokens;
@@ -82,7 +69,7 @@ function ProviderCard({
         <div className="min-w-0">
           <div className="text-sm font-semibold truncate" style={{ color: T.text }}>{meta.label}</div>
           <div className="text-[11px] mt-0.5" style={{ color: T.textSub }}>
-            {accountsCount} accounts
+            {accountsCount} {accountsCount === 1 ? 'account' : 'accounts'}
           </div>
         </div>
       </div>

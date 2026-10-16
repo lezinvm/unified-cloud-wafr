@@ -817,15 +817,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
                 ? 'warning'
                 : 'complete';
 
+            const itemCloud = ((a.cloud || acc.cloud || 'aws') as Cloud).toLowerCase() as Cloud;
+            const defaultReg = itemCloud === 'azure' ? 'eastus' : itemCloud === 'gcp' ? 'us-central1' : 'us-east-1';
+
             return {
               id: a.id,
-              name: a.name || 'Cloud Review',
-              accountName: a.account_name || acc.account_name || 'Production Account',
-              accountId: String(a.account_identifier || acc.account_identifier || acc.id || '124890123456'),
-              region: a.region || acc.default_region || 'us-east-1',
-              cloud: (a.cloud || acc.cloud as Cloud) || 'aws',
+              name: a.name || `${itemCloud.toUpperCase()} Architecture Review`,
+              accountName: a.account_name || acc.account_name || `${itemCloud.toUpperCase()} Account`,
+              accountId: String(a.account_identifier || acc.account_identifier || acc.id || a.cloud_account_id || ''),
+              region: a.region || acc.default_region || defaultReg,
+              cloud: itemCloud,
               status: mappedStatus,
-              score: Number(a.score) || 84,
+              score: Number(a.score) ?? 80,
               lastRun: rawStatus === 'running' ? 'In progress' : (a.last_run_at ? 'Recently' : '2h ago'),
               checks: Number(a.total_checks || a.checks_count) || 46,
               pillars: a.pillar_scores || {
