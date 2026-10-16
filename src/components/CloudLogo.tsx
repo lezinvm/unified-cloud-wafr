@@ -61,23 +61,35 @@ export const AwsWordmark = ({
 
 import { AZURE_LOGO_DATA_URI, GCP_LOGO_DATA_URI, LENS_LOGO_DATA_URI } from './brandAssets';
 
+// Optical balancing factors. The source PNGs have very different intrinsic
+// shapes — Azure is a tight 1:1 square (225x225) whose artwork fills the whole
+// frame, while GCP is a wide ~1.9:1 image (738x387) that only fills about half
+// of a square's height under object-contain. Equal box sizes therefore make
+// Azure look oversized and GCP look small. These multipliers scale each mark's
+// footprint so the *visible* logo reads at a comparable size inside the tile.
+const AZURE_SCALE = 0.82;
+const GCP_SCALE = 1.18;
+
 export const AzureMark = ({
   size = 32,
   className = '',
 }: {
   size?: number;
   className?: string;
-}) => (
-  <img
-    src={AZURE_LOGO_DATA_URI}
-    alt="Microsoft Azure"
-    width={size}
-    height={size}
-    className={`shrink-0 object-contain ${className}`}
-    style={{ width: size, height: size }}
-    loading="eager"
-  />
-);
+}) => {
+  const s = Math.round(size * AZURE_SCALE);
+  return (
+    <img
+      src={AZURE_LOGO_DATA_URI}
+      alt="Microsoft Azure"
+      width={s}
+      height={s}
+      className={`shrink-0 object-contain ${className}`}
+      style={{ width: s, height: s }}
+      loading="eager"
+    />
+  );
+};
 
 export const GcpMark = ({
   size = 32,
@@ -85,17 +97,20 @@ export const GcpMark = ({
 }: {
   size?: number;
   className?: string;
-}) => (
-  <img
-    src={GCP_LOGO_DATA_URI}
-    alt="Google Cloud"
-    width={size}
-    height={size}
-    className={`shrink-0 object-contain ${className}`}
-    style={{ width: size, height: size }}
-    loading="eager"
-  />
-);
+}) => {
+  // GCP is scaled by width; object-contain preserves its wide aspect ratio.
+  const w = Math.round(size * GCP_SCALE);
+  return (
+    <img
+      src={GCP_LOGO_DATA_URI}
+      alt="Google Cloud"
+      width={w}
+      className={`shrink-0 object-contain ${className}`}
+      style={{ width: w, height: 'auto' }}
+      loading="eager"
+    />
+  );
+};
 
 /**
  * Modern, beautifully proportioned square chip container for cloud provider logos.
