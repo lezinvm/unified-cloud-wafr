@@ -1,56 +1,61 @@
 /**
- * Official Cloud Provider Logos — AWS, Microsoft Azure (Fluent 2021+ Ribbon), Google Cloud.
- * Renders both pixel-perfect SVGs and high-resolution assets for crisp fidelity at all DPRs.
+/**
+ * Cloud Provider Logos — AWS, Microsoft Azure, Google Cloud.
+ *
+ * All three provider marks are authored as inline SVGs on an identical 24x24
+ * viewBox with the artwork sized to roughly the same optical weight. This
+ * replaces the previous mix of a text wordmark + two differently-proportioned
+ * PNGs, which could never look balanced at a shared box size. Rendering them
+ * from one coordinate system guarantees consistent sizing and padding.
  */
+
+import { LENS_LOGO_DATA_URI } from './brandAssets';
 
 export type CloudId = 'aws' | 'azure' | 'gcp';
 
-export const AwsWordmark = ({
-  width = 44,
-  height = 28,
+// AWS — "aws" wordmark with the orange "smile" arrow, framed in 24x24.
+export const AwsMark = ({
+  size = 24,
   isDark = false,
   className = '',
 }: {
-  width?: number;
-  height?: number;
+  size?: number;
   isDark?: boolean;
   className?: string;
 }) => {
-  const textColor = isDark ? '#FFFFFF' : '#232F3E';
+  const textColor = isDark ? '#FFFFFF' : '#252F3E';
   return (
     <svg
-      width={width}
-      height={height}
-      viewBox="0 0 68 36"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       className={`shrink-0 ${className}`}
     >
-      {/* AWS Typography */}
       <text
-        x="34"
-        y="21"
+        x="12"
+        y="12.5"
         textAnchor="middle"
         fontFamily="Inter, system-ui, -apple-system, sans-serif"
-        fontSize="21"
+        fontSize="8.5"
         fontWeight="800"
-        letterSpacing="-0.5px"
+        letterSpacing="-0.3"
         fill={textColor}
       >
         aws
       </text>
-      {/* AWS Smile Arrow Curve */}
       <path
-        d="M14 24.5C22 29.5 32 31 42 29.5C47 28.5 51.5 26.5 55 23.5"
+        d="M5 16.2c4.3 2.6 9.7 2.6 14 0"
         stroke="#FF9900"
-        strokeWidth="2.8"
+        strokeWidth="1.5"
         strokeLinecap="round"
+        fill="none"
       />
-      {/* Arrowhead */}
       <path
-        d="M52 23.5L56 23L54.5 27.5"
+        d="M16.6 15.1l2.6-.4-.7 2.6"
         stroke="#FF9900"
-        strokeWidth="2.8"
+        strokeWidth="1.5"
         strokeLinecap="round"
         strokeLinejoin="round"
         fill="none"
@@ -59,58 +64,73 @@ export const AwsWordmark = ({
   );
 };
 
-import { AZURE_LOGO_DATA_URI, GCP_LOGO_DATA_URI, LENS_LOGO_DATA_URI } from './brandAssets';
+// Backward-compatible alias. Older screens import `AwsWordmark` and pass a
+// `width`/`height`; map that to the new square `AwsMark` using width as size.
+export const AwsWordmark = ({
+  width = 24,
+  isDark = false,
+  className = '',
+}: {
+  width?: number;
+  height?: number;
+  isDark?: boolean;
+  className?: string;
+}) => <AwsMark size={width} isDark={isDark} className={className} />;
 
-// Optical balancing factors. The source PNGs have very different intrinsic
-// shapes — Azure is a tight 1:1 square (225x225) whose artwork fills the whole
-// frame, while GCP is a wide ~1.9:1 image (738x387) that only fills about half
-// of a square's height under object-contain. Equal box sizes therefore make
-// Azure look oversized and GCP look small. These multipliers scale each mark's
-// footprint so the *visible* logo reads at a comparable size inside the tile.
-const AZURE_SCALE = 0.82;
-const GCP_SCALE = 1.18;
-
+// Microsoft Azure — the "A" ribbon mark.
 export const AzureMark = ({
-  size = 32,
+  size = 24,
   className = '',
 }: {
   size?: number;
   className?: string;
-}) => {
-  const s = Math.round(size * AZURE_SCALE);
-  return (
-    <img
-      src={AZURE_LOGO_DATA_URI}
-      alt="Microsoft Azure"
-      width={s}
-      height={s}
-      className={`shrink-0 object-contain ${className}`}
-      style={{ width: s, height: s }}
-      loading="eager"
-    />
-  );
-};
+}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    className={`shrink-0 ${className}`}
+  >
+    <defs>
+      <linearGradient id="azA" x1="6" y1="3" x2="12" y2="20" gradientUnits="userSpaceOnUse">
+        <stop stopColor="#114A8B" />
+        <stop offset="1" stopColor="#0669BC" />
+      </linearGradient>
+      <linearGradient id="azB" x1="14" y1="12" x2="12" y2="21" gradientUnits="userSpaceOnUse">
+        <stop stopColor="#3CCBF4" />
+        <stop offset="1" stopColor="#2892DF" />
+      </linearGradient>
+    </defs>
+    <path d="M9 3h5.1l-5.3 15.7a1 1 0 0 1-.95.68H4.2a.6.6 0 0 1-.57-.8L8.05 3.68A1 1 0 0 1 9 3Z" fill="url(#azA)" />
+    <path d="M16.3 14.3H8.2a.46.46 0 0 0-.31.8l5.2 4.86a1 1 0 0 0 .68.27h4.57l-2.04-5.93Z" fill="#0078D4" />
+    <path d="M14.9 3H9a1 1 0 0 1 .95.68L15 19.38a.6.6 0 0 1-.57.8h5.37a.6.6 0 0 0 .57-.8L15.86 3.68A1 1 0 0 0 14.9 3Z" fill="url(#azB)" />
+  </svg>
+);
 
+// Google Cloud — four-color cloud mark.
 export const GcpMark = ({
-  size = 32,
+  size = 24,
   className = '',
 }: {
   size?: number;
   className?: string;
-}) => {
-  // GCP is scaled by width; object-contain preserves its wide aspect ratio.
-  const w = Math.round(size * GCP_SCALE);
-  return (
-    <img
-      src={GCP_LOGO_DATA_URI}
-      alt="Google Cloud"
-      width={w}
-      className={`shrink-0 object-contain ${className}`}
-      style={{ width: w, height: 'auto' }}
-      loading="eager"
-    />
-  );
-};
+}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    className={`shrink-0 ${className}`}
+  >
+    <path d="M15.1 8.2l1 .02 2.9-2.9.14-1.23A6.57 6.57 0 0 0 8.6 7.2a1.98 1.98 0 0 1 1.17.07l3.52-.58s.18-.3.27-.28a3.65 3.65 0 0 1 1.47 1.77Z" fill="#EA4335" />
+    <path d="M19.1 7.2a6.57 6.57 0 0 0-1.98-3.1l-2.84 2.84a3.65 3.65 0 0 1 1.34 2.9v.45a1.82 1.82 0 1 1 0 3.64h-3.65l-.45.46v2.18l.45.44h3.65A4.74 4.74 0 0 0 19.1 7.2Z" fill="#4285F4" />
+    <path d="M8.42 19.1h3.65v-2.92H8.42a1.8 1.8 0 0 1-.75-.16l-.52.15-2.92 2.92-.14.5a4.73 4.73 0 0 0 2.83.95Z" fill="#34A853" />
+    <path d="M8.42 9.65A4.74 4.74 0 0 0 5.6 18.2l2.84-2.84a1.82 1.82 0 1 1 2.41-2.41l2.84-2.84a4.73 4.73 0 0 0-5.27-.46Z" fill="#FBBC05" />
+  </svg>
+);
 
 /**
  * Modern, beautifully proportioned square chip container for cloud provider logos.
@@ -129,14 +149,13 @@ export function CloudChip({
   isDark?: boolean;
   className?: string;
 }) {
-  // Each tile defines a square inner area (`inner`) that all three marks share.
-  // object-contain centers every logo inside that area regardless of the logo's
-  // intrinsic aspect ratio, so AWS, Azure, and GCP get identical breathing room.
+  // All three marks share one square `inner` size (they're all 24x24 SVGs),
+  // so AWS, Azure, and GCP render at identical dimensions inside the tile.
   const sizeMap = {
-    xs: { box: 'w-7 h-7 rounded-lg p-1', inner: 18, awsW: 24, awsH: 16 },
-    sm: { box: 'w-10 h-10 rounded-xl p-1.5', inner: 24, awsW: 32, awsH: 20 },
-    md: { box: 'w-12 h-12 rounded-2xl p-2', inner: 28, awsW: 38, awsH: 24 },
-    lg: { box: 'w-16 h-16 rounded-2xl p-2.5', inner: 38, awsW: 50, awsH: 32 },
+    xs: { box: 'w-7 h-7 rounded-lg p-1', inner: 20 },
+    sm: { box: 'w-10 h-10 rounded-xl p-1.5', inner: 26 },
+    md: { box: 'w-12 h-12 rounded-2xl p-2', inner: 32 },
+    lg: { box: 'w-16 h-16 rounded-2xl p-2.5', inner: 42 },
   };
 
   const config = sizeMap[size] || sizeMap.sm;
@@ -169,7 +188,7 @@ export function CloudChip({
             : '0 1px 3px rgba(0,0,0,0.06)',
       }}
     >
-      {id === 'aws' && <AwsWordmark width={config.awsW} height={config.awsH} isDark={isDark} />}
+      {id === 'aws' && <AwsMark size={config.inner} isDark={isDark} />}
       {id === 'azure' && <AzureMark size={config.inner} />}
       {id === 'gcp' && <GcpMark size={config.inner} />}
     </span>
