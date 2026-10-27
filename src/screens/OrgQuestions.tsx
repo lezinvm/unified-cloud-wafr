@@ -153,10 +153,7 @@ export function OrgQuestions() {
           onClick={() => go('dashboard')}
           className="flex items-center gap-2 cursor-pointer transition-opacity hover:opacity-85"
         >
-          <CloudifyOpsSymbol height={24} />
-          <span className="font-semibold text-sm tracking-tight" style={{ color: T.text }}>
-            CloudifyOps
-          </span>
+          <CloudifyOpsSymbol height={32} />
           <span
             className="text-[10px] font-bold px-2 py-0.5 rounded-full border hidden sm:inline-block"
             style={{

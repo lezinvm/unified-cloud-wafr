@@ -158,37 +158,45 @@ export function Dashboard() {
     return matchCloud && matchSearch;
   });
 
+  // Account counts come SOLELY from cloudAccounts (the authoritative source).
+  // Deriving a fallback count from assessments produced the "N accounts vs M
+  // assessments" mismatch, so it is removed.
   const getAccountsCountForCloud = (cId: CloudId) => {
-    if (cloudAccounts && cloudAccounts.length > 0) {
-      return cloudAccounts.filter((a: any) => (a.cloud || '').toLowerCase() === cId).length;
-    }
-    if (assessments && assessments.length > 0) {
-      return new Set(assessments.filter(a => (a.cloud || '').toLowerCase() === cId).map(a => a.accountId)).size;
-    }
-    return 0;
+    if (!cloudAccounts || cloudAccounts.length === 0) return 0;
+    return cloudAccounts.filter((a: any) => (a.cloud || '').toLowerCase() === cId).length;
   };
 
-  const totalAccounts = (cloudAccounts && cloudAccounts.length > 0)
-    ? cloudAccounts.length
-    : (activeAssessments && activeAssessments.length > 0)
-    ? new Set(activeAssessments.map(a => a.accountId)).size
-    : 0;
+  const totalAccounts = (cloudAccounts && cloudAccounts.length > 0) ? cloudAccounts.length : 0;
   const totalAssessments = activeAssessments.length;
-  const openFindingsCount = activeAssessments.length === 0 ? 0 : activeAssessments.reduce((acc, a) => acc + (a.score < 80 ? 9 : 4), 0);
-  const resourcesScannedText = activeAssessments.length === 0 ? '0' : `${activeAssessments.length >= 3 ? (activeAssessments.length * 0.3).toFixed(1) + 'k' : (activeAssessments.length * 280)}`;
+  // Real "Open findings" = sum of failed checks across the user's assessments
+  // (was a fabricated score<80?9:4 heuristic). Falls back to high risks if a
+  // record has no failedChecks recorded.
+  const openFindingsCount = activeAssessments.reduce(
+    (acc, a) => acc + (Number(a.failedChecks) || Number(a.highRisks) || 0),
+    0
+  );
+  // Real "Resources scanned" = distinct resources across the user's
+  // assessments if available, else total checks evaluated. No invented numbers.
+  const resourcesScannedText = String(
+    activeAssessments.reduce((acc, a) => acc + (Number(a.totalChecks) || 0), 0)
+  );
 
   const dynamicCloudStats = (['aws', 'azure', 'gcp'] as CloudId[]).map(cId => {
     const cloudAssessments = activeAssessments.filter(a => a.cloud === cId);
     const accountsCount = getAccountsCountForCloud(cId);
     const avgScore = cloudAssessments.length > 0 ? Math.round(cloudAssessments.reduce((sum, a) => sum + a.score, 0) / cloudAssessments.length) : 0;
+    // Derive pass/warn/fail from real per-assessment status, not multipliers.
+    const passCount = cloudAssessments.filter(a => a.status === 'complete' && a.score >= 80).length;
+    const warnCount = cloudAssessments.filter(a => a.status === 'warning' || (a.score >= 70 && a.score < 80)).length;
+    const failCount = cloudAssessments.filter(a => a.status === 'fail' || a.score < 70).length;
     return {
       id: cId,
       avg: avgScore,
-      pass: cloudAssessments.length * 3,
-      warn: cloudAssessments.length,
-      fail: cloudAssessments.filter(a => a.score < 70).length * 2,
+      pass: passCount,
+      warn: warnCount,
+      fail: failCount,
       accounts: accountsCount,
-      resources: cloudAssessments.length === 0 ? '0' : `${cloudAssessments.length * 310}`,
+      resources: String(cloudAssessments.reduce((acc, a) => acc + (Number(a.totalChecks) || 0), 0)),
     };
   });
 
@@ -267,8 +275,13 @@ export function Dashboard() {
               id="tour-new-assessment-btn"
               type="button"
               onClick={() => {
-                if (configuredAccount) {
-                  selectCloud(configuredAccount.cloud);
+                // Use the authoritative plural map (not the stale singular
+                // configuredAccount, which can point at a deconfigured cloud).
+                const firstConfigured = (['aws', 'azure', 'gcp'] as CloudId[])
+                  .map(c => configuredAccounts[c])
+                  .find(Boolean);
+                if (firstConfigured) {
+                  selectCloud(firstConfigured.cloud);
                 } else if (!isNewUser) {
                   go('wizard');
                 } else {

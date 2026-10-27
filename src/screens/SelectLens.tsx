@@ -18,7 +18,7 @@ interface LensOption {
 const LENS_OPTIONS: LensOption[] = [
   {
     id: 'wafr',
-    title: 'WAFR Lens',
+    title: 'Well-Architected Framework Lens',
     badge: 'Active & Available',
     status: 'active',
     desc: 'Complete Well-Architected Framework Reviews across AWS, Azure, and Google Cloud with automated telemetry scans and AI-assisted remediation.',
@@ -136,8 +136,8 @@ export function SelectLens() {
         </button>
 
         <div className="flex items-center gap-2.5">
-          <CloudifyOpsSymbol height={24} />
-          <span className="font-bold text-sm text-white tracking-wide">CloudifyOps LENS</span>
+          <CloudifyOpsSymbol height={32} />
+          <span className="font-bold text-sm text-white tracking-wide">LENS</span>
         </div>
 
         <div className="ml-auto flex items-center gap-3">

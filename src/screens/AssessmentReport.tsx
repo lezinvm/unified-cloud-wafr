@@ -720,11 +720,11 @@ function PillarCard({
       {/* Best Practices breakdown badges */}
       <div className="grid grid-cols-2 gap-2 text-center">
         <div className="py-2 px-2.5 rounded-xl flex items-center justify-between" style={{ backgroundColor: isDark ? 'rgba(82,183,136,.12)' : '#ECFDF5' }}>
-          <span className="text-[11px] font-medium" style={{ color: isDark ? '#74C69D' : '#059669' }}>BP Passed</span>
+          <span className="text-[11px] font-medium" style={{ color: isDark ? '#74C69D' : '#059669' }}>Best Practices Passed</span>
           <span className="font-bold text-sm tabular-nums" style={{ color: isDark ? '#74C69D' : '#059669' }}>{animatedPassedBps}</span>
         </div>
         <div className="py-2 px-2.5 rounded-xl flex items-center justify-between" style={{ backgroundColor: isDark ? 'rgba(251,113,133,.1)' : '#FFF1F2' }}>
-          <span className="text-[11px] font-medium" style={{ color: isDark ? '#FECDD3' : '#E11D48' }}>BP Failed</span>
+          <span className="text-[11px] font-medium" style={{ color: isDark ? '#FECDD3' : '#E11D48' }}>Best Practices Failed</span>
           <span className="font-bold text-sm tabular-nums" style={{ color: isDark ? '#FB7185' : '#E11D48' }}>{animatedFailedBps}</span>
         </div>
       </div>
@@ -1587,9 +1587,9 @@ export function AssessmentReport() {
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-semibold" style={{ color: T.textSub }}>BP Passed</span>
+                  <span className="text-xs font-semibold" style={{ color: T.textSub }}>Best Practices Passed</span>
                   <InfoTooltip
-                    title="What is BP Passed?"
+                    title="What is a Passed Best Practice?"
                     content="A Best Practice is considered Passed when all underlying technical checks and architectural controls meet the Well-Architected Framework compliance standards."
                     isDark={isDark}
                     T={T}
@@ -1617,9 +1617,9 @@ export function AssessmentReport() {
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-semibold" style={{ color: T.textSub }}>BP Failed</span>
+                  <span className="text-xs font-semibold" style={{ color: T.textSub }}>Best Practices Failed</span>
                   <InfoTooltip
-                    title="What is BP Failed?"
+                    title="What is a Failed Best Practice?"
                     content="A Best Practice is considered Failed when one or more underlying technical checks or architectural requirements fail compliance rules, requiring remediation."
                     isDark={isDark}
                     T={T}

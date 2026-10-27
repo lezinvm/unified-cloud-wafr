@@ -202,7 +202,8 @@ export const api = {
     }),
 
   // Integrations & Alerts
-  getIntegrations: () => apiRequest<any[]>('/integrations'),
+  getIntegrations: (orgId?: string) =>
+    apiRequest<any[]>(orgId ? `/integrations?org_id=${encodeURIComponent(orgId)}` : '/integrations'),
   saveIntegration: (payload: any) =>
     apiRequest<any>('/integrations', {
       method: 'POST',

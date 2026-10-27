@@ -92,7 +92,8 @@ export function AIFix() {
     : (Object.keys(remediationsDb)[0] || 'REL-019');
 
   const checkData = remediationsDb[targetCheckId] || Object.values(remediationsDb)[0] || REMEDIATION_DATABASE['REL-019'];
-  const isSolved = Boolean(solvedCheckIds[targetCheckId]);
+  const assessmentKeyForSolved = selectedAssessmentId || currentAssessment?.id || 'default';
+  const isSolved = Boolean(solvedCheckIds[`${assessmentKeyForSolved}::${targetCheckId}`]);
 
   const cliName = activeCloud === 'azure' ? 'Azure CLI (az)' : activeCloud === 'gcp' ? 'Google Cloud CLI (gcloud)' : 'AWS CLI v2';
   const iacSecondLabel = activeCloud === 'azure' ? 'Azure Bicep (.bicep)' : activeCloud === 'gcp' ? 'Deployment Manager (.yml)' : 'CloudFormation (.yml)';
@@ -105,8 +106,7 @@ export function AIFix() {
     const assessmentKey = selectedAssessmentId || 'default';
     return resList.filter(r => {
       const key = `${assessmentKey}::${checkData.id}::${r}`;
-      const legacyKey = `${checkData.id}::${r}`;
-      const st = (resourceRemediations[key] || resourceRemediations[legacyKey])?.status;
+      const st = resourceRemediations[key]?.status;
       return st !== 'fixed' && st !== 'cant_fix';
     }).length;
   }, [checkData, resourceRemediations, selectedAssessmentId]);
@@ -531,8 +531,7 @@ export function AIFix() {
                 {visibleResources.map((res, i) => {
                   const isCopied = copiedArnId === `main-${i}`;
                   const resKey = `${selectedAssessmentId || 'default'}::${checkData.id}::${res}`;
-                  const legacyKey = `${checkData.id}::${res}`;
-                  const resRem = resourceRemediations[resKey] || resourceRemediations[legacyKey];
+                  const resRem = resourceRemediations[resKey];
                   const resStatus = resRem?.status || 'pending';
                   const resNote = resRem?.note;
                   const isFixed = resStatus === 'fixed';

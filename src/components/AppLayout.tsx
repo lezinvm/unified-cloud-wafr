@@ -102,9 +102,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
           )}
         </div>
 
-        {/* Right: CloudifyOps brand text only */}
+        {/* Right: CloudifyOps corporate brand logo */}
         <div className="flex items-center">
-          <span className="font-semibold text-sm tracking-tight" style={{ color: T.text }}>CloudifyOps</span>
+          <CloudifyOpsSymbol height={30} />
         </div>
       </header>
 

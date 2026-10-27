@@ -85,8 +85,7 @@ export function SelectCloud() {
         </div>
 
         <div className="flex items-center gap-2.5">
-          <CloudifyOpsSymbol height={24} />
-          <span className="font-semibold text-sm text-white">CloudifyOps</span>
+          <CloudifyOpsSymbol height={32} />
           <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-cyan-400/20 text-cyan-200 border border-cyan-400/30">
             WAFR Lens
           </span>

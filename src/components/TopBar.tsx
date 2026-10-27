@@ -32,8 +32,7 @@ export function TopBar() {
         onClick={() => go('select-cloud')}
         className="flex items-center gap-2.5 mr-2 group cursor-pointer"
       >
-        <CloudifyOpsSymbol height={24} />
-        <span className="text-white font-semibold text-sm tracking-tight">CloudifyOps</span>
+        <CloudifyOpsSymbol height={32} />
       </button>
 
       {/* Cloud badge */}

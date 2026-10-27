@@ -252,7 +252,7 @@ interface AppState {
   cloudLabel: string;
   cloudShort: string;
   dbConnected: boolean;
-  refreshFromDb: () => Promise<void>;
+  refreshFromDb: (targetUser?: UserProfile) => Promise<void>;
 }
 
 export interface RepoConfig {
@@ -778,27 +778,43 @@ export function AppProvider({ children }: { children: ReactNode }) {
         let currentUserId = userToUse.id;
         let currentOrgId = userToUse.orgId;
 
-        // Automatically sync real user ID and org ID from MongoDB
+        // Automatically sync real user ID and org ID from MongoDB for the user
+        // that is actually logging in / active (`userToUse`). We MUST match on
+        // the exact email and only adopt a DB record that belongs to this same
+        // user. Previously this used the stale `currentUser` closure (which
+        // defaults to the first preset user) and blindly took dbUsers[0], which
+        // caused a brand-new user to be overwritten by an existing account and
+        // inherit that account's assessments. See user-isolation bug fix.
         if (userToUse.email) {
           try {
             const dbUsers = await api.getUsers(undefined, userToUse.email);
-            if (Array.isArray(dbUsers) && dbUsers.length > 0) {
-              const matchedUser = dbUsers[0];
-              currentUserId = matchedUser.id || currentUserId;
+            const normalizedEmail = userToUse.email.trim().toLowerCase();
+            const matchedUser =
+              Array.isArray(dbUsers)
+                ? dbUsers.find(
+                    (u: any) => (u.email || '').trim().toLowerCase() === normalizedEmail
+                  )
+                : undefined;
+
+            if (matchedUser && matchedUser.id) {
+              currentUserId = matchedUser.id;
               currentOrgId = matchedUser.org_id || currentOrgId;
-              if (currentUser.id !== matchedUser.id || currentUser.orgId !== matchedUser.org_id) {
+              if (userToUse.id !== matchedUser.id || userToUse.orgId !== matchedUser.org_id) {
                 const updated: UserProfile = {
-                  ...currentUser,
+                  ...userToUse,
                   id: matchedUser.id,
-                  orgId: matchedUser.org_id,
-                  name: matchedUser.name || currentUser.name,
+                  orgId: matchedUser.org_id || userToUse.orgId,
+                  name: matchedUser.name || userToUse.name,
                 };
                 setCurrentUser(updated);
                 if (typeof window !== 'undefined') {
-                  localStorage.setItem('lens_active_user', JSON.stringify(updated));
+                  localStorage.setItem(ACTIVE_USER_KEY, JSON.stringify(updated));
                 }
               }
             }
+            // If no DB record matches this email yet (e.g. a freshly registered
+            // user not yet synced), keep the identity assigned at login. Never
+            // fall back to another user's record.
           } catch {}
         }
 
@@ -837,6 +853,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
           setConfiguredAccountState(null);
         }
 
+        // Data-integrity invariant: a user may only ever see assessments for
+        // clouds on which they actually have a configured account. Seed data
+        // and the permissive backend $or query can otherwise leak a global
+        // assessment (e.g. an Azure review) to a user who has no account on
+        // that cloud, producing the "0 accounts but 1 assessment" state.
+        const accountedClouds = new Set(
+          (Array.isArray(dbAccounts) ? dbAccounts : [])
+            .map((a: any) => (a.cloud || '').toLowerCase())
+            .filter(Boolean)
+        );
+
         if (Array.isArray(dbAssessments) && dbAssessments.length > 0) {
           const mapped: AssessmentInfo[] = dbAssessments.map((a: any) => {
             const acc = (dbAccounts || []).find((x: any) => x.id === a.cloud_account_id) || {};
@@ -853,6 +880,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
             const itemCloud = ((a.cloud || acc.cloud || 'aws') as Cloud).toLowerCase() as Cloud;
             const defaultReg = itemCloud === 'azure' ? 'eastus' : itemCloud === 'gcp' ? 'us-central1' : 'us-east-1';
 
+            // Honest numeric coercion: use the real DB value when present
+            // (including a legitimate 0), falling back to 0 — never to a
+            // fabricated demo metric. `n(x)` returns the number or 0.
+            const n = (v: any): number => {
+              const num = Number(v);
+              return Number.isFinite(num) ? num : 0;
+            };
+            const totalChecksVal = n(a.total_checks ?? a.checks_count);
+
             return {
               id: a.id,
               name: a.name || `${itemCloud.toUpperCase()} Architecture Review`,
@@ -861,31 +897,43 @@ export function AppProvider({ children }: { children: ReactNode }) {
               region: a.region || acc.default_region || defaultReg,
               cloud: itemCloud,
               status: mappedStatus,
-              score: Number(a.score) ?? 80,
-              lastRun: rawStatus === 'running' ? 'In progress' : (a.last_run_at ? 'Recently' : '2h ago'),
-              checks: Number(a.total_checks || a.checks_count) || 46,
+              score: n(a.score),
+              lastRun: rawStatus === 'running' ? 'In progress' : (a.last_run_at ? 'Recently' : '—'),
+              checks: totalChecksVal,
               pillars: a.pillar_scores || {
-                reliability: 88,
-                security: Number(a.score) || 82,
-                cost: 90,
-                operations: 85,
-                performance: 84,
+                reliability: 0,
+                security: 0,
+                cost: 0,
+                operations: 0,
+                performance: 0,
               },
-              totalBestPractices: Number(a.total_best_practices) || 16,
-              passedBps: Number(a.passed_bps) || 12,
-              failedBps: Number(a.failed_bps) || 4,
-              totalChecks: Number(a.total_checks || a.checks_count) || 46,
-              passedChecks: Number(a.passed_checks) || 36,
-              failedChecks: Number(a.failed_checks) || 10,
-              highRisks: Number(a.high_risks) || 3,
-              mediumRisks: Number(a.medium_risks) || 5,
-              lowRisks: Number(a.low_risks) || 2,
+              totalBestPractices: n(a.total_best_practices),
+              passedBps: n(a.passed_bps),
+              failedBps: n(a.failed_bps),
+              totalChecks: totalChecksVal,
+              passedChecks: n(a.passed_checks),
+              failedChecks: n(a.failed_checks),
+              highRisks: n(a.high_risks),
+              mediumRisks: n(a.medium_risks),
+              lowRisks: n(a.low_risks),
             };
           });
 
-          setAssessments(mapped);
-          if (mapped[0]) {
-            setSelectedAssessmentId(mapped[0].id);
+          // Enforce the invariant: keep only assessments whose cloud has a
+          // configured account for this user. This prevents leaked/global
+          // seed assessments from showing for a cloud the user hasn't set up.
+          const reconciled = mapped.filter((m) => accountedClouds.has(m.cloud));
+          if (reconciled.length !== mapped.length) {
+            console.warn(
+              `Dropped ${mapped.length - reconciled.length} assessment(s) for cloud(s) with no configured account.`
+            );
+          }
+
+          setAssessments(reconciled);
+          if (reconciled[0]) {
+            setSelectedAssessmentId(reconciled[0].id);
+          } else {
+            setSelectedAssessmentId('');
           }
         } else {
           setAssessments([]);
@@ -895,34 +943,45 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // Sync milestones directly from MongoDB scoped to this user's assessments
         try {
           const dbMilestones = await api.getMilestones();
-          if (Array.isArray(dbMilestones) && dbMilestones.length > 0 && Array.isArray(dbAssessments) && dbAssessments.length > 0) {
-            const userAssessmentIds = new Set(dbAssessments.map((a: any) => a.id));
-            const userMilestones = dbMilestones.filter((m: any) => userAssessmentIds.has(m.assessment_id));
+          // Scope milestones to the user's RECONCILED assessments only, so a
+          // milestone attached to an assessment that was dropped (cloud with no
+          // account) does not linger as an orphan.
+          const reconciledAssessmentIds = new Set(
+            (Array.isArray(dbAssessments) ? dbAssessments : [])
+              .filter((a: any) => accountedClouds.has((a.cloud || '').toLowerCase()))
+              .map((a: any) => a.id)
+          );
+          if (Array.isArray(dbMilestones) && dbMilestones.length > 0 && reconciledAssessmentIds.size > 0) {
+            const userMilestones = dbMilestones.filter((m: any) => reconciledAssessmentIds.has(m.assessment_id));
+            const nm = (v: any): number => {
+              const num = Number(v);
+              return Number.isFinite(num) ? num : 0;
+            };
             const mappedMilestones: AssessmentMilestone[] = userMilestones.map((m: any) => ({
               id: m.id,
               assessmentId: m.assessment_id,
-              milestoneNumber: Number(m.milestone_number) || 1,
-              milestoneName: m.milestone_name || 'Pre-Audit Baseline',
+              milestoneNumber: nm(m.milestone_number) || 1,
+              milestoneName: m.milestone_name || 'Milestone',
               version: m.version || 'v1.0.0',
-              recordedAt: m.recorded_at || 'Recently',
-              recordedBy: m.recorded_by || 'Admin',
-              score: Number(m.score) || 84,
-              totalBestPractices: Number(m.total_best_practices) || 16,
-              passedBps: Number(m.passed_bps) || 12,
-              failedBps: Number(m.failed_bps) || 4,
-              totalChecks: Number(m.total_checks) || 46,
-              passedChecks: Number(m.passed_checks) || 36,
-              failedChecks: Number(m.failed_checks) || 10,
-              highRisks: Number(m.high_risks) || 3,
-              mediumRisks: Number(m.medium_risks) || 5,
-              lowRisks: Number(m.low_risks) || 2,
-              notes: m.notes || 'Baseline milestone state.',
+              recordedAt: m.recorded_at || '—',
+              recordedBy: m.recorded_by || '—',
+              score: nm(m.score),
+              totalBestPractices: nm(m.total_best_practices),
+              passedBps: nm(m.passed_bps),
+              failedBps: nm(m.failed_bps),
+              totalChecks: nm(m.total_checks),
+              passedChecks: nm(m.passed_checks),
+              failedChecks: nm(m.failed_checks),
+              highRisks: nm(m.high_risks),
+              mediumRisks: nm(m.medium_risks),
+              lowRisks: nm(m.low_risks),
+              notes: m.notes || '',
               pillarScores: m.pillar_scores || {
-                reliability: 88,
-                security: 82,
-                cost: 90,
-                operations: 85,
-                performance: 84,
+                reliability: 0,
+                security: 0,
+                cost: 0,
+                operations: 0,
+                performance: 0,
               },
               pillarHighRisks: m.pillar_high_risks,
             }));
@@ -948,16 +1007,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
             dbRepos,
             dbJiraTickets,
           ] = await Promise.all([
-            api.getScheduledAssessments(userOrgId, userToUse.id),
+            api.getScheduledAssessments(userOrgId, currentUserId),
             api.getPillars(detectedCloud),
             api.getComplianceFrameworks(),
-            api.getIntegrations(),
+            api.getIntegrations(userOrgId),
             api.getAlertLogs(),
             api.getQuestionnaireQuestions(),
-            api.getRemediationStatuses(),
-            api.getRepositories(userOrgId, userToUse.id),
+            // Scope remediation statuses to this user so another user's "fixed"
+            // marks cannot bleed into this user's findings.
+            api.getRemediationStatuses(undefined, currentUserId),
+            api.getRepositories(userOrgId, currentUserId),
             api.getJiraTickets(),
           ]);
+
+          // Only this user's assessment ids are valid parents for milestones,
+          // statuses, jira tickets, and alert logs loaded below.
+          const userAssessmentIdSet = new Set(
+            (Array.isArray(dbAssessments) ? dbAssessments : [])
+              .filter((a: any) => accountedClouds.has((a.cloud || '').toLowerCase()))
+              .map((a: any) => a.id)
+          );
 
           if (Array.isArray(dbSchedules)) {
             const mappedSchedules: ScheduledAssessment[] = dbSchedules.map((s: any) => ({
@@ -1003,24 +1072,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
             setPillars(mergedPillars);
           }
 
-          if (Array.isArray(dbStatuses) && dbStatuses.length > 0) {
+          {
+            // Replace (not merge) remediation status maps on every sync so a
+            // previous user's statuses never linger. Key strictly by
+            // assessment_id::check_id[::resource] — the old assessment-agnostic
+            // bare-checkId keys let one assessment's (or user's) "fixed" mark
+            // bleed into another's findings.
             const resMap: Record<string, { status: 'fixed' | 'cant_fix' | 'pending'; note?: string }> = {};
             const solvedMap: Record<string, boolean> = {};
-            for (const s of dbStatuses) {
-              const assm = s.assessment_id || 'default';
-              if (s.resource_raw === '__check_level__') {
-                const isSolved = s.status === 'fixed';
-                solvedMap[`${assm}::${s.check_id}`] = isSolved;
-                solvedMap[s.check_id] = isSolved;
-              } else {
-                const key = `${assm}::${s.check_id}::${s.resource_raw}`;
-                const legacyKey = `${s.check_id}::${s.resource_raw}`;
-                resMap[key] = { status: s.status, note: s.note };
-                resMap[legacyKey] = { status: s.status, note: s.note };
+            if (Array.isArray(dbStatuses)) {
+              for (const s of dbStatuses) {
+                const assm = s.assessment_id || 'default';
+                // Ignore statuses that belong to assessments this user can't see.
+                if (assm !== 'default' && userAssessmentIdSet.size > 0 && !userAssessmentIdSet.has(assm)) {
+                  continue;
+                }
+                if (s.resource_raw === '__check_level__') {
+                  solvedMap[`${assm}::${s.check_id}`] = s.status === 'fixed';
+                } else {
+                  resMap[`${assm}::${s.check_id}::${s.resource_raw}`] = { status: s.status, note: s.note };
+                }
               }
             }
-            setResourceRemediations(prev => ({ ...prev, ...resMap }));
-            setSolvedCheckIds(prev => ({ ...prev, ...solvedMap }));
+            setResourceRemediations(resMap);
+            setSolvedCheckIds(solvedMap);
           }
 
           if (Array.isArray(dbFrameworks) && dbFrameworks.length > 0) {
@@ -1038,8 +1113,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
             }));
           }
 
-          if (Array.isArray(dbAlertLogs) && dbAlertLogs.length > 0) {
+          // Replace-or-clear: when the DB returns no alert logs, clear them so a
+          // real user never keeps demo INITIAL_ALERT_LOGS on screen.
+          if (Array.isArray(dbAlertLogs)) {
             setAlertLogs(dbAlertLogs);
+          } else {
+            setAlertLogs([]);
           }
 
           if (Array.isArray(dbQuestions) && dbQuestions.length > 0) {
@@ -1080,6 +1159,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
               }
             }
             setJiraTickets(ticketMap);
+          } else {
+            // No tickets in the DB for this user: clear so demo
+            // INITIAL_JIRA_TICKETS never persist for a real user.
+            setJiraTickets({});
           }
         } catch (subErr) {
           console.warn('Could not sync secondary datasets from MongoDB:', subErr);
@@ -1092,7 +1175,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
-    refreshFromDb();
+    // Only sync from the DB on mount when a real session is persisted. Without
+    // this guard, a fresh load on the login screen would sync against the
+    // default preset user (Lezin) and pull their data before anyone logs in.
+    if (hasPersistedSession()) {
+      refreshFromDb();
+    }
   }, []);
 
   const lastSavedUserIdRef = useRef<string>(currentUser.id);
@@ -1287,11 +1375,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   ) => {
     const assessmentKey = selectedAssessmentId || 'default';
     const key = `${assessmentKey}::${checkId}::${resourceRaw}`;
-    const legacyKey = `${checkId}::${resourceRaw}`;
     setResourceRemediations(prev => ({
       ...prev,
       [key]: { status, note },
-      [legacyKey]: { status, note },
     }));
 
     api.saveRemediationStatus({
@@ -1312,7 +1398,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const checkSolvedKey = `${assessmentKey}::${checkId}`;
 
     if (!resources || resources.length === 0) {
-      if (solvedCheckIds[checkSolvedKey] || solvedCheckIds[checkId]) return 'fixed';
+      if (solvedCheckIds[checkSolvedKey]) return 'fixed';
       return 'pending';
     }
 
@@ -1322,8 +1408,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     for (const res of resources) {
       const key = `${assessmentKey}::${checkId}::${res}`;
-      const legacyKey = `${checkId}::${res}`;
-      const item = resourceRemediations[key] || resourceRemediations[legacyKey];
+      const item = resourceRemediations[key];
       const status = item?.status || 'pending';
       if (status === 'fixed') fixedCount++;
       else if (status === 'cant_fix') cantFixCount++;
@@ -1333,7 +1418,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (fixedCount === resources.length) return 'fixed';
     if (cantFixCount > 0 && pendingCount === 0 && fixedCount === 0) return 'cant_fix';
     if (fixedCount > 0 || (cantFixCount > 0 && pendingCount > 0)) return 'in_progress';
-    if (solvedCheckIds[checkSolvedKey] || solvedCheckIds[checkId]) return 'fixed';
+    if (solvedCheckIds[checkSolvedKey]) return 'fixed';
 
     return 'pending';
   };
@@ -1369,7 +1454,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setSolvedCheckIds(prev => ({
       ...prev,
       [key]: newSolved,
-      [id]: newSolved,
     }));
 
     api.saveRemediationStatus({
@@ -1387,7 +1471,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setSolvedCheckIds(prev => ({
       ...prev,
       [key]: solved,
-      [id]: solved,
     }));
 
     api.saveRemediationStatus({

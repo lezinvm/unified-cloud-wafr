@@ -379,6 +379,24 @@ def main():
     db = client[DB_NAME]
 
     # ─────────────────────────────────────────────────────────────────────────
+    # 0. CLEAN SLATE — drop stale collections that OTHER seed scripts populate
+    #    but master does not, so a fresh master run can never inherit orphaned
+    #    or conflicting documents left behind by a previous mixed seed. This is
+    #    what makes master the single authoritative source of truth.
+    # ─────────────────────────────────────────────────────────────────────────
+    for stale in [
+        "assessment_compliance_scores",
+        "remediation_statuses",
+        "scheduled_assessments",
+        "questionnaire_responses",
+        "jira_tickets",
+        "agent_task_runs",
+        "report_artifacts",
+    ]:
+        db[stale].drop()
+    print("[OK] Cleared stale per-run collections for a clean authoritative seed.")
+
+    # ─────────────────────────────────────────────────────────────────────────
     # A. SEED BASE PLATFORM DUMP (Pillars, Frameworks, Integrations, Alert Logs, Questions)
     # ─────────────────────────────────────────────────────────────────────────
     dump_path = os.path.join(BASE_DIR, "platform_data_dump.json")
@@ -598,9 +616,22 @@ def main():
         {"id": "res-gcp-02", "cloud": "gcp", "type": "compute_disk", "arn": "//compute.googleapis.com/projects/proj-gcp-prod-9941/zones/us-central1-a/disks/lens-multicloud-boot", "name": "lens-multicloud-boot", "region": "us-central1", "account_id": "proj-gcp-prod-9941"},
         {"id": "res-gcp-03", "cloud": "gcp", "type": "backend_service", "arn": "//compute.googleapis.com/projects/proj-gcp-prod-9941/global/backendServices/lens-multicloud-backend", "name": "lens-multicloud-backend", "region": "global", "account_id": "proj-gcp-prod-9941"},
     ]
+    # The API reads cloud resources from the 'resource_inventory' collection
+    # (GET /api/resources -> db["resource_inventory"]). Seed BOTH the legacy
+    # 'resources' name and the canonical 'resource_inventory' so the inventory
+    # UI actually renders. Tag each resource with its assessment_id so the
+    # per-assessment resource view resolves.
+    first_asm_for_cloud = {}
+    for asm in ASSESSMENTS:
+        first_asm_for_cloud.setdefault(asm["cloud"], asm["id"])
+    for r in resources_list:
+        r["assessment_id"] = first_asm_for_cloud.get(r["cloud"], "")
+
     db["resources"].drop()
-    db["resources"].insert_many(resources_list)
-    print(f"[OK] Seeded {len(resources_list)} cloud resources into 'resources' collection.")
+    db["resources"].insert_many([dict(r) for r in resources_list])
+    db["resource_inventory"].drop()
+    db["resource_inventory"].insert_many([dict(r) for r in resources_list])
+    print(f"[OK] Seeded {len(resources_list)} cloud resources into 'resources' and 'resource_inventory'.")
 
     print("\n==================================================================")
     print(" [MASTER SEED COMPLETE]")

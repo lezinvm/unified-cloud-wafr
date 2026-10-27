@@ -390,9 +390,9 @@ export function PillarDetail() {
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-semibold" style={{ color: T.textSub }}>BP Passed</span>
+                  <span className="text-xs font-semibold" style={{ color: T.textSub }}>Best Practices Passed</span>
                   <InfoTooltip
-                    title="What is BP Passed?"
+                    title="What is a Passed Best Practice?"
                     content="A Best Practice is considered Passed when all underlying technical checks and architectural controls meet the Well-Architected Framework compliance standards."
                     isDark={isDark}
                     T={T}
@@ -418,9 +418,9 @@ export function PillarDetail() {
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-semibold" style={{ color: T.textSub }}>BP Failed</span>
+                  <span className="text-xs font-semibold" style={{ color: T.textSub }}>Best Practices Failed</span>
                   <InfoTooltip
-                    title="What is BP Failed?"
+                    title="What is a Failed Best Practice?"
                     content="A Best Practice is considered Failed when one or more underlying technical checks or architectural requirements fail compliance rules, requiring remediation."
                     isDark={isDark}
                     T={T}
@@ -471,7 +471,7 @@ export function PillarDetail() {
                   }}
                 >
                   <span className="w-2 h-2 rounded-full" style={{ backgroundColor: T.error }} />
-                  <span>BP Failed ({failedBps})</span>
+                  <span>Best Practices Failed ({failedBps})</span>
                 </button>
                 <button
                   onClick={() => setBpFilter('pass')}
@@ -483,7 +483,7 @@ export function PillarDetail() {
                   }}
                 >
                   <span className="w-2 h-2 rounded-full" style={{ backgroundColor: T.success }} />
-                  <span>BP Passed ({passedBps})</span>
+                  <span>Best Practices Passed ({passedBps})</span>
                 </button>
               </div>
             </div>
@@ -615,7 +615,7 @@ export function PillarDetail() {
                             }}
                           >
                             <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: T.error }} />
-                            <span>BP Failed</span>
+                            <span>Best Practice Failed</span>
                           </span>
                         ) : (
                           <span
@@ -627,7 +627,7 @@ export function PillarDetail() {
                             }}
                           >
                             <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: T.success }} />
-                            <span>BP Passed</span>
+                            <span>Best Practice Passed</span>
                           </span>
                         )}
                       </div>

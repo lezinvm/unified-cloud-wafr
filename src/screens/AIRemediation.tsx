@@ -591,7 +591,7 @@ export function AIRemediation() {
 
   const isCheckSolved = (id: string) => {
     const assessmentKey = activeAssessmentId || 'default';
-    return !!(solvedCheckIds[`${assessmentKey}::${id}`] || solvedCheckIds[id]);
+    return !!solvedCheckIds[`${assessmentKey}::${id}`];
   };
   const solvedChecksCount = allChecksList.filter(c => isCheckSolved(c.id)).length;
   const filteredChecks = allChecksList.filter(c => {
@@ -610,8 +610,7 @@ export function AIRemediation() {
     const assessmentKey = activeAssessmentId || 'default';
     return resList.filter(r => {
       const key = `${assessmentKey}::${checkData.id}::${r}`;
-      const legacyKey = `${checkData.id}::${r}`;
-      const st = (resourceRemediations[key] || resourceRemediations[legacyKey])?.status;
+      const st = resourceRemediations[key]?.status;
       return st !== 'fixed' && st !== 'cant_fix';
     }).length;
   }, [checkData, resourceRemediations, activeAssessmentId]);
@@ -1387,8 +1386,7 @@ export function AIRemediation() {
                       const realIndex = allResources.indexOf(res);
                       const resInfo = parseResourceInfo(res);
                       const resKey = `${activeAssessmentId || 'default'}::${checkData.id}::${res}`;
-                      const legacyKey = `${checkData.id}::${res}`;
-                      const resRem = resourceRemediations[resKey] || resourceRemediations[legacyKey];
+                      const resRem = resourceRemediations[resKey];
                       const resStatus = resRem?.status || (solvedResourceArns[res] ? 'fixed' : 'pending');
                       const resNote = resRem?.note;
                       const isResSolved = resStatus === 'fixed';
@@ -2715,8 +2713,7 @@ export function AIRemediation() {
                   const isCopied = copiedArnId === `modal-${i}`;
                   const resInfo = parseResourceInfo(res);
                   const resKey = `${activeAssessmentId || 'default'}::${checkData.id}::${res}`;
-                  const legacyKey = `${checkData.id}::${res}`;
-                  const resRem = resourceRemediations[resKey] || resourceRemediations[legacyKey];
+                  const resRem = resourceRemediations[resKey];
                   const resStatus = resRem?.status || (solvedResourceArns[res] ? 'fixed' : 'pending');
                   const isResSolved = resStatus === 'fixed';
                   const isCantFix = resStatus === 'cant_fix';

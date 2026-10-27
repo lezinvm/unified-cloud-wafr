@@ -99,7 +99,9 @@ export function Onboarding() {
       tenant_id: acc.tenantId,
       gcp_project: acc.projectId,
     }).then(() => {
-      refreshFromDb();
+      // Pass the current (new) user explicitly so the DB sync targets THIS
+      // user's identity rather than falling back to the default preset user.
+      refreshFromDb(currentUser);
     }).catch(err => {
       console.warn('Could not save onboarding account to DB:', err);
     });
@@ -467,7 +469,7 @@ export function Onboarding() {
                     </svg>
                   </div>
                   <div className="flex items-center justify-between gap-1 mb-1">
-                    <h3 className="text-sm font-bold text-white">WAFR Lens</h3>
+                    <h3 className="text-sm font-bold text-white">Well-Architected Framework Lens</h3>
                     <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
                       Active
                     </span>

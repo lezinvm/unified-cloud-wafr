@@ -2077,8 +2077,7 @@ export function Wizard() {
         </button>
 
         <div className="flex items-center gap-2.5 mr-6">
-          <CloudifyOpsSymbol height={24} />
-          <span className="font-semibold text-sm text-gray-900">CloudifyOps</span>
+          <CloudifyOpsSymbol height={32} />
         </div>
         <span className="text-sm text-gray-400">New Assessment Wizard</span>
 

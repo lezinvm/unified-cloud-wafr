@@ -56,10 +56,16 @@ def get_keycloak_admin_token() -> Optional[str]:
         print(f"Keycloak admin token error: {e}")
         return None
 
-def get_keycloak_realm_users() -> List[Dict[str, Any]]:
+def get_keycloak_realm_users() -> Optional[List[Dict[str, Any]]]:
+    """Return the Keycloak realm users, or None if Keycloak is unreachable.
+
+    IMPORTANT: None (fetch failed) must be distinguished from [] (Keycloak
+    genuinely has zero users). Callers use this to avoid destructive pruning of
+    the local users collection during a transient Keycloak outage.
+    """
     token = get_keycloak_admin_token()
     if not token:
-        return []
+        return None
     try:
         req = urllib.request.Request(
             f"{KEYCLOAK_URL}/admin/realms/{KEYCLOAK_REALM}/users",
@@ -69,7 +75,7 @@ def get_keycloak_realm_users() -> List[Dict[str, Any]]:
             return json.loads(res.read().decode())
     except Exception as e:
         print(f"Error fetching Keycloak users: {e}")
-        return []
+        return None
 
 def create_keycloak_realm_user(email: str, password: str, name: str, role: str = "user") -> Dict[str, Any]:
     token = get_keycloak_admin_token()
@@ -113,6 +119,8 @@ def delete_keycloak_realm_user(user_id_or_email: str) -> bool:
     user_id = user_id_or_email
     if "@" in user_id_or_email:
         users = get_keycloak_realm_users()
+        if not users:
+            return False
         match = next((u for u in users if (u.get("email") or u.get("username") or "").lower() == user_id_or_email.lower()), None)
         if match:
             user_id = match["id"]
@@ -133,13 +141,24 @@ def delete_keycloak_realm_user(user_id_or_email: str) -> bool:
 
 async def sync_keycloak_users_to_db() -> List[Dict[str, Any]]:
     kc_users = await asyncio.to_thread(get_keycloak_realm_users)
+
+    # SAFETY: if Keycloak is unreachable (None, not an empty list), do NOT prune
+    # or wipe the local users collection. A transient Keycloak outage previously
+    # caused delete_many({}) to erase every user. Return the existing DB users
+    # untouched so the app degrades gracefully instead of destroying data.
+    if kc_users is None:
+        print("[WARN] Keycloak unreachable; skipping user sync/prune to avoid data loss.")
+        existing = await db["users"].find({}, {"_id": 0}).to_list(500)
+        return existing
+
     kc_emails_map = {
         (u.get("email") or u.get("username")).lower(): u
         for u in kc_users
         if (u.get("email") or u.get("username"))
     }
 
-    # "users in keycloak user list should be only at user list of our db"
+    # Keycloak reachable but genuinely has zero users: the local list should
+    # mirror that (empty). Only now is pruning everything the correct behavior.
     if not kc_emails_map:
         await db["users"].delete_many({})
         return []
@@ -247,6 +266,27 @@ async def get_assessments(
     if cloud_account_id:
         query["cloud_account_id"] = cloud_account_id
     assessments = await db["assessments"].find(query, {"_id": 0}).to_list(100)
+
+    # Data-integrity invariant: never return an assessment for a cloud the
+    # requesting user has no account on. The permissive $or above (is_global /
+    # user_id:"all") plus inconsistent seed tagging can otherwise leak a global
+    # assessment (e.g. an Azure review) to a user with zero Azure accounts.
+    # Skip this reconciliation for explicit single-account lookups.
+    if (org_id or user_id) and not cloud_account_id:
+        acct_query = {}
+        if org_id and user_id:
+            acct_query["$or"] = [{"org_id": org_id}, {"user_id": user_id}, {"is_global": True}, {"user_id": "all"}]
+        elif org_id:
+            acct_query["$or"] = [{"org_id": org_id}, {"is_global": True}, {"user_id": "all"}]
+        elif user_id:
+            acct_query["$or"] = [{"user_id": user_id}, {"is_global": True}, {"user_id": "all"}]
+        user_accounts = await db["cloud_accounts"].find(acct_query, {"_id": 0, "cloud": 1}).to_list(100)
+        accounted_clouds = {(a.get("cloud") or "").lower() for a in user_accounts if a.get("cloud")}
+        assessments = [
+            a for a in assessments
+            if (a.get("cloud") or "").lower() in accounted_clouds
+        ]
+
     return assessments
 
 @app.get("/api/assessments/{assessment_id}")
@@ -275,13 +315,19 @@ async def get_findings(
         query["service"] = service
     findings = await db["findings"].find(query, {"_id": 0}).to_list(limit)
 
-    # If no findings found for assessment_id, automatically initialize from remediations for assessment's cloud
+    # If no findings found, auto-initialize from remediations — but ONLY for an
+    # assessment that actually exists, and ONLY using that assessment's real
+    # cloud. Previously this fabricated findings for non-existent assessment ids
+    # and fell back to AWS remediations, mislabeling GCP/Azure assessments.
     if assessment_id and not findings:
         assessment = await db["assessments"].find_one({"id": assessment_id})
-        asm_cloud = (assessment.get("cloud") if assessment else (cloud or "aws")).lower()
+        if not assessment:
+            # Do not fabricate findings for an unknown assessment.
+            return findings
+        asm_cloud = (assessment.get("cloud") or "aws").lower()
         rems = await db["remediations"].find({"cloud": asm_cloud}, {"_id": 0}).to_list(100)
-        if not rems:
-            rems = await db["remediations"].find({"cloud": "aws"}, {"_id": 0}).to_list(100)
+        # No AWS fallback: if the cloud has no remediation catalog, return empty
+        # rather than injecting wrong-cloud findings.
         new_findings = []
         for r in rems:
             fnd = {
@@ -756,8 +802,14 @@ async def save_integration(payload: Dict[str, Any]):
     service_type = payload.get("service_type")
     if not service_type:
         raise HTTPException(status_code=400, detail="Missing 'service_type'")
+    # Key integration config by (org_id, service_type) so each org keeps its own
+    # Slack/Jira/GChat credentials. Previously keyed on service_type alone, so
+    # every org shared and overwrote a single global integration document.
+    match = {"service_type": service_type}
+    if payload.get("org_id"):
+        match["org_id"] = payload["org_id"]
     await db["integrations"].update_one(
-        {"service_type": service_type},
+        match,
         {"$set": payload},
         upsert=True
     )
@@ -815,8 +867,16 @@ async def save_questionnaire_response(payload: Dict[str, Any]):
     q_id = payload.get("question_id")
     if not q_id:
         raise HTTPException(status_code=400, detail="Missing 'question_id'")
+    # Key responses by (assessment_id, user_id, question_id) so one assessment's
+    # or user's answer never overwrites another's. Previously keyed on
+    # question_id alone, which collapsed all tenants' answers into one document.
+    match = {"question_id": q_id}
+    if payload.get("assessment_id"):
+        match["assessment_id"] = payload["assessment_id"]
+    if payload.get("user_id"):
+        match["user_id"] = payload["user_id"]
     await db["questionnaire_responses"].update_one(
-        {"question_id": q_id},
+        match,
         {"$set": payload},
         upsert=True
     )
