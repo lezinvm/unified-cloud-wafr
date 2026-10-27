@@ -237,15 +237,24 @@ async def sync_users():
     users = await sync_keycloak_users_to_db()
     return {"status": "synced", "count": len(users), "users": users}
 
+# Demo tenant orgs that share the pre-seeded demo estate
+DEMO_ORGS = {"org_01", "org_lezin_menath", "org_admin", "global"}
+
 @app.get("/api/cloud-accounts")
 async def get_cloud_accounts(org_id: Optional[str] = None, user_id: Optional[str] = None):
     query = {}
     if org_id and user_id:
-        query["$or"] = [{"org_id": org_id}, {"user_id": user_id}, {"is_global": True}, {"user_id": "all"}]
+        if org_id in DEMO_ORGS:
+            query["$or"] = [{"org_id": {"$in": list(DEMO_ORGS)}}, {"user_id": user_id}]
+        else:
+            query["$or"] = [{"org_id": org_id}, {"user_id": user_id}]
     elif org_id:
-        query["$or"] = [{"org_id": org_id}, {"is_global": True}, {"user_id": "all"}]
+        if org_id in DEMO_ORGS:
+            query["org_id"] = {"$in": list(DEMO_ORGS)}
+        else:
+            query["org_id"] = org_id
     elif user_id:
-        query["$or"] = [{"user_id": user_id}, {"is_global": True}, {"user_id": "all"}]
+        query["user_id"] = user_id
     accounts = await db["cloud_accounts"].find(query, {"_id": 0}).to_list(100)
     return accounts
 
@@ -257,29 +266,39 @@ async def get_assessments(
 ):
     query = {}
     if org_id and user_id:
-        query["$or"] = [{"org_id": org_id}, {"user_id": user_id}, {"is_global": True}, {"user_id": "all"}]
+        if org_id in DEMO_ORGS:
+            query["$or"] = [{"org_id": {"$in": list(DEMO_ORGS)}}, {"user_id": user_id}]
+        else:
+            query["$or"] = [{"org_id": org_id}, {"user_id": user_id}]
     elif org_id:
-        query["$or"] = [{"org_id": org_id}, {"is_global": True}, {"user_id": "all"}]
+        if org_id in DEMO_ORGS:
+            query["org_id"] = {"$in": list(DEMO_ORGS)}
+        else:
+            query["org_id"] = org_id
     elif user_id:
-        query["$or"] = [{"user_id": user_id}, {"is_global": True}, {"user_id": "all"}]
+        query["user_id"] = user_id
 
     if cloud_account_id:
         query["cloud_account_id"] = cloud_account_id
     assessments = await db["assessments"].find(query, {"_id": 0}).to_list(100)
 
     # Data-integrity invariant: never return an assessment for a cloud the
-    # requesting user has no account on. The permissive $or above (is_global /
-    # user_id:"all") plus inconsistent seed tagging can otherwise leak a global
-    # assessment (e.g. an Azure review) to a user with zero Azure accounts.
-    # Skip this reconciliation for explicit single-account lookups.
+    # requesting user has no account on. Skip this reconciliation for explicit
+    # single-account lookups.
     if (org_id or user_id) and not cloud_account_id:
         acct_query = {}
         if org_id and user_id:
-            acct_query["$or"] = [{"org_id": org_id}, {"user_id": user_id}, {"is_global": True}, {"user_id": "all"}]
+            if org_id in DEMO_ORGS:
+                acct_query["$or"] = [{"org_id": {"$in": list(DEMO_ORGS)}}, {"user_id": user_id}]
+            else:
+                acct_query["$or"] = [{"org_id": org_id}, {"user_id": user_id}]
         elif org_id:
-            acct_query["$or"] = [{"org_id": org_id}, {"is_global": True}, {"user_id": "all"}]
+            if org_id in DEMO_ORGS:
+                acct_query["org_id"] = {"$in": list(DEMO_ORGS)}
+            else:
+                acct_query["org_id"] = org_id
         elif user_id:
-            acct_query["$or"] = [{"user_id": user_id}, {"is_global": True}, {"user_id": "all"}]
+            acct_query["user_id"] = user_id
         user_accounts = await db["cloud_accounts"].find(acct_query, {"_id": 0, "cloud": 1}).to_list(100)
         accounted_clouds = {(a.get("cloud") or "").lower() for a in user_accounts if a.get("cloud")}
         assessments = [
@@ -716,8 +735,13 @@ async def create_cloud_account(payload: Dict[str, Any]):
             if not payload.get("org_id"):
                 payload["org_id"] = user_doc.get("org_id")
 
+    payload["is_global"] = False
+    match_query = {"id": payload["id"]}
+    if payload.get("org_id"):
+        match_query["org_id"] = payload["org_id"]
+
     await db["cloud_accounts"].update_one(
-        {"id": payload["id"]},
+        match_query,
         {"$set": payload},
         upsert=True
     )

@@ -23,22 +23,22 @@ export function Onboarding() {
 
   // Account Configuration State (Step 5)
   const [authMethod, setAuthMethod] = useState<'role' | 'keys'>('role');
-  const [accountName, setAccountName] = useState('acme-aws-production');
-  const [accountId, setAccountId] = useState('124890123456');
+  const [accountName, setAccountName] = useState('');
+  const [accountId, setAccountId] = useState('');
   // AWS Fields
-  const [roleArn, setRoleArn] = useState('arn:aws:iam::124890123456:role/CloudifyOpsWAFRReadOnlyRole');
+  const [roleArn, setRoleArn] = useState('');
   const [externalId] = useState('cfops-wafr-tenant-9941');
   const [accessKey, setAccessKey] = useState('');
   const [secretKey, setSecretKey] = useState('');
   const [copiedId, setCopiedId] = useState(false);
   // Azure Fields
-  const [azureTenantId, setAzureTenantId] = useState('tenant-9901-4412-2291');
-  const [azureClientId, setAzureClientId] = useState('client-5541-8890-1122');
+  const [azureTenantId, setAzureTenantId] = useState('');
+  const [azureClientId, setAzureClientId] = useState('');
   const [azureClientSecret, setAzureClientSecret] = useState('');
   // GCP Fields
-  const [gcpProjectId, setGcpProjectId] = useState('proj-gcp-prod-9941');
-  const [gcpSaEmail, setGcpSaEmail] = useState('wafr-scanner@proj-gcp-prod-9941.iam.gserviceaccount.com');
-  const [gcpKeyUploaded, setGcpKeyUploaded] = useState(true);
+  const [gcpProjectId, setGcpProjectId] = useState('');
+  const [gcpSaEmail, setGcpSaEmail] = useState('');
+  const [gcpKeyUploaded, setGcpKeyUploaded] = useState(false);
 
   // Test Connection
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
@@ -46,16 +46,6 @@ export function Onboarding() {
   const handleSelectCloud = (c: Cloud) => {
     setChosenCloud(c);
     setTestStatus('idle');
-    if (c === 'aws') {
-      setAccountName('acme-aws-production');
-      setAccountId('124890123456');
-    } else if (c === 'azure') {
-      setAccountName('AcmeCorp-AzureSub');
-      setAccountId('sub-4891-2394-8172');
-    } else {
-      setAccountName('acme-gcp-prod');
-      setAccountId('proj-gcp-prod-9941');
-    }
   };
 
   const handleTestConnection = () => {
@@ -72,39 +62,50 @@ export function Onboarding() {
   };
 
   const handleSaveAndGoHome = () => {
-    const acc: ConfiguredAccount = {
-      cloud: chosenCloud,
-      name: accountName.trim() || (chosenCloud === 'aws' ? 'acme-aws-production' : chosenCloud === 'azure' ? 'AcmeCorp-AzureSub' : 'acme-gcp-prod'),
-      id: accountId.trim() || (chosenCloud === 'aws' ? '124890123456' : chosenCloud === 'azure' ? 'sub-4891-2394-8172' : 'proj-gcp-prod-9941'),
-      authType: chosenCloud === 'aws' ? authMethod : chosenCloud === 'azure' ? 'service-principal' : 'service-account',
-      roleArn: chosenCloud === 'aws' && authMethod === 'role' ? roleArn : undefined,
-      tenantId: chosenCloud === 'azure' ? azureTenantId : undefined,
-      projectId: chosenCloud === 'gcp' ? gcpProjectId : undefined,
-    };
-    setConfiguredAccount(acc);
-    setCloud(chosenCloud);
-    setIsNewUser(false);
-    setSelectedLens('wafr');
+    const trimmedId = accountId.trim();
+    const trimmedName = accountName.trim();
+    const hasAccountInput = Boolean(trimmedId || trimmedName);
 
-    const userOrg = currentUser.orgId || `org_${currentUser.id}`;
-    api.saveCloudAccount({
-      id: acc.id,
-      org_id: userOrg,
-      user_id: currentUser.id,
-      cloud: chosenCloud,
-      account_name: acc.name,
-      account_identifier: acc.id,
-      auth_type: acc.authType,
-      role_arn: acc.roleArn,
-      tenant_id: acc.tenantId,
-      gcp_project: acc.projectId,
-    }).then(() => {
-      // Pass the current (new) user explicitly so the DB sync targets THIS
-      // user's identity rather than falling back to the default preset user.
-      refreshFromDb(currentUser);
-    }).catch(err => {
-      console.warn('Could not save onboarding account to DB:', err);
-    });
+    if (hasAccountInput) {
+      const generatedId = trimmedId || `acc-${currentUser.id.slice(-6)}-${Date.now().toString().slice(-4)}`;
+      const accName = trimmedName || `${currentUser.name || 'My'} ${chosenCloud.toUpperCase()} Account`;
+
+      const acc: ConfiguredAccount = {
+        cloud: chosenCloud,
+        name: accName,
+        id: generatedId,
+        authType: chosenCloud === 'aws' ? authMethod : chosenCloud === 'azure' ? 'service-principal' : 'service-account',
+        roleArn: chosenCloud === 'aws' && authMethod === 'role' ? roleArn.trim() || undefined : undefined,
+        tenantId: chosenCloud === 'azure' ? azureTenantId.trim() || undefined : undefined,
+        projectId: chosenCloud === 'gcp' ? gcpProjectId.trim() || undefined : undefined,
+      };
+      setConfiguredAccount(acc);
+      setCloud(chosenCloud);
+      setIsNewUser(false);
+      setSelectedLens('wafr');
+
+      const userOrg = currentUser.orgId || `org_${currentUser.id}`;
+      api.saveCloudAccount({
+        id: acc.id,
+        org_id: userOrg,
+        user_id: currentUser.id,
+        cloud: chosenCloud,
+        account_name: acc.name,
+        account_identifier: acc.id,
+        auth_type: acc.authType,
+        role_arn: acc.roleArn,
+        tenant_id: acc.tenantId,
+        gcp_project: acc.projectId,
+      }).then(() => {
+        refreshFromDb(currentUser);
+      }).catch(err => {
+        console.warn('Could not save onboarding account to DB:', err);
+      });
+    } else {
+      setIsNewUser(true);
+      setConfiguredAccount(null);
+      setCloud(null);
+    }
 
     startTour();
     go('dashboard');
@@ -965,6 +966,21 @@ export function Onboarding() {
             </div>
 
             <div className="flex items-center gap-3">
+              {currentStep === totalSteps && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsNewUser(true);
+                    setConfiguredAccount(null);
+                    setCloud(null);
+                    startTour();
+                    go('dashboard');
+                  }}
+                  className="px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-white transition-all cursor-pointer"
+                >
+                  Skip for now
+                </button>
+              )}
               <button
                 type="button"
                 onClick={handleNext}

@@ -404,13 +404,13 @@ export function Dashboard() {
                   </div>
                   <div>
                     <div className="text-sm font-semibold" style={{ color: T.text }}>
-                      {isNewUser ? 'Welcome! No accounts or assessments connected yet' : 'No assessments match your search'}
+                      {totalAssessments === 0 ? 'Welcome! No accounts or assessments connected yet' : 'No assessments match your search'}
                     </div>
                     <div className="text-xs mt-1 max-w-md" style={{ color: T.textSub }}>
-                      {isNewUser ? 'Get started by filling in your cloud credentials to connect your first target account and region.' : 'Try changing your search term or clearing the active cloud filter.'}
+                      {totalAssessments === 0 ? 'Get started by filling in your cloud credentials to connect your first target account and region.' : 'Try changing your search term or clearing the active cloud filter.'}
                     </div>
                   </div>
-                  {isNewUser && (
+                  {(isNewUser || totalAssessments === 0) && (
                     <div className="flex items-center gap-3 mt-2">
                       <button
                         onClick={() => setShowCredsModal(true)}
