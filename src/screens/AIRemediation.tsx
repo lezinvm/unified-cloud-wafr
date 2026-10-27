@@ -4,7 +4,7 @@ import { AppLayout } from '../components/AppLayout';
 import { SeverityPill, type Severity } from '../components/FindingUI';
 import { CloudChip } from '../components/CloudLogo';
 import { PILLARS_DATA } from '../data/wafrData';
-import { INITIAL_ASSESSMENTS, type AssessmentInfo } from '../data/assessmentData';
+import { type AssessmentInfo } from '../data/assessmentData';
 import { JiraTicketModal } from '../components/JiraTicketModal';
 import { SlackAlertModal } from '../components/SlackAlertModal';
 import { SlackLogo, JiraLogo } from '../components/IntegrationLogos';

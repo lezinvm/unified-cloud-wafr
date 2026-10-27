@@ -188,47 +188,6 @@ interface CloudConfigItem {
   syncIntervalHours: number;
 }
 
-const INITIAL_CLOUD_CONFIGS: CloudConfigItem[] = [
-  {
-    id: 'cfg-aws-01',
-    cloud: 'AWS',
-    name: 'acme-production (12 accounts)',
-    method: 'IAM Role / Cross-Account',
-    authType: 'role',
-    status: 'active',
-    lastSync: '2h ago',
-    roleArn: 'arn:aws:iam::124890123456:role/CloudifyOpsWAFRReadOnlyRole',
-    externalId: 'cfops-wafr-tenant-9941',
-    autoSync: true,
-    syncIntervalHours: 6,
-  },
-  {
-    id: 'cfg-az-01',
-    cloud: 'Azure',
-    name: 'Acme Corp Tenant (8 subscriptions)',
-    method: 'Service Principal',
-    authType: 'sp',
-    status: 'active',
-    lastSync: '1d ago',
-    tenantId: '72f988bf-86f1-41af-91ab-2d7cd011db47',
-    clientId: 'e892c901-44bb-4e31-8902-124890123456',
-    autoSync: true,
-    syncIntervalHours: 24,
-  },
-  {
-    id: 'cfg-gcp-01',
-    cloud: 'GCP',
-    name: 'acme-org (4 projects)',
-    method: 'Service Account',
-    authType: 'sa',
-    status: 'warning',
-    lastSync: '3d ago',
-    gcpProject: 'acme-gcp-prod-9941',
-    saEmail: 'wafr-scanner@acme-gcp-prod.iam.gserviceaccount.com',
-    autoSync: false,
-    syncIntervalHours: 12,
-  },
-];
 
 function EditCloudConfigModal({
   config,

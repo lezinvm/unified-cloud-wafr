@@ -9,7 +9,8 @@
  * from one coordinate system guarantees consistent sizing and padding.
  */
 
-import { LENS_LOGO_DATA_URI } from './brandAssets';
+import { useState } from 'react';
+import { LENS_LOGO_DATA_URI, CLOUDIFYOPS_LOGO_DATA_URI } from './brandAssets';
 
 export type CloudId = 'aws' | 'azure' | 'gcp';
 
@@ -197,7 +198,9 @@ export function CloudChip({
 }
 
 /**
- * Official CloudifyOps Brand Symbol (Teal-to-Green dual-loop / ops mark)
+ * Official CloudifyOps Corporate Brand Symbol & Wordmark
+ * Embedded as self-contained Base64 Data URI to guarantee flawless rendering
+ * on any VM, proxy, container, or production deployment.
  */
 export function CloudifyOpsSymbol({
   className = '',
@@ -206,14 +209,39 @@ export function CloudifyOpsSymbol({
   className?: string;
   height?: number;
 }) {
+  const [hasError, setHasError] = useState(false);
+
+  if (hasError) {
+    return (
+      <div
+        className={`flex items-center gap-1.5 font-bold tracking-tight select-none text-emerald-500 ${className}`}
+        style={{ height, fontSize: Math.max(14, Math.round(height * 0.52)) }}
+      >
+        <svg
+          width={height}
+          height={height}
+          viewBox="0 0 32 32"
+          fill="none"
+          xmlns="http://www.w3.org/2000/svg"
+          className="shrink-0"
+        >
+          <circle cx="11" cy="16" r="7" stroke="#00C49F" strokeWidth="3" />
+          <circle cx="21" cy="16" r="7" stroke="#0088FE" strokeWidth="3" />
+        </svg>
+        <span style={{ color: '#00C49F' }}>Cloudify<span style={{ color: '#0088FE' }}>Ops</span></span>
+      </div>
+    );
+  }
+
   return (
     <img
-      src="/logos/cloudifyops.png"
+      src={CLOUDIFYOPS_LOGO_DATA_URI}
       alt="CloudifyOps"
       height={height}
       className={`shrink-0 object-contain ${className}`}
       style={{ height, width: 'auto' }}
       loading="eager"
+      onError={() => setHasError(true)}
     />
   );
 }

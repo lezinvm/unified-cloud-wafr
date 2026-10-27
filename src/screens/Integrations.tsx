@@ -8,7 +8,6 @@ import {
   JiraIntegration,
   GChatIntegration,
   AlertLogItem,
-  INITIAL_ALERT_LOGS,
 } from '../data/integrationData';
 
 const LIGHT = {

@@ -2,18 +2,14 @@ import { createContext, useContext, useState, useEffect, useRef, ReactNode } fro
 import {
   AssessmentInfo,
   AssessmentMilestone,
-  INITIAL_ASSESSMENTS,
-  INITIAL_MILESTONES,
 } from './data/assessmentData';
 import { QuestionnaireItem, INITIAL_ORG_QUESTIONS } from './data/questionnaireData';
-import { ScheduledAssessment, INITIAL_SCHEDULED_ASSESSMENTS } from './data/scheduleData';
+import { ScheduledAssessment } from './data/scheduleData';
 import {
   IntegrationsState,
   INITIAL_INTEGRATIONS,
   LinkedJiraTicket,
-  INITIAL_JIRA_TICKETS,
   AlertLogItem,
-  INITIAL_ALERT_LOGS,
 } from './data/integrationData';
 import {
   ComplianceFramework,
@@ -284,52 +280,27 @@ const SHORTS: Record<Cloud, string> = { aws: 'AWS', azure: 'Azure', gcp: 'GCP' }
 
 const STORAGE_PREFIX = 'lens_user_data_v3_';
 
-function getDefaultUserData(userId: string): UserDataStore {
-  const isDemo = userId === 'user-admin';
-  if (!isDemo) {
-    return {
-      assessments: [],
-      milestones: [],
-      scheduledAssessments: [],
-      integrations: INITIAL_INTEGRATIONS,
-      jiraTickets: {},
-      alertLogs: [],
-      configuredAccount: null,
-      configuredAccounts: {
-        aws: null,
-        azure: null,
-        gcp: null,
-      },
-      repoConfig: {
-        provider: 'github',
-        repoName: '',
-        branch: 'main',
-        pat: '',
-        connected: false,
-      },
-      complianceFrameworks: INITIAL_COMPLIANCE_FRAMEWORKS,
-      pinnedComplianceIds: {
-        'cis-8.1': true,
-        'fedramp-ksi': true,
-        'soc2-type2': true,
-        'iso-27001': true,
-        'aws-fsbp': true,
-      },
-      solvedCheckIds: {},
-      resourceRemediations: {},
-      orgQuestions: INITIAL_ORG_QUESTIONS.map(q => ({ ...q, answered: false, ans: '' })),
-      theme: 'light',
-    };
-  }
-
-  // Default active user (Lezin VM demo)
+function getDefaultUserData(_userId?: string): UserDataStore {
   return {
-    assessments: INITIAL_ASSESSMENTS,
-    milestones: INITIAL_MILESTONES,
-    scheduledAssessments: INITIAL_SCHEDULED_ASSESSMENTS,
+    assessments: [],
+    milestones: [],
+    scheduledAssessments: [],
     integrations: INITIAL_INTEGRATIONS,
-    jiraTickets: INITIAL_JIRA_TICKETS,
-    alertLogs: INITIAL_ALERT_LOGS,
+    jiraTickets: {},
+    alertLogs: [],
+    configuredAccount: null,
+    configuredAccounts: {
+      aws: null,
+      azure: null,
+      gcp: null,
+    },
+    repoConfig: {
+      provider: 'github',
+      repoName: '',
+      branch: 'main',
+      pat: '',
+      connected: false,
+    },
     complianceFrameworks: INITIAL_COMPLIANCE_FRAMEWORKS,
     pinnedComplianceIds: {
       'cis-8.1': true,
@@ -338,48 +309,9 @@ function getDefaultUserData(userId: string): UserDataStore {
       'iso-27001': true,
       'aws-fsbp': true,
     },
-    configuredAccount: {
-      cloud: 'aws',
-      name: 'acme-production',
-      id: '124890123456',
-      authType: 'role',
-      roleArn: 'arn:aws:iam::124890123456:role/CloudifyOpsWAFRReadOnlyRole',
-    },
-    configuredAccounts: {
-      aws: {
-        cloud: 'aws',
-        name: 'acme-production',
-        id: '124890123456',
-        authType: 'role',
-        roleArn: 'arn:aws:iam::124890123456:role/CloudifyOpsWAFRReadOnlyRole',
-      },
-      azure: {
-        cloud: 'azure',
-        name: 'AcmeCorp-ProductionSub',
-        id: 'sub-1248-9012',
-        authType: 'service-principal',
-        tenantId: 'tenant-9901-4412-2291',
-      },
-      gcp: {
-        cloud: 'gcp',
-        name: 'acme-gcp-prod',
-        id: 'proj-gcp-9941',
-        authType: 'service-account',
-        projectId: 'proj-gcp-prod-9941',
-      },
-    },
-    repoConfig: {
-      provider: 'github',
-      repoName: 'acme-corp/terraform-aws-infrastructure',
-      branch: 'main',
-      pat: 'ghp_live983274982374982374982374',
-      connected: true,
-      lastSync: '10m ago',
-      autoCreatePr: true,
-    },
     solvedCheckIds: {},
     resourceRemediations: {},
-    orgQuestions: INITIAL_ORG_QUESTIONS,
+    orgQuestions: INITIAL_ORG_QUESTIONS.map(q => ({ ...q, answered: false, ans: '' })),
     theme: 'light',
   };
 }
@@ -389,28 +321,38 @@ function loadUserData(userId: string): UserDataStore {
     const raw = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_PREFIX + userId) : null;
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (!parsed.configuredAccounts) {
-        parsed.configuredAccounts = {
-          aws: parsed.configuredAccount?.cloud === 'aws' ? parsed.configuredAccount : null,
-          azure: parsed.configuredAccount?.cloud === 'azure' ? parsed.configuredAccount : null,
-          gcp: parsed.configuredAccount?.cloud === 'gcp' ? parsed.configuredAccount : null,
-        };
-      }
-      const isDemo = userId === 'user-admin';
-      if (!parsed.scheduledAssessments) {
-        parsed.scheduledAssessments = isDemo ? INITIAL_SCHEDULED_ASSESSMENTS : [];
-      }
+      // Cleanse any legacy cached mock records so only authentic MongoDB data exists
+      const sanitizeAssessments = (arr: any[]): AssessmentInfo[] => {
+        if (!Array.isArray(arr)) return [];
+        return arr.filter(a => a && a.id && !a.id.startsWith('A-00'));
+      };
+      const sanitizeAccount = (acc: any): ConfiguredAccount | null => {
+        if (!acc || !acc.id) return null;
+        if (acc.id === '124890123456' || acc.id === 'sub-1248-9012' || acc.id === 'proj-gcp-9941') return null;
+        return acc;
+      };
+
+      parsed.assessments = sanitizeAssessments(parsed.assessments);
+      parsed.milestones = Array.isArray(parsed.milestones) ? parsed.milestones.filter((m: any) => m && m.id && !m.id.startsWith('m-00')) : [];
+      parsed.scheduledAssessments = Array.isArray(parsed.scheduledAssessments) ? parsed.scheduledAssessments.filter((s: any) => s && s.id && !s.id.startsWith('SCH-')) : [];
+      parsed.configuredAccount = sanitizeAccount(parsed.configuredAccount);
+      parsed.configuredAccounts = {
+        aws: sanitizeAccount(parsed.configuredAccounts?.aws || (parsed.configuredAccount?.cloud === 'aws' ? parsed.configuredAccount : null)),
+        azure: sanitizeAccount(parsed.configuredAccounts?.azure || (parsed.configuredAccount?.cloud === 'azure' ? parsed.configuredAccount : null)),
+        gcp: sanitizeAccount(parsed.configuredAccounts?.gcp || (parsed.configuredAccount?.cloud === 'gcp' ? parsed.configuredAccount : null)),
+      };
+      parsed.jiraTickets = parsed.jiraTickets || {};
+      Object.keys(parsed.jiraTickets).forEach(k => {
+        if (parsed.jiraTickets[k]?.key?.startsWith('WAFR-14')) {
+          delete parsed.jiraTickets[k];
+        }
+      });
+      parsed.alertLogs = Array.isArray(parsed.alertLogs) ? parsed.alertLogs.filter((l: any) => l && l.id && !l.id.startsWith('ALT-DEMO')) : [];
       parsed.integrations = {
         slack: { ...INITIAL_INTEGRATIONS.slack, ...(parsed.integrations?.slack || {}) },
         jira: { ...INITIAL_INTEGRATIONS.jira, ...(parsed.integrations?.jira || {}) },
         gchat: { ...INITIAL_INTEGRATIONS.gchat, ...(parsed.integrations?.gchat || {}) },
       };
-      if (!parsed.jiraTickets) {
-        parsed.jiraTickets = isDemo ? INITIAL_JIRA_TICKETS : {};
-      }
-      if (!parsed.alertLogs) {
-        parsed.alertLogs = isDemo ? INITIAL_ALERT_LOGS : [];
-      }
       return parsed;
     }
   } catch (e) {
@@ -478,10 +420,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [cloud, setCloud] = useState<Cloud | null>(initialData.assessments[0]?.cloud || null);
   const [selectedLens, setSelectedLens] = useState<LensType>('wafr');
   const [selectedAssessmentId, setSelectedAssessmentId] = useState<string>(
-    initialData.assessments[0]?.id || 'A-001'
+    initialData.assessments[0]?.id || ''
   );
-  const [assessments, setAssessments] = useState<AssessmentInfo[]>(initialData.assessments);
-  const [milestones, setMilestones] = useState<AssessmentMilestone[]>(initialData.milestones);
+  const [assessments, setAssessments] = useState<AssessmentInfo[]>(initialData.assessments || []);
+  const [milestones, setMilestones] = useState<AssessmentMilestone[]>(initialData.milestones || []);
   const [scheduledAssessments, setScheduledAssessments] = useState<ScheduledAssessment[]>(
     initialData.scheduledAssessments || []
   );
@@ -489,10 +431,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     initialData.integrations || INITIAL_INTEGRATIONS
   );
   const [jiraTickets, setJiraTickets] = useState<Record<string, LinkedJiraTicket>>(
-    initialData.jiraTickets || INITIAL_JIRA_TICKETS
+    initialData.jiraTickets || {}
   );
   const [alertLogs, setAlertLogs] = useState<AlertLogItem[]>(
-    initialData.alertLogs || INITIAL_ALERT_LOGS
+    initialData.alertLogs || []
   );
   const [toast, setToast] = useState<ToastItem | null>(null);
 
@@ -1167,10 +1109,32 @@ export function AppProvider({ children }: { children: ReactNode }) {
         } catch (subErr) {
           console.warn('Could not sync secondary datasets from MongoDB:', subErr);
         }
+      } else {
+        setDbConnected(false);
+        setAssessments([]);
+        setCloudAccounts([]);
+        setConfiguredAccountState(null);
+        setConfiguredAccounts({ aws: null, azure: null, gcp: null });
+        setMilestones([]);
+        setScheduledAssessments([]);
+        setAlertLogs([]);
+        setJiraTickets({});
+        setSelectedAssessmentId('');
+        setCloud(null);
       }
     } catch (e) {
-      console.warn('API/MongoDB not reachable, using local storage state.', e);
+      console.warn('API/MongoDB not reachable, resetting state to disconnected/empty.', e);
       setDbConnected(false);
+      setAssessments([]);
+      setCloudAccounts([]);
+      setConfiguredAccountState(null);
+      setConfiguredAccounts({ aws: null, azure: null, gcp: null });
+      setMilestones([]);
+      setScheduledAssessments([]);
+      setAlertLogs([]);
+      setJiraTickets({});
+      setSelectedAssessmentId('');
+      setCloud(null);
     }
   };
 
@@ -1255,8 +1219,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setOrgQuestions(data.orgQuestions);
     setTheme(data.theme || 'light');
 
-    const isDemo = user.id === 'user-admin' || user.role === 'admin' || user.email === 'admin@cloudifyops.com';
-    if (user.isNewUser || (!isDemo && data.assessments.length === 0)) {
+    if (user.isNewUser || data.assessments.length === 0) {
       setCloudAccounts([]);
       setConfiguredAccountState(null);
       setConfiguredAccounts({ aws: null, azure: null, gcp: null });
