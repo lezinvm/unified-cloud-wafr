@@ -4,11 +4,6 @@ import { AppLayout } from '../components/AppLayout';
 import { api } from '../services/apiClient';
 import { SlackLogo, JiraLogo, GChatLogo } from '../components/IntegrationLogos';
 import {
-  RegisterMcpWizard,
-  McpServerConfig,
-  INITIAL_MCP_TOOLS,
-} from '../components/RegisterMcpWizard';
-import {
   SlackIntegration,
   JiraIntegration,
   GChatIntegration,
@@ -71,57 +66,9 @@ export function Integrations() {
   const isDark = theme === 'dark';
   const T = isDark ? DARK : LIGHT;
 
-  const [activeTab, setActiveTab] = useState<'all' | 'mcp' | 'rules' | 'logs'>('all');
+  const [activeTab, setActiveTab] = useState<'all' | 'rules' | 'logs'>('all');
   const [selectedService, setSelectedService] = useState<IntegrationType | null>(null);
   const [testNotificationToast, setTestNotificationToast] = useState<string | null>(null);
-
-  // MCP Wizard & Capability Providers State
-  const [isMcpWizardOpen, setIsMcpWizardOpen] = useState(false);
-  const [mcpWizardStep, setMcpWizardStep] = useState<number>(1);
-  const [editingMcpServer, setEditingMcpServer] = useState<McpServerConfig | null>(null);
-  const [mcpServers, setMcpServers] = useState<McpServerConfig[]>([
-    {
-      id: 'mcp-cloudifyops-aish',
-      name: 'cloudifyopsAish-devops-mcp',
-      endpointUrl: 'https://ec2-44-200-223-241.compute-1.amazonaws.com',
-      description: 'Production DevOps Agent MCP server providing Jira ticket automation, Slack alerts, and Kubernetes cluster operations.',
-      enableDynamicRegistration: false,
-      privateConnection: false,
-      authFlow: 'api_key',
-      authConfig: {
-        apiKeyName: 'cloudifyops-api-key',
-        apiKeyHeader: 'X-API-Key',
-        apiKeyValue: 'cfops_live_key_9941a8',
-      },
-      tools: INITIAL_MCP_TOOLS,
-      status: 'connected',
-      createdAt: '2026-10-25T10:00:00Z',
-    },
-  ]);
-
-  const handleOpenMcpWizard = (server?: McpServerConfig, step: number = 1) => {
-    setEditingMcpServer(server || null);
-    setMcpWizardStep(step);
-    setIsMcpWizardOpen(true);
-  };
-
-  const handleSaveMcpServer = (newServer: McpServerConfig) => {
-    setMcpServers((prev) => {
-      const idx = prev.findIndex((s) => s.id === newServer.id);
-      if (idx >= 0) {
-        const copy = [...prev];
-        copy[idx] = newServer;
-        return copy;
-      }
-      return [...prev, newServer];
-    });
-    showToast(`MCP Server "${newServer.name}" and tools successfully registered!`);
-  };
-
-  const handleDeleteMcpServer = (id: string) => {
-    setMcpServers((prev) => prev.filter((s) => s.id !== id));
-    showToast('MCP Server disconnected.');
-  };
 
   // Form states for modals/drawers
   const [slackForm, setSlackForm] = useState<SlackIntegration>(integrations.slack);
@@ -269,18 +216,6 @@ export function Integrations() {
 
               <button
                 type="button"
-                onClick={() => handleOpenMcpWizard(undefined, 1)}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-full text-xs font-bold text-white transition-opacity hover:opacity-90 cursor-pointer shadow-sm"
-                style={{ backgroundColor: '#EC7211' }}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                  <path d="M12 5v14M5 12h14"/>
-                </svg>
-                <span>+ Register MCP Server</span>
-              </button>
-
-              <button
-                type="button"
                 onClick={() => handleOpenConfig('slack')}
                 className="flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-bold text-white transition-opacity hover:opacity-90 cursor-pointer shadow-sm"
                 style={{ background: 'linear-gradient(135deg,#2563EB,#22C55E)' }}
@@ -291,7 +226,7 @@ export function Integrations() {
           </div>
 
           {/* Header Tabs */}
-          <div className="flex items-center gap-2 mt-5 border-b -mb-4 pb-0 overflow-x-auto" style={{ borderColor: T.border }}>
+          <div className="flex items-center gap-2 mt-5 border-b -mb-4 pb-0" style={{ borderColor: T.border }}>
             <button
               type="button"
               onClick={() => setActiveTab('all')}
@@ -315,33 +250,7 @@ export function Integrations() {
                   color: activeTab === 'all' ? '#2563EB' : T.textSub,
                 }}
               >
-                {connectedCount + (mcpServers.length > 0 ? 1 : 0)} connected
-              </span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab('mcp')}
-              className={`flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all cursor-pointer ${
-                activeTab === 'mcp'
-                  ? 'border-[#EC7211] text-[#EC7211]'
-                  : 'border-transparent text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'
-              }`}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <rect x="2" y="2" width="20" height="20" rx="5" />
-                <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z" />
-                <line x1="17.5" y1="6.5" x2="17.51" y2="6.5" />
-              </svg>
-              <span>Capability Providers (MCP)</span>
-              <span
-                className="px-2 py-0.5 rounded-full text-[10px] font-bold"
-                style={{
-                  backgroundColor: activeTab === 'mcp' ? (isDark ? 'rgba(236,114,17,0.2)' : '#FFF7ED') : (isDark ? 'rgba(255,255,255,0.06)' : '#F1F5F9'),
-                  color: activeTab === 'mcp' ? '#EC7211' : T.textSub,
-                }}
-              >
-                {mcpServers.length} active
+                {connectedCount} / 3 connected
               </span>
             </button>
 
@@ -632,266 +541,6 @@ export function Integrations() {
                     Configure
                   </button>
                 </div>
-              </div>
-
-              {/* AWS DEVOPS AGENT MCP CARD */}
-              <div
-                className="p-5 rounded-2xl border flex flex-col justify-between gap-4 transition-all hover:shadow-lg relative overflow-hidden"
-                style={{ backgroundColor: T.card, borderColor: '#EC7211', boxShadow: T.shadow }}
-              >
-                <div className="absolute top-0 right-0 w-24 h-24 bg-[#EC7211]/5 rounded-bl-full pointer-events-none" />
-                <div>
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-11 h-11 rounded-2xl flex items-center justify-center bg-[#EC7211]/10 border border-[#EC7211]/30 p-2 shrink-0 text-[#EC7211]">
-                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <rect x="2" y="2" width="20" height="20" rx="5" />
-                          <circle cx="12" cy="12" r="3" />
-                          <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
-                        </svg>
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-1.5">
-                          <h3 className="font-bold text-sm" style={{ color: T.text }}>DevOps Agent MCP</h3>
-                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-[#EC7211]/15 text-[#EC7211] uppercase">MCP</span>
-                        </div>
-                        <p className="text-[11px]" style={{ color: T.textSub }}>Capability Provider & Tool Server</p>
-                      </div>
-                    </div>
-                    <span
-                      className={`text-[10px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1.5 ${
-                        mcpServers.length > 0
-                          ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
-                          : 'bg-gray-500/10 text-gray-500 border border-gray-500/20'
-                      }`}
-                    >
-                      <span className={`w-1.5 h-1.5 rounded-full ${mcpServers.length > 0 ? 'bg-emerald-500' : 'bg-gray-400'}`} />
-                      {mcpServers.length > 0 ? 'Connected' : 'Not Connected'}
-                    </span>
-                  </div>
-
-                  <p className="text-xs leading-relaxed" style={{ color: T.textSub }}>
-                    Connect Model Context Protocol (MCP) servers to equip autonomous DevOps agents with Jira, Slack, and cloud orchestration tools.
-                  </p>
-
-                  {mcpServers.length > 0 && (
-                    <div className="mt-3 p-3 rounded-xl border bg-black/5 dark:bg-black/20 text-xs flex flex-col gap-1.5" style={{ borderColor: T.border }}>
-                      <div className="flex items-center justify-between font-mono text-[11px]">
-                        <span className="font-semibold truncate max-w-[180px]" style={{ color: T.text }}>
-                          {mcpServers[0].name}
-                        </span>
-                        <span className="text-emerald-500 font-bold shrink-0">
-                          {mcpServers[0].tools.filter(t => t.enabled).length} Tools Active
-                        </span>
-                      </div>
-                      <span className="text-[10px] text-slate-400 truncate">{mcpServers[0].endpointUrl}</span>
-                    </div>
-                  )}
-                </div>
-
-                <div className="flex items-center justify-between pt-3 border-t" style={{ borderColor: T.border }}>
-                  <button
-                    type="button"
-                    onClick={() => handleOpenMcpWizard(mcpServers[0], 5)}
-                    className="text-xs font-semibold hover:underline cursor-pointer text-[#EC7211] flex items-center gap-1"
-                  >
-                    <span>Manage Tools ({mcpServers[0]?.tools?.filter(t => t.enabled).length || 13})</span>
-                    <span>→</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => handleOpenMcpWizard(mcpServers[0], 1)}
-                    className="px-4 py-1.5 rounded-xl text-xs font-semibold border transition-all hover:border-[#EC7211] cursor-pointer"
-                    style={{ borderColor: T.border, backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : '#FFFFFF', color: T.text }}
-                  >
-                    Configure
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* TAB: CAPABILITY PROVIDERS & MCP SERVERS */}
-          {activeTab === 'mcp' && (
-            <div className="flex flex-col gap-6">
-              <div
-                className="p-6 rounded-2xl border flex items-center justify-between flex-wrap gap-4"
-                style={{ backgroundColor: T.card, borderColor: T.border, boxShadow: T.shadow }}
-              >
-                <div>
-                  <div className="flex items-center gap-2.5 mb-1">
-                    <h2 className="text-base font-bold" style={{ color: T.text }}>
-                      Capability Providers & MCP Servers
-                    </h2>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#EC7211]/20 text-[#EC7211]">
-                      Streamable HTTP Protocol
-                    </span>
-                  </div>
-                  <p className="text-xs max-w-2xl leading-relaxed" style={{ color: T.textSub }}>
-                    DevOps Agent connects to external Model Context Protocol (MCP) servers to discover and invoke tools during architecture review and automated remediation. Tool classifications govern execution authority.
-                  </p>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => handleOpenMcpWizard(undefined, 1)}
-                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold text-white transition-all shadow-md cursor-pointer hover:opacity-95"
-                  style={{ backgroundColor: '#EC7211' }}
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                    <path d="M12 5v14M5 12h14" />
-                  </svg>
-                  <span>Register MCP Server</span>
-                </button>
-              </div>
-
-              {/* MCP Servers List */}
-              <div className="grid grid-cols-1 gap-4">
-                {mcpServers.map((server) => {
-                  const enabledTools = server.tools.filter((t) => t.enabled);
-                  const readOnlyCount = enabledTools.filter((t) => t.classification === 'Read only').length;
-                  const mutativeCount = enabledTools.filter((t) => t.classification === 'Mutative').length;
-                  const destructiveCount = enabledTools.filter((t) => t.classification === 'Destructive').length;
-
-                  return (
-                    <div
-                      key={server.id}
-                      className="p-6 rounded-2xl border flex flex-col gap-5 shadow-xs transition-all hover:border-[#EC7211]"
-                      style={{ backgroundColor: T.card, borderColor: T.border }}
-                    >
-                      {/* Top Row: Title, Endpoint, Status */}
-                      <div className="flex items-start justify-between flex-wrap gap-4 pb-4 border-b" style={{ borderColor: T.border }}>
-                        <div className="flex items-start gap-4">
-                          <div className="w-12 h-12 rounded-2xl flex items-center justify-center bg-[#EC7211]/10 border border-[#EC7211]/30 p-2.5 text-[#EC7211] shrink-0">
-                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <rect x="2" y="2" width="20" height="20" rx="5" />
-                              <circle cx="12" cy="12" r="3" />
-                              <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
-                            </svg>
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-2.5">
-                              <h3 className="text-base font-bold font-mono" style={{ color: T.text }}>
-                                {server.name}
-                              </h3>
-                              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-500 border border-blue-500/20">
-                                {server.authFlow.toUpperCase().replace('_', ' ')}
-                              </span>
-                            </div>
-                            <p className="text-xs font-mono text-slate-400 mt-1 break-all">
-                              {server.endpointUrl}
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-3">
-                          <span className="text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
-                            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                            Connected
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Middle: Description & Metadata */}
-                      {server.description && (
-                        <p className="text-xs leading-relaxed" style={{ color: T.textSub }}>
-                          {server.description}
-                        </p>
-                      )}
-
-                      {/* Tool Classification Breakdown Bar */}
-                      <div
-                        className="p-4 rounded-xl border flex items-center justify-between flex-wrap gap-4"
-                        style={{ backgroundColor: isDark ? 'rgba(0,0,0,0.2)' : '#F8FAFC', borderColor: T.border }}
-                      >
-                        <div className="flex items-center gap-3">
-                          <span className="text-xs font-bold" style={{ color: T.text }}>
-                            Enabled Tools:
-                          </span>
-                          <span className="text-xs font-mono font-bold text-blue-500">
-                            {enabledTools.length} / {server.tools.length}
-                          </span>
-                          <div className="flex items-center gap-2 pl-3 border-l" style={{ borderColor: T.border }}>
-                            <span className="text-[11px] px-2.5 py-0.5 rounded-md bg-blue-500/10 text-blue-400 font-semibold border border-blue-500/20">
-                              {readOnlyCount} Read-only
-                            </span>
-                            <span className="text-[11px] px-2.5 py-0.5 rounded-md bg-amber-500/10 text-amber-500 font-semibold border border-amber-500/20">
-                              {mutativeCount} Mutative
-                            </span>
-                            {destructiveCount > 0 && (
-                              <span className="text-[11px] px-2.5 py-0.5 rounded-md bg-rose-500/10 text-rose-400 font-semibold border border-rose-500/20">
-                                {destructiveCount} Destructive
-                              </span>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleOpenMcpWizard(server, 5)}
-                            className="px-4 py-2 rounded-xl text-xs font-bold text-white transition-all shadow-xs hover:opacity-90 cursor-pointer flex items-center gap-1.5"
-                            style={{ backgroundColor: '#EC7211' }}
-                          >
-                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                              <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
-                            </svg>
-                            <span>Manage Tools & Permissions</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => handleOpenMcpWizard(server, 1)}
-                            className="px-3.5 py-2 rounded-xl text-xs font-semibold border hover:border-slate-500 transition-colors cursor-pointer"
-                            style={{ borderColor: T.border, color: T.text }}
-                          >
-                            Edit
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteMcpServer(server.id)}
-                            className="px-3.5 py-2 rounded-xl text-xs font-semibold text-rose-500 hover:bg-rose-500/10 border border-rose-500/20 transition-colors cursor-pointer"
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-
-                {mcpServers.length === 0 && (
-                  <div
-                    className="p-12 rounded-2xl border flex flex-col items-center justify-center text-center gap-3"
-                    style={{ backgroundColor: T.card, borderColor: T.border }}
-                  >
-                    <div className="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center">
-                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <rect x="2" y="2" width="20" height="20" rx="5" />
-                        <line x1="12" y1="8" x2="12" y2="12" />
-                        <line x1="12" y1="16" x2="12.01" y2="16" />
-                      </svg>
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-bold" style={{ color: T.text }}>
-                        No MCP Servers Registered
-                      </h3>
-                      <p className="text-xs text-slate-400 mt-1 max-w-md">
-                        Register your first Model Context Protocol server to allow DevOps Agent to perform automated Jira ticketing and infrastructure analysis.
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleOpenMcpWizard(undefined, 1)}
-                      className="mt-2 px-5 py-2.5 rounded-xl text-xs font-bold text-white shadow-md cursor-pointer hover:opacity-95"
-                      style={{ backgroundColor: '#EC7211' }}
-                    >
-                      + Register MCP Server
-                    </button>
-                  </div>
-                )}
               </div>
             </div>
           )}
@@ -1496,16 +1145,6 @@ export function Integrations() {
           </div>
         </div>
       )}
-
-      {/* ── REGISTER MCP SERVER WIZARD MODAL (Steps 1-4 & Step 5 Tool Classification) ── */}
-      <RegisterMcpWizard
-        isOpen={isMcpWizardOpen}
-        onClose={() => setIsMcpWizardOpen(false)}
-        onSave={handleSaveMcpServer}
-        initialServer={editingMcpServer}
-        initialStep={mcpWizardStep}
-        isDark={isDark}
-      />
     </AppLayout>
   );
 }
