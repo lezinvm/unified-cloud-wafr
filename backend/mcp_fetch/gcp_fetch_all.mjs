@@ -75,6 +75,13 @@ const FETCH_PLAN = [
   // component-install prompt that hangs; omitted here. Add once the alpha
   // component is pre-installed in the scanner environment.
 
+  // Load balancing / edge (list is global)
+  { key: 'backend_services',     args: ['compute', 'backend-services', 'list'] },
+  { key: 'url_maps',             args: ['compute', 'url-maps', 'list'] },
+  { key: 'backend_buckets',      args: ['compute', 'backend-buckets', 'list'] },
+  { key: 'security_policies',    args: ['compute', 'security-policies', 'list'] }, // Cloud Armor
+  { key: 'instance_groups_managed', args: ['compute', 'instance-groups', 'managed', 'list'] },
+
   // Kubernetes & containers
   { key: 'gke_clusters',         args: ['container', 'clusters', 'list'] },
   { key: 'artifact_repos',       args: ['artifacts', 'repositories', 'list'] },
@@ -88,13 +95,25 @@ const FETCH_PLAN = [
   { key: 'pubsub_topics',        args: ['pubsub', 'topics', 'list'] },
   { key: 'pubsub_subscriptions', args: ['pubsub', 'subscriptions', 'list'] },
 
-  // Security / secrets / KMS
-  { key: 'kms_keyrings',         args: ['kms', 'keyrings', 'list', '--location=global'] },
+  // Secrets
   { key: 'secrets',              args: ['secrets', 'list'] },
 
   // DNS / certs
   { key: 'dns_zones',            args: ['dns', 'managed-zones', 'list'] },
   { key: 'ssl_certificates',     args: ['compute', 'ssl-certificates', 'list'] },
+  { key: 'certificate_manager',  args: ['certificate-manager', 'certificates', 'list'] },
+
+  // Governance / contacts / org policy
+  { key: 'essential_contacts',   args: ['essential-contacts', 'list'] },
+  { key: 'org_policies',         args: ['org-policies', 'list'] },
+
+  // Analytics — BigQuery omitted: only `gcloud alpha bq` exists and it can
+  // trigger an interactive component-install prompt that hangs. Left UNKNOWN
+  // in checks until the alpha component is pre-installed in the scanner env.
+
+  // CI/CD
+  { key: 'build_triggers',       args: ['builds', 'triggers', 'list'] },
+  { key: 'source_repos',         args: ['source', 'repos', 'list'] },
 
   // Logging / monitoring
   { key: 'logging_sinks',        args: ['logging', 'sinks', 'list'] },
@@ -102,6 +121,14 @@ const FETCH_PLAN = [
 
   // Services / APIs enabled
   { key: 'services_enabled',     args: ['services', 'list', '--enabled'] },
+];
+
+// KMS is location-scoped: keyrings live in regions/global. We discover
+// keyrings across common locations, then list keys (with rotation/IAM-relevant
+// metadata) under each ring. Output stored under service key 'kms_crypto_keys'.
+const KMS_LOCATIONS = [
+  'global', 'us', 'us-central1', 'us-east1', 'us-east4', 'us-west1',
+  'europe', 'europe-west1', 'asia', 'asia-south1', 'asia-southeast1',
 ];
 
 // ---- MCP plumbing ----
@@ -158,7 +185,7 @@ async function fetchService(entry, project) {
   const args = [...entry.args];
   if (entry.iamPolicy) args.push(project);          // projects get-iam-policy PROJECT
   if (!args.some(a => a.startsWith('--project='))) args.push(`--project=${project}`);
-  args.push('--format=json');
+  if (!args.some(a => a.startsWith('--format='))) args.push('--format=json');
   const r = await runGcloud(args);
   if (r.ok) {
     const count = Array.isArray(r.data) ? r.data.length : (r.data && typeof r.data === 'object' ? 1 : 0);
@@ -171,6 +198,36 @@ async function listProjects() {
   const r = await runGcloud(['projects', 'list', '--format=json']);
   if (r.ok && Array.isArray(r.data)) return r.data.map(p => p.projectId).filter(Boolean);
   return [];
+}
+
+/**
+ * KMS fetch: keyrings are location-scoped. Discover rings across KMS_LOCATIONS,
+ * then list crypto keys (which carry rotationPeriod, nextRotationTime,
+ * destroyScheduledDuration, purpose) under each ring. Returns a flat list of
+ * keys annotated with their keyring + location so checks can evaluate them.
+ */
+async function fetchKms(project) {
+  const keys = [];
+  // 1. Discover keyrings across all locations in parallel.
+  const ringLists = await Promise.all(KMS_LOCATIONS.map(async (loc) => {
+    const r = await runGcloud(['kms', 'keyrings', 'list',
+      `--location=${loc}`, `--project=${project}`, '--format=json']);
+    return (r.ok && Array.isArray(r.data))
+      ? r.data.map(ring => ({ loc, ringName: ring.name.split('/').pop() }))
+      : [];
+  }));
+  const rings = ringLists.flat();
+  // 2. List keys per ring in parallel (bounded).
+  const keyLists = await Promise.all(rings.map(async ({ loc, ringName }) => {
+    const r = await runGcloud(['kms', 'keys', 'list',
+      `--keyring=${ringName}`, `--location=${loc}`,
+      `--project=${project}`, '--format=json']);
+    return (r.ok && Array.isArray(r.data))
+      ? r.data.map(k => ({ ...k, _location: loc, _keyring: ringName }))
+      : [];
+  }));
+  for (const list of keyLists) keys.push(...list);
+  return { ok: true, count: keys.length, data: keys };
 }
 
 async function main() {
@@ -217,6 +274,17 @@ async function main() {
       }
     }
     await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+
+    // KMS needs per-location discovery; run it separately (serial, bounded).
+    try {
+      const kms = await fetchKms(project);
+      pres.services['kms_crypto_keys'] = kms;
+      console.log(`  • kms_crypto_keys: OK (${kms.count})`);
+    } catch (e) {
+      pres.services['kms_crypto_keys'] = { ok: false, error: String(e) };
+      console.log('  • kms_crypto_keys: ERROR');
+    }
+
     result.projects[project] = pres;
     // Write incrementally so a timeout still leaves partial data on disk.
     writeFileSync(OUT, JSON.stringify(result, null, 2));

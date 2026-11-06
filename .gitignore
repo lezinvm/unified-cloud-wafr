@@ -18,3 +18,6 @@ credentials.json
 backend/mcp_fetch/*_result.json
 backend/mcp_fetch/*_all_projects.json
 backend/mcp_fetch/gcp_fetch*.json
+
+# Assessment results (contain live resource names / findings)
+backend/assessment_result*.json
