@@ -4,3 +4,17 @@ dist/
 __pycache__/
 *.pyc
 backend/__pycache__/
+
+# Cloud service-account keys and credentials — NEVER commit these
+*.json.key
+*-key.json
+*serviceaccount*.json
+gcp-key*.json
+lens-wafr-gcp-*.json
+.gcp-keys/
+credentials.json
+
+# MCP fetch output snapshots (contain live cloud resource data: IPs, SA emails, secrets)
+backend/mcp_fetch/*_result.json
+backend/mcp_fetch/*_all_projects.json
+backend/mcp_fetch/gcp_fetch*.json
