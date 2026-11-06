@@ -228,9 +228,95 @@ def build_assessment(provider: str, scope: str, controls: list[dict],
     return assessment, findings
 
 
+# Fetch service-key -> inventory resource "type" + the field holding the name.
+# Only the common, resource-bearing services are surfaced in the inventory UI.
+INVENTORY_TYPES = {
+    "compute_instances": "compute_instance",
+    "compute_disks": "compute_disk",
+    "storage_buckets": "storage_bucket",
+    "networks_vpc": "vpc_network",
+    "subnets": "subnet",
+    "firewall_rules": "firewall_rule",
+    "cloud_functions": "cloud_function",
+    "cloud_run_services": "cloud_run_service",
+    "pubsub_topics": "pubsub_topic",
+    "sql_instances": "sql_instance",
+    "gke_clusters": "gke_cluster",
+    "secrets": "secret",
+    "iam_service_accounts": "service_account",
+    "addresses_static_ip": "static_ip",
+}
+
+
+def build_resources(provider: str, scope: str, assessment_id: str,
+                    fetch_data_path: Path | None) -> list[dict]:
+    """Flatten the raw fetch JSON into resource_inventory docs so the UI's
+    Resources tab shows the real estate that was scanned."""
+    if not fetch_data_path or not fetch_data_path.exists():
+        return []
+    fetch = json.loads(fetch_data_path.read_text(encoding="utf-8"))
+    scopes = fetch.get("projects") or fetch.get("accounts") \
+        or fetch.get("subscriptions") or {}
+    services = (scopes.get(scope) or {}).get("services", {})
+    out: list[dict] = []
+    for svc_key, rtype in INVENTORY_TYPES.items():
+        svc = services.get(svc_key)
+        if not svc or not svc.get("ok"):
+            continue
+        data = svc.get("data")
+        items = data if isinstance(data, list) else ([data] if isinstance(data, dict) else [])
+        for i, item in enumerate(items):
+            if not isinstance(item, dict):
+                continue
+            raw_name = item.get("name") or item.get("email") or item.get("id") or f"{rtype}-{i}"
+            name = raw_name.rsplit("/", 1)[-1] if isinstance(raw_name, str) else str(raw_name)
+            out.append({
+                "id": f"res-{assessment_id}-{svc_key}-{i}",
+                "assessment_id": assessment_id,
+                "cloud": provider,
+                "type": rtype,
+                "name": name,
+                "arn": item.get("selfLink") or item.get("name") or name,
+                "region": (item.get("region") or item.get("zone") or item.get("location")
+                           or "global"),
+                "account_id": scope,
+            })
+    return out
+
+
+def build_milestone(assessment: dict) -> dict:
+    """A baseline milestone so the assessment's history/milestone view renders."""
+    return {
+        "id": f"MLST-{assessment['id']}-baseline",
+        "assessment_id": assessment["id"],
+        "milestone_number": 1,
+        "milestone_name": "Live Scan Baseline",
+        "version": "v1.0.0",
+        "score": assessment["score"],
+        "total_checks": assessment["total_checks"],
+        "passed_checks": assessment["passed_checks"],
+        "failed_checks": assessment["failed_checks"],
+        "total_best_practices": assessment["total_best_practices"],
+        "passed_bps": assessment["passed_bps"],
+        "failed_bps": assessment["failed_bps"],
+        "high_risks": assessment["high_risks"],
+        "medium_risks": assessment["medium_risks"],
+        "low_risks": assessment["low_risks"],
+        "pillar_scores": assessment["pillar_scores"],
+        "pillar_high_risks": assessment["pillar_high_risks"],
+        "notes": "Baseline from live cloud scan via check engine.",
+        "recorded_by": "Live Scanner",
+        "recorded_at": assessment["last_run_at"],
+        "created_at": NOW,
+    }
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--result", default=str(HERE / "assessment_result_gcp.json"))
+    ap.add_argument("--fetch", default=None,
+                    help="Raw fetch JSON for resource inventory "
+                         "(default mcp_fetch/<provider>_fetch_result.json).")
     ap.add_argument("--user-id", default="usr-09")
     ap.add_argument("--org-id", default="org_01")
     ap.add_argument("--dry-run", action="store_true")
@@ -240,6 +326,9 @@ def main() -> None:
     provider = result["provider"]
     controls = result["controls"]
     fetched_at = (result.get("generatedFrom") or {}).get("fetchedAt")
+
+    fetch_path = Path(args.fetch) if args.fetch else \
+        HERE / "mcp_fetch" / f"{provider}_fetch_result.json"
 
     client = MongoClient(MONGO_URI)
     db = client[DB_NAME]
@@ -260,6 +349,12 @@ def main() -> None:
               f"n/a={assessment['not_applicable_controls']} "
               f"not_impl={assessment['not_implemented_controls']}")
 
+        resources = build_resources(provider, scope, assessment["id"], fetch_path)
+        milestone = build_milestone(assessment)
+        print(f"  [resources] {len(resources)} inventory items"
+              f"{'' if fetch_path.exists() else ' (fetch JSON not found)'}")
+        print(f"  [milestone] {milestone['id']}")
+
         if args.dry_run:
             continue
 
@@ -268,6 +363,12 @@ def main() -> None:
         db["findings"].delete_many({"assessment_id": assessment["id"]})
         if findings:
             db["findings"].insert_many(findings)
+        # Resource inventory for this assessment (idempotent replace).
+        db["resource_inventory"].delete_many({"assessment_id": assessment["id"]})
+        if resources:
+            db["resource_inventory"].insert_many(resources)
+        # Baseline milestone (idempotent upsert).
+        db["milestones"].update_one({"id": milestone["id"]}, {"$set": milestone}, upsert=True)
 
     if not args.dry_run:
         print("\n[OK] Loaded into MongoDB.")
