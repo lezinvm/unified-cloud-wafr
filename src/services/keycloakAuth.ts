@@ -56,7 +56,9 @@ export const DEFAULT_KEYCLOAK_CONFIG: KeycloakConfig = {
   clientId: 'lens-app',
   adminUsername: 'admin',
   adminPassword: 'admin',
-  mode: 'live',
+  // Build-time switch: set VITE_AUTH_MODE=mock for environments without a
+  // Keycloak (e.g. the dev instance). Anything else keeps the default 'live'.
+  mode: (import.meta.env.VITE_AUTH_MODE as string) === 'mock' ? 'mock' : 'live',
 };
 
 /**
