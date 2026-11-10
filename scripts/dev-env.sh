@@ -76,8 +76,10 @@ start_backend() {
   (
     cd "$ROOT"
     venv
+    # SCAN_ENABLED lets the UI start real scans. The API has no auth, so this
+    # relies on the firewall allowing only your IP to reach :8001.
     MONGO_URI="$DEV_MONGO_URI" DB_NAME=wafr_db \
-    KEYCLOAK_URL="http://127.0.0.1:1" REAL_DATA_ONLY=1 \
+    KEYCLOAK_URL="http://127.0.0.1:1" REAL_DATA_ONLY=1 SCAN_ENABLED=1 \
       nohup python -m uvicorn backend.main:app --host 0.0.0.0 --port "$API_PORT" \
       > "$RUN/backend.log" 2>&1 &
     echo $! > "$RUN/backend.pid"

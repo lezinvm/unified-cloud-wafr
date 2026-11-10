@@ -16,7 +16,7 @@ import {
   INITIAL_COMPLIANCE_FRAMEWORKS,
 } from './data/complianceData';
 import { PillarData, PILLARS_DATA } from './data/wafrData';
-import { api } from './services/apiClient';
+import { api, type LiveScanStatus } from './services/apiClient';
 import { REAL_DATA_ONLY } from './config/realData';
 
 
@@ -250,6 +250,9 @@ interface AppState {
   cloudShort: string;
   dbConnected: boolean;
   refreshFromDb: (targetUser?: UserProfile) => Promise<void>;
+  /** Live scan in progress or last finished (real-data-only builds). */
+  activeScan: LiveScanStatus | null;
+  startLiveScan: (assessmentId: string) => Promise<void>;
 }
 
 export interface RepoConfig {
@@ -712,6 +715,63 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const startTour = () => setIsTourOpen(true);
   const closeTour = () => setIsTourOpen(false);
+
+  // -- Live scans (real pipeline started from the UI) ----------------------
+  const [activeScan, setActiveScan] = useState<LiveScanStatus | null>(null);
+  const scanPollRef = useRef<number | null>(null);
+
+  const pollScan = (scanId: string) => {
+    if (scanPollRef.current) window.clearTimeout(scanPollRef.current);
+    const tick = async () => {
+      try {
+        const s = await api.getScan(scanId);
+        setActiveScan(s);
+        if (s.status === 'done') {
+          scanPollRef.current = null;
+          showToast('Scan finished', 'success',
+            `Score ${s.result?.score ?? '-'} | ${s.result?.failed ?? 0} failing checks | ${s.result?.resources ?? 0} resources`);
+          await refreshFromDb();
+          return;
+        }
+        if (s.status === 'failed') {
+          scanPollRef.current = null;
+          showToast('Scan failed', 'info', s.error || 'See the scan log on the VM.');
+          return;
+        }
+      } catch {
+        // transient network error: keep polling
+      }
+      scanPollRef.current = window.setTimeout(tick, 4000);
+    };
+    tick();
+  };
+
+  const startLiveScan = async (assessmentId: string) => {
+    try {
+      const s = await api.startScan(assessmentId);
+      setActiveScan(s);
+      showToast('Live scan started', 'info', `Scanning ${s.project}. This takes a few minutes.`);
+      pollScan(s.id);
+    } catch (err: any) {
+      showToast('Could not start scan', 'info', err?.message || String(err));
+    }
+  };
+
+  // Resume watching a scan that is already running (e.g. after a page reload).
+  useEffect(() => {
+    if (!REAL_DATA_ONLY) return;
+    let cancelled = false;
+    api.getScans(undefined, 1).then(list => {
+      const latest = Array.isArray(list) ? list[0] : undefined;
+      if (cancelled || !latest) return;
+      setActiveScan(latest);
+      if (latest.status === 'running' || latest.status === 'queued') pollScan(latest.id);
+    }).catch(() => {});
+    return () => {
+      cancelled = true;
+      if (scanPollRef.current) window.clearTimeout(scanPollRef.current);
+    };
+  }, [currentUser.id]);
 
   // Sync assessments and accounts from MongoDB API scoped to the active user
   const refreshFromDb = async (targetUser?: UserProfile) => {
@@ -1675,12 +1735,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     region: string;
     name?: string;
   }): { isRerun: boolean; assessment: AssessmentInfo } => {
-    // Real-data-only: this function invents scores for new assessments and
-    // re-runs; refuse and leave every record untouched.
-    if (REAL_DATA_ONLY) {
-      showToast('Re-runs and new assessments are turned off here. Results come only from the scanner.', 'info');
-      return { isRerun: true, assessment: assessments[0] };
-    }
     // If it was a new user, they now have created an assessment
     setIsNewUser(false);
 
@@ -1690,6 +1744,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
        (config.accountName && a.accountName.toLowerCase() === config.accountName.toLowerCase())) &&
       a.region.toLowerCase() === config.region.toLowerCase()
     );
+    // Real-data-only: never invent scores. A re-run of an existing assessment
+    // starts the real scan pipeline; new assessments must come from the scanner.
+    if (REAL_DATA_ONLY) {
+      if (existingIndex !== -1) {
+        const existing = assessments[existingIndex];
+        void startLiveScan(existing.id);
+        return { isRerun: true, assessment: existing };
+      }
+      showToast('New assessments are created by the scanner, not from here.', 'info');
+      return { isRerun: false, assessment: assessments[0] };
+    }
 
     if (existingIndex !== -1) {
       const existing = assessments[existingIndex];
@@ -2040,6 +2105,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         cloudShort,
         dbConnected,
         refreshFromDb,
+        activeScan,
+        startLiveScan,
       }}
     >
       {children}

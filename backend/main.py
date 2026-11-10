@@ -12,8 +12,10 @@ from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 try:
     from backend.database import db, check_db_connection  # local dev (run from project root)
+    from backend import scan_runner
 except ModuleNotFoundError:
     from database import db, check_db_connection  # Docker (WORKDIR is /app = backend/)
+    import scan_runner
 
 app = FastAPI(
     title="Unified Cloud WAFR API",
@@ -549,6 +551,43 @@ async def delete_assessment(assessment_id: str):
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Assessment not found")
     return {"status": "deleted", "id": assessment_id}
+
+# --- LIVE SCANS (real pipeline: MCP fetch -> check engine -> loader) ---
+# Enabled only with SCAN_ENABLED=1. NOTE: there is no auth on this API, so only
+# enable it where network access is restricted (dev: firewall allows one IP).
+
+@app.on_event("startup")
+async def _mark_interrupted_scans():
+    try:
+        await scan_runner.mark_interrupted(db)
+    except Exception as e:  # DB may be unreachable at startup; don't block boot
+        print(f"[WARN] could not reset interrupted scans: {e}")
+
+@app.get("/api/scans/enabled")
+async def scans_enabled():
+    return {"enabled": scan_runner.SCAN_ENABLED}
+
+@app.post("/api/scans", status_code=202)
+async def start_scan(payload: Dict[str, Any]):
+    assessment_id = str(payload.get("assessment_id") or "")
+    if not assessment_id:
+        raise HTTPException(status_code=400, detail="Missing 'assessment_id'")
+    try:
+        return await scan_runner.start_scan(db, assessment_id)
+    except scan_runner.ScanError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+@app.get("/api/scans")
+async def list_scans(assessment_id: Optional[str] = None, limit: int = Query(default=5, le=50)):
+    query = {"assessment_id": assessment_id} if assessment_id else {}
+    return await db["scans"].find(query, {"_id": 0}).sort("started_at", -1).to_list(limit)
+
+@app.get("/api/scans/{scan_id}")
+async def get_scan(scan_id: str):
+    scan = await db["scans"].find_one({"id": scan_id}, {"_id": 0})
+    if not scan:
+        raise HTTPException(status_code=404, detail="Scan not found")
+    return scan
 
 @app.post("/api/assessments/{assessment_id}/rerun")
 async def rerun_assessment(assessment_id: str):

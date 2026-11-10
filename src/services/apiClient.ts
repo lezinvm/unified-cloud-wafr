@@ -4,6 +4,22 @@
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
 
+export type ScanStage = 'fetch' | 'check' | 'load';
+export interface LiveScanStatus {
+  id: string;
+  assessment_id: string;
+  project: string;
+  status: 'queued' | 'running' | 'done' | 'failed';
+  stage: ScanStage | 'done';
+  stages: Record<ScanStage, 'pending' | 'running' | 'done' | 'failed'>;
+  error: string | null;
+  log_tail: string;
+  started_at: string;
+  finished_at: string | null;
+  fetch_services?: number;
+  result: { score: number; passed: number; failed: number; resources: number } | null;
+}
+
 async function apiRequest<T>(endpoint: string, options?: RequestInit): Promise<T> {
   const url = `${API_BASE_URL}${endpoint}`;
   try {
@@ -226,6 +242,20 @@ export const api = {
     apiRequest<any>(`/users/${id}`, {
       method: 'DELETE',
     }),
+
+  // Live scans (real pipeline; backend must run with SCAN_ENABLED=1)
+  scansEnabled: () => apiRequest<{ enabled: boolean }>('/scans/enabled'),
+  startScan: (assessmentId: string) =>
+    apiRequest<LiveScanStatus>('/scans', {
+      method: 'POST',
+      body: JSON.stringify({ assessment_id: assessmentId }),
+    }),
+  getScan: (scanId: string) => apiRequest<LiveScanStatus>(`/scans/${encodeURIComponent(scanId)}`),
+  getScans: (assessmentId?: string, limit = 1) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (assessmentId) params.append('assessment_id', assessmentId);
+    return apiRequest<LiveScanStatus[]>(`/scans?${params.toString()}`);
+  },
 
   // Rerun assessment and checks
   rerunAssessment: (assessmentId: string) =>
