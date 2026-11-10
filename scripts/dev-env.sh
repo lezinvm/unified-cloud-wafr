@@ -49,7 +49,9 @@ start_mongo() {
   elif [ "$(docker ps -aq -f name=^${MONGO_NAME}$)" ]; then
     docker start "$MONGO_NAME" >/dev/null && echo "mongo started"
   else
-    docker run -d --name "$MONGO_NAME" -p "${MONGO_PORT}:27017" \
+    # Bound to localhost only: this Mongo has no auth, so it must never be
+    # reachable from outside the VM, whatever the firewall says.
+    docker run -d --name "$MONGO_NAME" -p "127.0.0.1:${MONGO_PORT}:27017" \
       -v wafr_dev_mongo:/data/db mongo:7 >/dev/null && echo "mongo created"
   fi
 }
