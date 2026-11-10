@@ -167,8 +167,13 @@ export const api = {
   },
 
   // Metadata / Frameworks & Checks
-  getPillars: (cloud?: string) =>
-    apiRequest<any[]>(cloud && cloud !== 'all' ? `/pillars?cloud=${cloud}` : '/pillars'),
+  getPillars: (cloud?: string, assessmentId?: string) => {
+    const params = new URLSearchParams();
+    if (cloud && cloud !== 'all') params.append('cloud', cloud);
+    if (assessmentId) params.append('assessment_id', assessmentId);
+    const query = params.toString();
+    return apiRequest<any[]>(query ? `/pillars?${query}` : '/pillars');
+  },
   getChecks: (filters?: { pillar_id?: string; best_practice_id?: string; severity?: string; status?: string; cloud?: string }) => {
     const params = new URLSearchParams();
     if (filters?.pillar_id) params.append('pillar_id', filters.pillar_id);

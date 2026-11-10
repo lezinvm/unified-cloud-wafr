@@ -1118,10 +1118,12 @@ export function getFallbackRemediations(cloud: string): Record<string, CheckReme
   return CLOUD_REMEDIATIONS_MAP[norm] || AWS_REMEDIATIONS;
 }
 
-export async function fetchRemediationsFromDb(cloud: string): Promise<Record<string, CheckRemediationData>> {
+export async function fetchRemediationsFromDb(cloud: string, assessmentId?: string): Promise<Record<string, CheckRemediationData>> {
   const norm = (cloud || 'aws').toLowerCase();
   try {
-    const data = await api.getRemediations({ cloud: norm });
+    // With an assessment id, only that assessment's remediations are returned, so two
+    // accounts of the same cloud never mix (maps are keyed by check id).
+    const data = await api.getRemediations({ cloud: norm, assessment_id: assessmentId || undefined });
     if (Array.isArray(data) && data.length > 0) {
       const map: Record<string, CheckRemediationData> = {};
       data.forEach((item: any) => {

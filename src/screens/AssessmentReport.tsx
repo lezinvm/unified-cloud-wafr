@@ -1209,13 +1209,13 @@ export function AssessmentReport() {
 
   useEffect(() => {
     let cancelled = false;
-    fetchRemediationsFromDb(activeCloud).then(data => {
+    fetchRemediationsFromDb(activeCloud, currentAssessment?.id).then(data => {
       if (!cancelled && data && Object.keys(data).length > 0) {
         setRemediationsDb(data);
       }
     }).catch(() => {});
     return () => { cancelled = true; };
-  }, [activeCloud]);
+  }, [activeCloud, currentAssessment?.id]);
 
   const remediationCheckStats = useMemo(() => {
     let fixed = 0;

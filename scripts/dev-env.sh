@@ -17,8 +17,9 @@
 #   rebuild     restart backend and force a frontend rebuild (after git pull)
 #   reset-data  wipe demo data from the dev DB, then run check engine + loader
 #               on backend/mcp_fetch/gcp_fetch_result.json
-#   scan        live fetch (gcloud MCP, VM identity) -> check engine -> loader.
+#   scan <id>   live scan of one assessment, any provider (scan_runner.py).
 #               Keeps the previous data if the fetch is mostly blocked.
+#   reset-data  (above) loads every provider with a fetch JSON on disk.
 #
 # Env overrides: DEV_HOST (public IP the browser uses), DEV_API_PORT,
 # DEV_WEB_PORT, DEV_KEEP_EMAIL (user kept by reset-data).
@@ -123,67 +124,63 @@ start_frontend() {
   echo "frontend starting on :$WEB_PORT"
 }
 
+owner() {
+  # "<user id> <org id>" of the dev user (KEEP_EMAIL), for loaded data.
+  python -c "
+import os
+from pymongo import MongoClient
+u = MongoClient(os.environ['MONGO_URI'])[os.environ['DB_NAME']]['users'].find_one({'email': '$KEEP_EMAIL'})
+print(u['id'], u.get('org_id') or 'org_' + u['id'])"
+}
+
 reset_data() {
-  local fetch="$ROOT/backend/mcp_fetch/gcp_fetch_result.json"
-  [ -f "$fetch" ] || { echo "missing $fetch (upload or fetch it first)"; exit 1; }
+  # Wipe demo data, then load every cloud that has fetched data on disk
+  # (backend/mcp_fetch/<provider>_fetch_result.json).
   start_mongo
   (
     cd "$ROOT/backend"
     venv
     export MONGO_URI="$DEV_MONGO_URI" DB_NAME=wafr_db
+    local clouds
+    clouds=$(python -c "import scan_providers as s; print(' '.join(n for n, p in s.PROVIDERS.items() if p.fetch_file.exists()))")
+    [ -n "$clouds" ] || { echo "no fetch JSON in backend/mcp_fetch/ (run a scan or upload one)"; exit 1; }
     python reset_dev_real_only.py --keep-email "$KEEP_EMAIL" --yes
-    # Log to a file: piping into `head`/`sed` would break the pipe and trip pipefail.
-    python check_engine.py --provider gcp > "$RUN/check_engine.log"
-    sed -n '1,10p' "$RUN/check_engine.log"
-    # Own the loaded data with the kept user's real id and org.
-    read -r uid org < <(python -c "
-import os
-from pymongo import MongoClient
-u = MongoClient(os.environ['MONGO_URI'])[os.environ['DB_NAME']]['users'].find_one({'email': '$KEEP_EMAIL'})
-print(u['id'], u.get('org_id') or 'org_' + u['id'])")
-    python load_assessment_to_db.py --user-id "$uid" --org-id "$org" --real-only
+    read -r uid org < <(owner)
+    for p in $clouds; do
+      echo "== $p =="
+      # Log to a file: piping into head/sed would break the pipe and trip pipefail.
+      python check_engine.py --provider "$p" --out "assessment_result_$p.json" > "$RUN/check_engine_$p.log"
+      sed -n '1,10p' "$RUN/check_engine_$p.log"
+      python load_assessment_to_db.py --provider "$p" --result "assessment_result_$p.json" \
+        --user-id "$uid" --org-id "$org" --real-only
+    done
   )
 }
 
 scan() {
-  # Real scan: fetch live GCP data via the official gcloud MCP server using the
-  # VM's own identity, then check engine + loader into the dev DB.
-  # Does NOT wipe the DB; it refreshes this project's assessment in place.
-  local project="${DEV_GCP_PROJECT:-lens-wafr-gcp}"
-  local fetch="$ROOT/backend/mcp_fetch/gcp_fetch_result.json"
-  local tmp="$RUN/gcp_fetch_new.json"
-  echo "identity: $(gcloud auth list --filter=status:ACTIVE --format='value(account)' 2>/dev/null)"
-  echo "fetching $project (several minutes; log: $RUN/fetch.log)..."
-  ( cd "$ROOT/backend/mcp_fetch" && node gcp_fetch_all.mjs --project "$project" --out "$tmp" > "$RUN/fetch.log" 2>&1 ) || {
-    echo "fetch failed; see $RUN/fetch.log (previous data kept)"; exit 1; }
-  # Refuse to replace good data with a mostly-blocked fetch (permission problem).
-  local ok
-  ok=$(python3 -c "
-import json,sys
-s=json.load(open('$tmp'))['projects']['$project']['services']
-print(sum(1 for v in s.values() if v.get('ok')))")
-  if [ "$ok" -lt 20 ]; then
-    echo "only $ok services readable: the VM identity lacks access. Previous data kept."
-    echo "see $RUN/fetch.log"; exit 1
-  fi
-  mv "$tmp" "$fetch"
-  echo "fetch ok ($ok services readable)"
+  # Real scan of one assessment, any provider: the same pipeline the UI runs
+  # (scan_runner.py). Keeps previous data if the fetch is mostly blocked.
+  local aid="${1:-}"
   start_mongo
   (
     cd "$ROOT/backend"
     venv
     export MONGO_URI="$DEV_MONGO_URI" DB_NAME=wafr_db
-    python check_engine.py --provider gcp > "$RUN/check_engine.log"
-    sed -n '1,10p' "$RUN/check_engine.log"
-    read -r uid org < <(python -c "
+    if [ -z "$aid" ]; then
+      echo "usage: scripts/dev-env.sh scan <assessment-id>"
+      echo "assessments:"
+      python -c "
 import os
 from pymongo import MongoClient
-u = MongoClient(os.environ['MONGO_URI'])[os.environ['DB_NAME']]['users'].find_one({'email': '$KEEP_EMAIL'})
-print(u['id'], u.get('org_id') or 'org_' + u['id'])")
-    python load_assessment_to_db.py --user-id "$uid" --org-id "$org" --real-only
+db = MongoClient(os.environ['MONGO_URI'])[os.environ['DB_NAME']]
+for a in db['assessments'].find({}, {'_id': 0, 'id': 1, 'cloud': 1, 'cloud_account_id': 1}):
+    print('  ', a['id'], '(' + str(a.get('cloud')) + ', ' + str(a.get('cloud_account_id')) + ')')"
+      exit 1
+    fi
+    echo "scanning $aid (several minutes; log in $RUN/)..."
+    python scan_runner.py --assessment-id "$aid"
   )
 }
-
 status() {
   local host; host="$(host_ip)"
   echo "mongo    : $(docker ps -f name=^${MONGO_NAME}$ --format '{{.Status}} {{.Ports}}' | head -1 || true)"
@@ -196,7 +193,7 @@ case "${1:-}" in
   rebuild)    rm -rf "$ROOT/dist"; stop_pid "$RUN/web.pid" frontend; stop_pid "$RUN/backend.pid" backend
               start_mongo; start_backend; start_frontend; sleep 4; status ;;
   reset-data) reset_data ;;
-  scan)       scan ;;
+  scan)       scan "${2:-}" ;;
   stop)       stop_pid "$RUN/web.pid" frontend; stop_pid "$RUN/backend.pid" backend
               docker stop "$MONGO_NAME" >/dev/null 2>&1 && echo "stopped mongo" || true ;;
   restart)    "$0" stop; "$0" start ;;

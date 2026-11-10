@@ -1020,7 +1020,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             dbJiraTickets,
           ] = await Promise.all([
             api.getScheduledAssessments(userOrgId, currentUserId),
-            api.getPillars(detectedCloud),
+            api.getPillars(detectedCloud, dbAssessments?.[0]?.id),
             api.getComplianceFrameworks(),
             api.getIntegrations(userOrgId),
             api.getAlertLogs(),

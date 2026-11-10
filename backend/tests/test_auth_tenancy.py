@@ -220,6 +220,26 @@ def test_pre_sso_user_record_is_adopted_not_duplicated(client, mongo):
     assert len(docs) == 1 and docs[0]["id"] == "kc-legacy"
 
 
+def test_pillars_are_per_assessment(client, mongo):
+    mongo["pillars"].insert_one({"id": "security", "label": "Security", "display_order": 1, "score": 99})
+    mongo["assessments"].update_one({"id": "A-1"}, {"$set": {"pillar_scores": {"security": 19}, "last_run_at": "2"}})
+    mongo["assessments"].insert_one({"id": "A-2", "org_id": "org_a", "cloud": "gcp", "last_run_at": "1",
+                                     "pillar_scores": {"security": 80}})
+    for aid in ("A-1", "A-2", "B-1"):
+        mongo["best_practices"].insert_one({"id": f"BP-{aid}", "pillar_id": "security", "assessment_id": aid})
+        mongo["checks"].insert_one({"id": "NET-01", "best_practice_id": f"BP-{aid}", "assessment_id": aid,
+                                    "cloud_provider": "gcp", "status": "fail" if aid == "A-1" else "pass"})
+    # Explicit assessment: only its tree and its own score (not the global 99).
+    sec = client.get("/api/pillars?cloud=gcp&assessment_id=A-2", headers=A()).json()[0]
+    assert sec["score"] == 80
+    assert [bp["id"] for bp in sec["bestPractices"]] == ["BP-A-2"]
+    # No assessment given: the caller's latest assessment for that cloud.
+    sec = client.get("/api/pillars?cloud=gcp", headers=A()).json()[0]
+    assert sec["score"] == 19 and [bp["id"] for bp in sec["bestPractices"]] == ["BP-A-1"]
+    # Another org's assessment is refused.
+    assert client.get("/api/pillars?cloud=gcp&assessment_id=B-1", headers=A()).status_code == 404
+
+
 def test_cors_preflight_allowed_origin_only(client):
     ok = client.options("/api/assessments", headers={
         "Origin": "http://localhost:8444", "Access-Control-Request-Method": "GET"})

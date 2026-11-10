@@ -1,45 +1,47 @@
 """
-Live scan runner: the same pipeline as `scripts/dev-env.sh scan`, started from
-the API.
+Live scan runner, for any registered cloud provider (scan_providers.py).
 
-    fetch   node mcp_fetch/gcp_fetch_all.mjs   (official gcloud MCP server,
-                                                VM identity, read-only)
-    check   python check_engine.py
-    load    python load_assessment_to_db.py --real-only
+    fetch   provider fetcher (official MCP server client), read-only
+    check   python check_engine.py --provider <p>
+    load    python load_assessment_to_db.py --provider <p> --assessment-id <id>
 
-Each scan is a document in the `scans` collection, so the UI can poll progress:
-    { id, assessment_id, project, status: queued|running|done|failed,
+Started from the API (POST /api/scans) or the CLI:
+    python scan_runner.py --assessment-id A-GCP-lens-wafr-gcp
+
+Each scan is a document in the `scans` collection so the UI can poll progress:
+    { id, assessment_id, provider, project, status: queued|running|done|failed,
       stage: fetch|check|load|done, stages: {...}, error, log_tail,
       started_at, finished_at, result: {score, passed, failed, resources} }
 
 Safety:
-  * Only enabled when SCAN_ENABLED=1 (dev sets it; prod does not).
+  * API scans only when SCAN_ENABLED=1 (dev sets it; prod does not).
   * One scan at a time (in-process lock + a DB check for running scans).
-  * The project id comes from the stored assessment/cloud account, never from
-    the request, and must match the GCP project-id pattern.
+  * Provider, scope id and owner come from the stored assessment/cloud account,
+    never from the request; the scope id must match the provider's id format.
   * Subprocesses get argument lists (no shell).
   * A fetch where most services are blocked keeps the previous data.
 """
 from __future__ import annotations
 
+import argparse
 import asyncio
 import json
 import os
-import re
 import shutil
 import sys
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+try:
+    from backend import scan_providers
+except ModuleNotFoundError:
+    import scan_providers
+
 BACKEND = Path(__file__).parent
-FETCH_DIR = BACKEND / "mcp_fetch"
-FETCH_FILE = FETCH_DIR / "gcp_fetch_result.json"
 RUN_DIR = BACKEND.parent / ".dev-run"
 
 SCAN_ENABLED = os.getenv("SCAN_ENABLED", "").lower() in ("1", "true", "yes")
-PROJECT_RE = re.compile(r"^[a-z][a-z0-9-]{4,28}[a-z0-9]$")
-MIN_READABLE_SERVICES = 20
 FETCH_TIMEOUT_S = 40 * 60
 STEP_TIMEOUT_S = 10 * 60
 
@@ -60,19 +62,19 @@ async def _run(args: list[str], cwd: Path, log, timeout: int) -> str:
         *args, cwd=str(cwd), env=os.environ.copy(),
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
     )
+    name = Path(args[1]).name if len(args) > 1 else args[0]
     try:
         out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
     except asyncio.TimeoutError:
         proc.kill()
         await proc.wait()
-        raise ScanError(f"{Path(args[1]).name if len(args) > 1 else args[0]} timed out after {timeout // 60} min")
+        raise ScanError(f"{name} timed out after {timeout // 60} min")
     text = out.decode("utf-8", errors="replace")
     log.write(f"\n$ {' '.join(args)}\n{text}")
     log.flush()
     if proc.returncode != 0:
         last = (text.strip().splitlines() or [""])[-1]
-        raise ScanError(f"{Path(args[1]).name if len(args) > 1 else args[0]} failed "
-                        f"(exit {proc.returncode}): {last[:300]}")
+        raise ScanError(f"{name} failed (exit {proc.returncode}): {last[:300]}")
     return text
 
 
@@ -85,37 +87,45 @@ async def mark_interrupted(db):
 
 
 async def resolve_target(db, assessment_id: str) -> dict:
-    """Look up what to scan from stored data (never from the request)."""
+    """Look up provider, scope and owner from stored data (never from the request)."""
     a = await db["assessments"].find_one({"id": assessment_id}, {"_id": 0})
     if not a:
         raise ScanError("Assessment not found.")
-    if (a.get("cloud") or "").lower() != "gcp":
-        raise ScanError("Live scanning is only available for GCP assessments so far.")
+    try:
+        prov = scan_providers.get(a.get("cloud") or "")
+    except KeyError as e:
+        raise ScanError(str(e))
+    if not prov.can_scan:
+        raise ScanError(f"Live scanning is not available for {prov.label} yet (no fetcher registered).")
     acct = await db["cloud_accounts"].find_one({"id": a.get("cloud_account_id")}, {"_id": 0}) or {}
-    project = acct.get("gcp_project") or a.get("cloud_account_id") or ""
-    if not PROJECT_RE.match(project):
-        raise ScanError(f"Stored project id '{project}' is not a valid GCP project id.")
+    scope = acct.get(prov.account_scope_field) or acct.get("account_identifier") or a.get("cloud_account_id") or ""
+    if not prov.valid_scope(scope):
+        raise ScanError(f"Stored {prov.scope_label} id '{scope}' is not a valid {prov.label} {prov.scope_label} id.")
     user_id, org_id = a.get("user_id"), a.get("org_id")
     if not user_id or not org_id:
         raise ScanError("Assessment has no owner (user_id/org_id); cannot load results.")
-    return {"project": project, "user_id": user_id, "org_id": org_id}
+    return {"provider": prov.name, "project": scope, "user_id": user_id, "org_id": org_id}
 
 
-async def start_scan(db, assessment_id: str) -> dict:
-    if not SCAN_ENABLED:
+async def start_scan(db, assessment_id: str, *, background: bool = True, require_enabled: bool = True) -> dict:
+    if require_enabled and not SCAN_ENABLED:
         raise ScanError("Live scanning is disabled on this environment (SCAN_ENABLED is not set).")
     if _lock.locked() or await db["scans"].find_one({"status": {"$in": ["queued", "running"]}}):
         raise ScanError("A scan is already running. Wait for it to finish.")
     target = await resolve_target(db, assessment_id)
     scan = {
         "id": f"SCAN-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:6]}",
-        "assessment_id": assessment_id, "project": target["project"],
+        "assessment_id": assessment_id, "provider": target["provider"], "project": target["project"],
         "status": "queued", "stage": "fetch",
         "stages": {s: "pending" for s in ("fetch", "check", "load")},
         "error": None, "log_tail": "", "started_at": now(), "finished_at": None, "result": None,
     }
     await db["scans"].insert_one(dict(scan))
-    asyncio.create_task(_execute(db, scan["id"], assessment_id, target))
+    job = _execute(db, scan["id"], assessment_id, target)
+    if background:
+        asyncio.create_task(job)
+    else:
+        await job
     return scan
 
 
@@ -124,35 +134,40 @@ async def _set(db, scan_id: str, **fields):
 
 
 async def _execute(db, scan_id: str, assessment_id: str, target: dict):
+    prov = scan_providers.get(target["provider"])
     RUN_DIR.mkdir(parents=True, exist_ok=True)
     log_path = RUN_DIR / f"{scan_id}.log"
     tmp = RUN_DIR / f"{scan_id}-fetch.json"
-    project = target["project"]
+    result_file = BACKEND / f"assessment_result_{prov.name}.json"
+    scope = target["project"]
     async with _lock:
         with open(log_path, "w", encoding="utf-8") as log:
             stage = "fetch"
             try:
                 await _set(db, scan_id, status="running", stage="fetch", **{"stages.fetch": "running"})
-                await _run(["node", "gcp_fetch_all.mjs", "--project", project, "--out", str(tmp)],
-                           FETCH_DIR, log, FETCH_TIMEOUT_S)
+                await _run(prov.fetch_cmd(scope, tmp), scan_providers.FETCH_DIR, log, FETCH_TIMEOUT_S)
                 fetched = json.loads(tmp.read_text(encoding="utf-8"))
-                services = (fetched.get("projects", {}).get(project) or {}).get("services", {})
+                services = ((fetched.get(prov.scope_key) or {}).get(scope) or {}).get("services", {})
                 readable = sum(1 for v in services.values() if v.get("ok"))
-                if readable < MIN_READABLE_SERVICES:
+                if readable < prov.min_readable_services:
                     raise ScanError(
-                        f"Only {readable} services were readable, so the scanner identity lacks access. "
-                        "Previous results were kept.")
-                shutil.move(str(tmp), str(FETCH_FILE))
+                        f"Only {readable} services were readable, so the scanner identity lacks access "
+                        f"to this {prov.scope_label}. Previous results were kept.")
+                shutil.move(str(tmp), str(prov.fetch_file))
                 await _set(db, scan_id, **{"stages.fetch": "done", "fetch_services": readable})
 
                 stage = "check"
                 await _set(db, scan_id, stage="check", **{"stages.check": "running"})
-                await _run([sys.executable, "check_engine.py", "--provider", "gcp"], BACKEND, log, STEP_TIMEOUT_S)
+                await _run([sys.executable, "check_engine.py", "--provider", prov.name,
+                            "--data", str(prov.fetch_file), "--out", str(result_file)],
+                           BACKEND, log, STEP_TIMEOUT_S)
                 await _set(db, scan_id, **{"stages.check": "done"})
 
                 stage = "load"
                 await _set(db, scan_id, stage="load", **{"stages.load": "running"})
-                await _run([sys.executable, "load_assessment_to_db.py",
+                await _run([sys.executable, "load_assessment_to_db.py", "--provider", prov.name,
+                            "--result", str(result_file), "--fetch", str(prov.fetch_file),
+                            "--assessment-id", assessment_id,
                             "--user-id", target["user_id"], "--org-id", target["org_id"], "--real-only"],
                            BACKEND, log, STEP_TIMEOUT_S)
 
@@ -175,3 +190,32 @@ async def _execute(db, scan_id: str, assessment_id: str, target: dict):
         await _set(db, scan_id, log_tail="\n".join(tail))
     except OSError:
         pass
+
+
+def _cli() -> None:
+    """Run one scan synchronously (same pipeline as the API)."""
+    ap = argparse.ArgumentParser(description="Run a live scan for one assessment.")
+    ap.add_argument("--assessment-id", required=True)
+    args = ap.parse_args()
+
+    from motor.motor_asyncio import AsyncIOMotorClient
+    db = AsyncIOMotorClient(os.getenv("MONGO_URI", "mongodb://localhost:27017"))[os.getenv("DB_NAME", "wafr_db")]
+
+    async def go():
+        scan = await start_scan(db, args.assessment_id, background=False, require_enabled=False)
+        doc = await db["scans"].find_one({"id": scan["id"]}, {"_id": 0})
+        print(f"scan {doc['id']}: {doc['status']} ({doc['provider']} {doc['project']})")
+        if doc.get("fetch_services") is not None:
+            print(f"  services readable: {doc['fetch_services']}")
+        if doc["status"] == "done":
+            r = doc["result"]
+            print(f"  score={r['score']} passed={r['passed']} failed={r['failed']} resources={r['resources']}")
+        else:
+            print(f"  error: {doc['error']}\n  log: {RUN_DIR / (doc['id'] + '.log')}")
+            sys.exit(1)
+
+    asyncio.run(go())
+
+
+if __name__ == "__main__":
+    _cli()

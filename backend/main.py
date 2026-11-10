@@ -491,18 +491,37 @@ async def get_resources(
     return resources
 
 @app.get("/api/pillars")
-async def get_pillars(request: Request, cloud: Optional[str] = None):
-    scope = await tenancy.catalog_or_owned(request, db)
+async def get_pillars(request: Request, cloud: Optional[str] = None, assessment_id: Optional[str] = None):
+    """Pillars with best practices and checks.
+
+    With `assessment_id` (or, under auth, the caller's latest assessment for the
+    cloud) the tree and pillar scores are that assessment's real results, so
+    several accounts of the same cloud never mix. Without either, the legacy
+    catalog view is returned.
+    """
+    cloud = (cloud or "").lower()
+    if not assessment_id and tenancy.principal_of(request) is not None and cloud and cloud != "all":
+        latest = await db["assessments"].find(
+            {"org_id": tenancy.principal_of(request).org_id, "cloud": cloud},
+            {"_id": 0, "id": 1}).sort("last_run_at", -1).to_list(1)
+        assessment_id = latest[0]["id"] if latest else None
+
     pillars = await db["pillars"].find({}, {"_id": 0}).sort("display_order", 1).to_list(50)
-    bps = await db["best_practices"].find(scope, {"_id": 0}).to_list(500)
-
-    chk_query = dict(scope)
-    if cloud and cloud.lower() != 'all':
-        chk_query["cloud_provider"] = cloud.lower()
+    if assessment_id:
+        scope = {"assessment_id": assessment_id}
+        chk_query = dict(scope)
     else:
-        chk_query["cloud_provider"] = "aws"
-
+        scope = await tenancy.catalog_or_owned(request, db)
+        chk_query = dict(scope)
+        chk_query["cloud_provider"] = cloud if cloud and cloud != "all" else "aws"
+    bps = await db["best_practices"].find(scope, {"_id": 0}).to_list(500)
     checks = await db["checks"].find(chk_query, {"_id": 0}).to_list(1000)
+
+    if assessment_id:
+        # Real per-pillar scores for this assessment (not a shared global value).
+        asm = await db["assessments"].find_one({"id": assessment_id}, {"_id": 0, "pillar_scores": 1}) or {}
+        for p in pillars:
+            p["score"] = (asm.get("pillar_scores") or {}).get(p["id"], 0)
 
     bp_map = {}
     for bp in bps:

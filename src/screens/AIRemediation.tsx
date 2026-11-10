@@ -162,7 +162,7 @@ export function AIRemediation() {
   useEffect(() => {
     let cancelled = false;
     setLoadingRemediations(true);
-    fetchRemediationsFromDb(activeCloud).then(data => {
+    fetchRemediationsFromDb(activeCloud, activeAssessmentId || selectedAssessmentId).then(data => {
       if (!cancelled && data && Object.keys(data).length > 0) {
         setRemediationsDb(data);
       }
@@ -171,7 +171,7 @@ export function AIRemediation() {
       if (!cancelled) setLoadingRemediations(false);
     });
     return () => { cancelled = true; };
-  }, [activeCloud]);
+  }, [activeCloud, activeAssessmentId, selectedAssessmentId]);
 
   const allChecksList = useMemo(() => {
     return uniqueRemediations(remediationsDb);

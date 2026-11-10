@@ -40,15 +40,11 @@ from collections import Counter
 from pathlib import Path
 
 from checks import get_provider, rollup
+import scan_providers
 
 HERE = Path(__file__).parent
 
 # Default fetch file per provider (override with --data).
-DEFAULT_DATA = {
-    "gcp": HERE / "mcp_fetch" / "gcp_fetch_result.json",
-    "aws": HERE / "mcp_fetch" / "aws_fetch_result.json",
-    "azure": HERE / "mcp_fetch" / "azure_fetch_result.json",
-}
 
 
 def load_catalog(path: Path) -> list[dict]:
@@ -71,11 +67,9 @@ def run(provider_name: str, catalog_path: Path, data_path: Path, out_path: Path,
     catalog = load_catalog(catalog_path)
     fetch = load_fetch(data_path)
 
-    # The fetch file groups resources by scope. GCP uses "projects"; other
-    # clouds may use "accounts"/"subscriptions". Accept any single grouping key
-    # that maps scope-name -> { services: {...} }.
-    scopes = fetch.get("projects") or fetch.get("accounts") \
-        or fetch.get("subscriptions") or fetch.get("scopes") or {}
+    # The fetch file groups resources by scope under the provider's key
+    # (projects / accounts / subscriptions; see scan_providers.py).
+    scopes = fetch.get(scan_providers.get(provider_name).scope_key) or {}
 
     assessment = {
         "provider": provider_name,
@@ -167,7 +161,7 @@ def print_summary(assessment: dict) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--provider", default="gcp", choices=["gcp", "aws", "azure"],
+    ap.add_argument("--provider", default="gcp", choices=sorted(scan_providers.PROVIDERS),
                     help="Which cloud's checks to run.")
     ap.add_argument("--catalog", default=str(HERE / "seed_data" / "control_catalog.csv"))
     ap.add_argument("--data", default=None, help="Fetch result JSON (defaults per provider).")
@@ -175,7 +169,7 @@ def main() -> None:
     ap.add_argument("--control", default=None, help="Run only this control_id.")
     args = ap.parse_args()
 
-    data_path = Path(args.data) if args.data else DEFAULT_DATA[args.provider]
+    data_path = Path(args.data) if args.data else scan_providers.get(args.provider).fetch_file
     out_path = Path(args.out) if args.out else HERE / f"assessment_result_{args.provider}.json"
 
     assessment = run(args.provider, Path(args.catalog), data_path, out_path, args.control)
