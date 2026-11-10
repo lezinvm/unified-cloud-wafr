@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { REAL_DATA_ONLY } from '../config/realData';
+import { RealDataNotice, SCANNER_REASON } from './RealDataNotice';
 import { useApp, Cloud, LIGHT, DARK } from '../context';
 import { CloudChip } from './CloudLogo';
 import { SlackLogo, GChatLogo, JiraLogo } from './IntegrationLogos';
@@ -55,7 +57,16 @@ interface ScheduleAssessmentModalProps {
   onSuccess?: (schedule: ScheduledAssessment, runNow?: boolean) => void;
 }
 
-export function ScheduleAssessmentModal({
+export function ScheduleAssessmentModal(props: ScheduleAssessmentModalProps) {
+  if (REAL_DATA_ONLY) {
+    return props.isOpen
+      ? <RealDataNotice feature="Scheduled assessments" reason={'Schedules re-run the simulated assessment rather than the scanner. ' + SCANNER_REASON} onClose={props.onClose} />
+      : null;
+  }
+  return <ScheduleAssessmentModalInner {...props} />;
+}
+
+function ScheduleAssessmentModalInner({
   isOpen,
   onClose,
   isAssessmentRerun,

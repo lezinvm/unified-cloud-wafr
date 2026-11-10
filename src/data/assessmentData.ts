@@ -27,6 +27,8 @@ export interface AssessmentInfo {
   lowRisks?: number;
   rerunCount?: number;
   isRerun?: boolean;
+  /** Real inventory count from a live scan; absent for other assessments. */
+  resourcesScanned?: number;
 }
 
 export interface AssessmentMilestone {

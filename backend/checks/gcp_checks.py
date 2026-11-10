@@ -386,7 +386,8 @@ def subnet_flow_logs(services: dict) -> list:
     for s in subs:
         # enableFlowLogs is only present when enabled; list output omits when off.
         on = bool(s.get("enableFlowLogs"))
-        out.append({"resource": s.get("name", "?"),
+        # region/name: subnet names repeat across regions (e.g. "default").
+        out.append({"resource": f"{_name(s.get('region', ''))}/{s.get('name', '?')}",
                     "status": "PASS" if on else "FAIL",
                     "evidence": f"enableFlowLogs={on}."})
     return out
@@ -457,7 +458,7 @@ def private_google_access(services: dict) -> list:
                    lambda s: bool(s.get("privateIpGoogleAccess")),
                    "Private Google Access on.", "Private Google Access off.") \
         if False else [  # evaluate only private subnets
-        {"resource": s.get("name", "?"),
+        {"resource": f"{_name(s.get('region', ''))}/{s.get('name', '?')}",
          "status": "PASS" if s.get("privateIpGoogleAccess") else "FAIL",
          "evidence": f"privateIpGoogleAccess={bool(s.get('privateIpGoogleAccess'))}."}
         for s in subs]

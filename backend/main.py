@@ -30,6 +30,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Real-data-only mode (dev): disable endpoints that fabricate or guess results.
+REAL_DATA_ONLY = os.getenv("REAL_DATA_ONLY", "").lower() in ("1", "true", "yes")
+REAL_DATA_ONLY_MSG = ("Disabled in real-data-only mode: results come only from the scanner "
+                      "(fetch -> check_engine.py -> load_assessment_to_db.py).")
+
 # --- KEYCLOAK AUTHENTICATION & SYNC HELPERS ---
 KEYCLOAK_URL = os.getenv("KEYCLOAK_URL", "http://localhost:8080").rstrip("/")
 KEYCLOAK_REALM = os.getenv("KEYCLOAK_REALM", "lens-realm")
@@ -338,7 +343,7 @@ async def get_findings(
     # assessment that actually exists, and ONLY using that assessment's real
     # cloud. Previously this fabricated findings for non-existent assessment ids
     # and fell back to AWS remediations, mislabeling GCP/Azure assessments.
-    if assessment_id and not findings:
+    if assessment_id and not findings and not REAL_DATA_ONLY:
         assessment = await db["assessments"].find_one({"id": assessment_id})
         if not assessment:
             # Do not fabricate findings for an unknown assessment.
@@ -547,6 +552,9 @@ async def delete_assessment(assessment_id: str):
 
 @app.post("/api/assessments/{assessment_id}/rerun")
 async def rerun_assessment(assessment_id: str):
+    if REAL_DATA_ONLY:
+        # This endpoint recomputes scores with heuristics rather than a scan.
+        raise HTTPException(status_code=409, detail=REAL_DATA_ONLY_MSG)
     assessment = await db["assessments"].find_one({"id": assessment_id})
     if not assessment:
         raise HTTPException(status_code=404, detail="Assessment not found")
@@ -631,6 +639,9 @@ async def rerun_assessment(assessment_id: str):
 
 @app.post("/api/checks/rerun")
 async def rerun_check(payload: Dict[str, Any]):
+    if REAL_DATA_ONLY:
+        # Marks findings as passing without re-checking the cloud.
+        raise HTTPException(status_code=409, detail=REAL_DATA_ONLY_MSG)
     check_id = payload.get("check_id")
     assessment_id = payload.get("assessment_id") or "A-001"
     resource_arn = payload.get("resource_arn")

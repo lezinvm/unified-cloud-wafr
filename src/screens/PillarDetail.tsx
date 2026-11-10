@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { demoOr } from '../config/realData';
 import { useApp, LIGHT, DARK, Tokens } from '../context';
 import { AppLayout } from '../components/AppLayout';
 import { SeverityPill } from '../components/FindingUI';
@@ -283,7 +284,7 @@ export function PillarDetail() {
                   </span>
                 </div>
                 <div className="text-xs mt-1" style={{ color: T.textSub }}>
-                  Detailed Best Practices & Technical Checks breakdown for <span className="font-medium" style={{ color: T.text }}>acme-production</span>
+                  Detailed Best Practices & Technical Checks breakdown for <span className="font-medium" style={{ color: T.text }}>{currentAssessment?.accountName || demoOr('acme-production', '')}</span>
                 </div>
               </div>
             </div>

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { REAL_DATA_ONLY, demoOr } from '../config/realData';
 import { useApp } from '../context';
 import { AppLayout } from '../components/AppLayout';
 import { api } from '../services/apiClient';
@@ -215,8 +216,8 @@ function EditCloudConfigModal({
         cloud: 'AWS',
         method: 'IAM Role / Cross-Account',
         authType: 'role',
-        roleArn: prev.roleArn || 'arn:aws:iam::124890123456:role/CloudifyOpsWAFRReadOnlyRole',
-        externalId: prev.externalId || 'cfops-wafr-9941',
+        roleArn: prev.roleArn || demoOr('arn:aws:iam::124890123456:role/CloudifyOpsWAFRReadOnlyRole', ''),
+        externalId: prev.externalId || demoOr('cfops-wafr-9941', ''),
       }));
     } else if (c === 'Azure') {
       setFormData(prev => ({
@@ -224,8 +225,8 @@ function EditCloudConfigModal({
         cloud: 'Azure',
         method: 'Service Principal',
         authType: 'sp',
-        tenantId: prev.tenantId || '72f988bf-86f1-41af-91ab-2d7cd011db47',
-        clientId: prev.clientId || 'e892c901-44bb-4e31-8902-124890123456',
+        tenantId: prev.tenantId || demoOr('72f988bf-86f1-41af-91ab-2d7cd011db47', ''),
+        clientId: prev.clientId || demoOr('e892c901-44bb-4e31-8902-124890123456', ''),
       }));
     } else {
       setFormData(prev => ({
@@ -233,13 +234,15 @@ function EditCloudConfigModal({
         cloud: 'GCP',
         method: 'Service Account',
         authType: 'sa',
-        gcpProject: prev.gcpProject || 'acme-gcp-prod-9941',
-        saEmail: prev.saEmail || 'wafr-scanner@acme-gcp-prod.iam.gserviceaccount.com',
+        gcpProject: prev.gcpProject || demoOr('acme-gcp-prod-9941', ''),
+        saEmail: prev.saEmail || demoOr('wafr-scanner@acme-gcp-prod.iam.gserviceaccount.com', ''),
       }));
     }
   };
 
   const handleTestConnection = () => {
+    // No real connection test exists yet; the sample always reports success.
+    if (REAL_DATA_ONLY) return;
     setTestState('testing');
     setTimeout(() => {
       setTestState('success');
@@ -697,14 +700,17 @@ function CloudConfigPanel({ T, isDark }: { T: Tokens; isDark: boolean }) {
             method: a.auth_type === 'role' ? 'IAM Role / Cross-Account' : (a.auth_type === 'sp' ? 'Service Principal' : 'Service Account'),
             authType: a.auth_type || 'role',
             status: 'active',
-            lastSync: a.last_connected_at ? 'Recently' : 'Just now',
+            lastSync: REAL_DATA_ONLY
+              ? ((a.updated_at || a.last_connected_at || '').slice(0, 16).replace('T', ' ') || 'Never')
+              : (a.last_connected_at ? 'Recently' : 'Just now'),
             roleArn: a.role_arn,
             externalId: a.external_id,
             tenantId: a.tenant_id,
             clientId: a.client_id,
             gcpProject: a.gcp_project,
             saEmail: a.sa_email,
-            autoSync: true,
+            // No sync scheduler exists; real-data-only builds don't claim one.
+            autoSync: !REAL_DATA_ONLY,
             syncIntervalHours: 6,
           }));
           setConfigs(mapped);
@@ -740,8 +746,8 @@ function CloudConfigPanel({ T, isDark }: { T: Tokens; isDark: boolean }) {
       authType: 'role',
       status: 'active',
       lastSync: 'Never',
-      roleArn: 'arn:aws:iam::124890123456:role/CloudifyOpsWAFRReadOnlyRole',
-      externalId: `cfops-wafr-${Math.floor(Math.random() * 8999 + 1000)}`,
+      roleArn: demoOr('arn:aws:iam::124890123456:role/CloudifyOpsWAFRReadOnlyRole', ''),
+      externalId: demoOr(`cfops-wafr-${Math.floor(Math.random() * 8999 + 1000)}`, ''),
       autoSync: true,
       syncIntervalHours: 6,
     });
@@ -785,6 +791,8 @@ function CloudConfigPanel({ T, isDark }: { T: Tokens; isDark: boolean }) {
   };
 
   const handleSyncNow = (id: string, name: string) => {
+    // Sync only flips the label to 'Just now'; nothing is fetched.
+    if (REAL_DATA_ONLY) { showToast('Sync is not implemented. Run the scanner to refresh data.'); return; }
     setSyncingId(id);
     setTimeout(() => {
       setConfigs(prev =>
@@ -900,12 +908,12 @@ function CloudConfigPanel({ T, isDark }: { T: Tokens; isDark: boolean }) {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <div className="font-semibold text-sm truncate" style={{ color: T.text }}>{c.name}</div>
-                  <span
+                  {c.autoSync && (<span
                     className="text-[10px] font-mono px-2 py-0.5 rounded-full"
                     style={{ backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : '#F1F5F9', color: T.textSub }}
                   >
                     Sync: {c.syncIntervalHours}h
-                  </span>
+                  </span>)}
                 </div>
                 <div className="text-[11px] mt-0.5 truncate" style={{ color: T.textSub }}>
                   {c.method} · Last synced: <span className="font-medium">{c.lastSync}</span>
@@ -1038,6 +1046,7 @@ function RepoConfigPanel({ T, isDark }: { T: Tokens; isDark: boolean }) {
   const [savedSuccess, setSavedSuccess] = useState(false);
 
   const handleTest = () => {
+    if (REAL_DATA_ONLY) return;
     setTestState('testing');
     setTimeout(() => {
       setTestState('success');

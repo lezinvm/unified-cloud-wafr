@@ -175,10 +175,13 @@ export function Dashboard() {
     (acc, a) => acc + (Number(a.failedChecks) || Number(a.highRisks) || 0),
     0
   );
-  // Real "Resources scanned" = distinct resources across the user's
-  // assessments if available, else total checks evaluated. No invented numbers.
+  // "Resources scanned" = real inventory count where a live scan recorded it,
+  // otherwise total checks evaluated (older assessments have no inventory count).
   const resourcesScannedText = String(
-    activeAssessments.reduce((acc, a) => acc + (Number(a.totalChecks) || 0), 0)
+    activeAssessments.reduce(
+      (acc, a) => acc + (a.resourcesScanned != null ? a.resourcesScanned : (Number(a.totalChecks) || 0)),
+      0
+    )
   );
 
   const dynamicCloudStats = (['aws', 'azure', 'gcp'] as CloudId[]).map(cId => {

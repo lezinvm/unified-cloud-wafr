@@ -70,7 +70,9 @@ import {
   getFallbackRemediations,
   fetchRemediationsFromDb,
   REMEDIATION_DATABASE,
+  EMPTY_REMEDIATION,
 } from '../data/remediationData';
+import { demoOr } from '../config/realData';
 export { REMEDIATION_DATABASE };
 
 export function AIRemediation() {
@@ -124,7 +126,7 @@ export function AIRemediation() {
     ignored: false,
     markedAsDone: false,
     hasExistingRepo: repoConfig.connected,
-    repoName: repoConfig.repoName || 'acme-corp/terraform-aws-infrastructure',
+    repoName: repoConfig.repoName || demoOr('acme-corp/terraform-aws-infrastructure', ''),
     branch: repoConfig.branch || 'main',
     pat: repoConfig.pat || '',
   });
@@ -134,7 +136,7 @@ export function AIRemediation() {
   const [gitModalStep, setGitModalStep] = useState<'ask_repo' | 'pat_form' | 'validating' | 'connected_success'>('ask_repo');
   const [pendingAssessmentId, setPendingAssessmentId] = useState<string | null>(null);
   const [patInput, setPatInput] = useState(repoConfig.pat || '');
-  const [repoInput, setRepoInput] = useState(repoConfig.repoName || 'acme-corp/terraform-aws-infrastructure');
+  const [repoInput, setRepoInput] = useState(repoConfig.repoName || demoOr('acme-corp/terraform-aws-infrastructure', ''));
   const [branchInput, setBranchInput] = useState(repoConfig.branch || 'main');
   const [showPat, setShowPat] = useState(false);
   const [patError, setPatError] = useState('');
@@ -200,7 +202,7 @@ export function AIRemediation() {
   const [assessmentCloudFilter, setAssessmentCloudFilter] = useState<'all' | 'aws' | 'azure' | 'gcp'>('all');
 
   // Check detail state
-  const checkData = remediationsDb[activeCheckId] || allChecksList[0] || REMEDIATION_DATABASE['REL-019'];
+  const checkData = remediationsDb[activeCheckId] || allChecksList[0] || REMEDIATION_DATABASE['REL-019'] || EMPTY_REMEDIATION;
   const [selectedResourceIndex, setSelectedResourceIndex] = useState(0);
   const [fixModalOpen, setFixModalOpen] = useState(false);
   const [solvedResourceArns, setSolvedResourceArns] = useState<Record<string, boolean>>({});
@@ -248,7 +250,7 @@ export function AIRemediation() {
     setGitConfig(prev => ({
       ...prev,
       connected: repoConfig.connected,
-      repoName: repoConfig.repoName || 'acme-corp/terraform-aws-infrastructure',
+      repoName: repoConfig.repoName || demoOr('acme-corp/terraform-aws-infrastructure', ''),
       branch: repoConfig.branch || 'main',
       pat: repoConfig.pat || '',
     }));
@@ -266,7 +268,7 @@ export function AIRemediation() {
     setTimeout(() => {
       const updated = {
         provider: 'github' as const,
-        repoName: repoInput.trim() || 'acme-corp/terraform-aws-infrastructure',
+        repoName: repoInput.trim() || demoOr('acme-corp/terraform-aws-infrastructure', ''),
         branch: branchInput.trim() || 'main',
         pat: patInput.trim(),
         connected: true,
@@ -294,7 +296,7 @@ export function AIRemediation() {
       connected: true,
       markedAsDone: true,
       ignored: false,
-      repoName: repoInput.trim() || 'acme-corp/terraform-aws-infrastructure',
+      repoName: repoInput.trim() || demoOr('acme-corp/terraform-aws-infrastructure', ''),
       branch: branchInput.trim() || 'main',
     }));
     setIsGitModalOpen(false);

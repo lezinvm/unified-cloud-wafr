@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { REAL_DATA_ONLY } from '../config/realData';
 import { useApp, Screen } from '../context';
 
 interface ChatMessage {
@@ -513,7 +514,13 @@ interface Props {
   onClose: () => void;
 }
 
-export function AssessmentChat({ isOpen, onClose }: Props) {
+export function AssessmentChat(props: Props) {
+  // Canned answers reference sample accounts; hidden in real-data-only mode.
+  if (REAL_DATA_ONLY) return null;
+  return <AssessmentChatInner {...props} />;
+}
+
+function AssessmentChatInner({ isOpen, onClose }: Props) {
   const { screen, theme, currentAssessment, go } = useApp();
   const isDark = theme === 'dark';
 
@@ -854,6 +861,7 @@ export function AssessmentChat({ isOpen, onClose }: Props) {
 }
 
 export function ChatLauncher({ onClick }: { onClick: () => void }) {
+  if (REAL_DATA_ONLY) return null;
   return (
     <button
       type="button"

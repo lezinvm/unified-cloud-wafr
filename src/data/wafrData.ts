@@ -1,4 +1,5 @@
 import { Severity } from '../components/FindingUI';
+import { REAL_DATA_ONLY } from '../config/realData';
 
 export interface CheckItem {
   id: string;
@@ -26,7 +27,7 @@ export interface PillarData {
   bestPractices: BestPractice[];
 }
 
-export const PILLARS_DATA: PillarData[] = [
+const SAMPLE_PILLARS_DATA: PillarData[] = [
   {
     id: 'reliability',
     label: 'Reliability',
@@ -535,3 +536,9 @@ export const PILLARS_DATA: PillarData[] = [
     ],
   },
 ];
+
+// Real-data-only builds keep the pillar definitions (ids, labels, colours) but
+// drop the sample scores, best practices and checks.
+export const PILLARS_DATA: PillarData[] = REAL_DATA_ONLY
+  ? SAMPLE_PILLARS_DATA.map(p => ({ ...p, score: 0, bestPractices: [] }))
+  : SAMPLE_PILLARS_DATA;

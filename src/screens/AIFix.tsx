@@ -5,6 +5,7 @@ import { SeverityPill } from '../components/FindingUI';
 import { PILLARS_DATA } from '../data/wafrData';
 import { REMEDIATION_DATABASE, parseResourceInfo } from './AIRemediation';
 import {
+  EMPTY_REMEDIATION,
   fetchRemediationsFromDb,
   getFallbackRemediations,
   type CheckRemediationData,
@@ -91,7 +92,7 @@ export function AIFix() {
     ? remediationFindingId
     : (Object.keys(remediationsDb)[0] || 'REL-019');
 
-  const checkData = remediationsDb[targetCheckId] || Object.values(remediationsDb)[0] || REMEDIATION_DATABASE['REL-019'];
+  const checkData = remediationsDb[targetCheckId] || Object.values(remediationsDb)[0] || REMEDIATION_DATABASE['REL-019'] || EMPTY_REMEDIATION;
   const assessmentKeyForSolved = selectedAssessmentId || currentAssessment?.id || 'default';
   const isSolved = Boolean(solvedCheckIds[`${assessmentKeyForSolved}::${targetCheckId}`]);
 

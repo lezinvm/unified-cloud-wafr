@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { REAL_DATA_ONLY, demoOr } from '../config/realData';
 import { CloudChip, CloudId } from './CloudLogo';
 import { LIGHT, DARK } from '../context';
 
@@ -33,23 +34,23 @@ export function AccountCredentialsModal({
   const [authType, setAuthType] = useState<'role' | 'keys'>('role');
   
   // AWS Fields
-  const [roleArn, setRoleArn] = useState('arn:aws:iam::124890123456:role/CloudifyOpsWAFRReadOnlyRole');
-  const [externalId] = useState('cfops-wafr-tenant-9941');
+  const [roleArn, setRoleArn] = useState(demoOr('arn:aws:iam::124890123456:role/CloudifyOpsWAFRReadOnlyRole', ''));
+  const [externalId] = useState(demoOr('cfops-wafr-tenant-9941', ''));
   const [accessKey, setAccessKey] = useState('');
   const [secretKey, setSecretKey] = useState('');
 
   // Azure Fields
-  const [tenantId, setTenantId] = useState('tenant-9901-4412-2291');
-  const [clientId, setClientId] = useState('client-5541-8890-1122');
+  const [tenantId, setTenantId] = useState(demoOr('tenant-9901-4412-2291', ''));
+  const [clientId, setClientId] = useState(demoOr('client-5541-8890-1122', ''));
   const [clientSecret, setClientSecret] = useState('');
 
   // GCP Fields
-  const [gcpProject, setGcpProject] = useState('proj-gcp-prod-9941');
-  const [saEmail, setSaEmail] = useState('wafr-scanner@proj-gcp-prod-9941.iam.gserviceaccount.com');
+  const [gcpProject, setGcpProject] = useState(demoOr('proj-gcp-prod-9941', ''));
+  const [saEmail, setSaEmail] = useState(demoOr('wafr-scanner@proj-gcp-prod-9941.iam.gserviceaccount.com', ''));
 
   // Scope & Account Details (No Region here - decided at assessment time)
-  const [accountName, setAccountName] = useState('acme-production');
-  const [accountId, setAccountId] = useState('124890123456');
+  const [accountName, setAccountName] = useState(demoOr('acme-production', ''));
+  const [accountId, setAccountId] = useState(demoOr('124890123456', ''));
 
   // Test state
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
@@ -58,14 +59,14 @@ export function AccountCredentialsModal({
     setSelectedCloud(c);
     setTestStatus('idle');
     if (c === 'aws') {
-      setAccountName('acme-aws-production');
-      setAccountId('124890123456');
+      setAccountName(demoOr('acme-aws-production', ''));
+      setAccountId(demoOr('124890123456', ''));
     } else if (c === 'azure') {
-      setAccountName('AcmeCorp-AzureSub');
-      setAccountId('sub-4891-2394-8172');
+      setAccountName(demoOr('AcmeCorp-AzureSub', ''));
+      setAccountId(demoOr('sub-4891-2394-8172', ''));
     } else {
-      setAccountName('acme-gcp-prod');
-      setAccountId('proj-gcp-prod-9941');
+      setAccountName(demoOr('acme-gcp-prod', ''));
+      setAccountId(demoOr('proj-gcp-prod-9941', ''));
     }
   };
 
@@ -76,6 +77,8 @@ export function AccountCredentialsModal({
   }, [initialCloud, isOpen]);
 
   const handleTestConnection = () => {
+    // No real connection test exists yet; the sample always reports success.
+    if (REAL_DATA_ONLY) return;
     setTestStatus('testing');
     setTimeout(() => {
       setTestStatus('success');

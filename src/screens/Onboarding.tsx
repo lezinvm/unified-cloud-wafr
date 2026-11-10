@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { REAL_DATA_ONLY, demoOr } from '../config/realData';
 import { useApp, Cloud, LensType, ConfiguredAccount } from '../context';
 import { AwsWordmark, AzureMark, GcpMark } from '../components/CloudLogo';
 import { QuestionnaireItem } from '../data/questionnaireData';
@@ -27,7 +28,7 @@ export function Onboarding() {
   const [accountId, setAccountId] = useState('');
   // AWS Fields
   const [roleArn, setRoleArn] = useState('');
-  const [externalId] = useState('cfops-wafr-tenant-9941');
+  const [externalId] = useState(demoOr('cfops-wafr-tenant-9941', ''));
   const [accessKey, setAccessKey] = useState('');
   const [secretKey, setSecretKey] = useState('');
   const [copiedId, setCopiedId] = useState(false);
@@ -49,6 +50,8 @@ export function Onboarding() {
   };
 
   const handleTestConnection = () => {
+    // No real connection test exists yet; the sample always reports success.
+    if (REAL_DATA_ONLY) return;
     setTestStatus('testing');
     setTimeout(() => {
       setTestStatus('success');

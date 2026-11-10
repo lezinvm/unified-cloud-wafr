@@ -1,5 +1,6 @@
 import { api } from '../services/apiClient';
 import type { Severity } from '../components/FindingUI';
+import { REAL_DATA_ONLY } from '../config/realData';
 
 export interface ManualStepItem {
   step: number;
@@ -1070,7 +1071,27 @@ export const CLOUD_REMEDIATIONS_MAP: Record<string, Record<string, CheckRemediat
   gcp: GCP_REMEDIATIONS,
 };
 
+/** Neutral placeholder used when there is no remediation data at all. */
+export const EMPTY_REMEDIATION: CheckRemediationData = {
+  id: '',
+  pillar: '',
+  pillarId: '',
+  severity: 'low',
+  title: 'No failing checks to remediate',
+  effort: '',
+  estTime: '',
+  risk: '',
+  description: 'There are no remediation items for this assessment.',
+  rationale: '',
+  resources: [],
+  manualSteps: [],
+  cli: { command: '', explanation: '' },
+  iac: { tf: '', cf: '' },
+};
+
 export function getFallbackRemediations(cloud: string): Record<string, CheckRemediationData> {
+  // Real-data-only builds never fall back to the hardcoded sample remediations.
+  if (REAL_DATA_ONLY) return {};
   const norm = (cloud || 'aws').toLowerCase();
   return CLOUD_REMEDIATIONS_MAP[norm] || AWS_REMEDIATIONS;
 }
@@ -1094,5 +1115,5 @@ export async function fetchRemediationsFromDb(cloud: string): Promise<Record<str
   return getFallbackRemediations(norm);
 }
 
-// Backwards-compatibility default database
-export const REMEDIATION_DATABASE = AWS_REMEDIATIONS;
+// Backwards-compatibility default database (empty in real-data-only builds)
+export const REMEDIATION_DATABASE: Record<string, CheckRemediationData> = REAL_DATA_ONLY ? {} : AWS_REMEDIATIONS;

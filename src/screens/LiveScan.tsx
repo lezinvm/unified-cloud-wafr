@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useApp } from '../context';
 import { AppLayout } from '../components/AppLayout';
+import { REAL_DATA_ONLY } from '../config/realData';
+import { RealDataNotice, SCANNER_REASON } from '../components/RealDataNotice';
 
 const LIGHT = { bg:'#F8FAFC', card:'#FFFFFF', border:'#E2E8F0', text:'#0F172A', textSub:'#64748B', primary:'#2563EB', primaryBg:'#EFF6FF', success:'#059669', successBg:'#ECFDF5', successBar:'#10B981', error:'#E11D48', errorBg:'#FFF1F2', errorBar:'#FB7185', warning:'#D97706', warningBg:'#FFFBEB', warningBar:'#FBBF24', muted:'#94A3B8', progress:'#10B981', activeNavBg:'#EFF6FF', shadow:'0 1px 3px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.04)', shadowMd:'0 4px 6px -1px rgba(0,0,0,.07),0 2px 4px -2px rgba(0,0,0,.05)' };
 const DARK  = { bg:'#0B1220', card:'#111B2E', border:'#1E293B', text:'#F1F5F9', textSub:'#94A3B8', primary:'#3B82F6', primaryBg:'rgba(59,130,246,.15)', success:'#52B788', successBg:'rgba(82,183,136,.12)', successBar:'rgba(82,183,136,.75)', error:'#FB7185', errorBg:'rgba(251,113,133,.12)', errorBar:'rgba(251,113,133,.65)', warning:'#FBBF24', warningBg:'rgba(251,191,36,.12)', warningBar:'rgba(251,191,36,.65)', muted:'#94A3B8', progress:'#52B788', activeNavBg:'rgba(59,130,246,.12)', shadow:'0 1px 3px rgba(0,0,0,.3),0 1px 2px rgba(0,0,0,.2)', shadowMd:'0 4px 6px rgba(0,0,0,.35),0 2px 4px rgba(0,0,0,.25)' };
@@ -13,6 +15,12 @@ const STAGES = [
 ];
 
 export function LiveScan() {
+  // Build-time constant, so this early return never changes hook order.
+  if (REAL_DATA_ONLY) return <RealDataNotice feature="Live scan" reason={SCANNER_REASON} />;
+  return <LiveScanInner />;
+}
+
+function LiveScanInner() {
   const { go, theme, currentAssessment, completeAssessment } = useApp();
   const isDark = theme === 'dark';
   const T = isDark ? DARK : LIGHT;

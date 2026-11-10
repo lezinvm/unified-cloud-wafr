@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { REAL_DATA_ONLY } from '../config/realData';
+import { RealDataNotice, SCANNER_REASON } from '../components/RealDataNotice';
 import { useApp } from '../context';
 import { AppLayout } from '../components/AppLayout';
 
@@ -93,6 +95,13 @@ const VPC_BOUNDS = {
 };
 
 export function ArchitectureDiagram() {
+  if (REAL_DATA_ONLY) {
+    return <RealDataNotice feature="Architecture diagram" reason={'The diagram is a fixed sample topology, not built from your resources. ' + SCANNER_REASON} />;
+  }
+  return <ArchitectureDiagramInner />;
+}
+
+function ArchitectureDiagramInner() {
   const { go, theme } = useApp();
   const isDark = theme === 'dark';
   const T = isDark ? DARK : LIGHT;

@@ -1,235 +1,80 @@
 """
-Load real check-engine results into MongoDB so the frontend shows actual
-findings instead of seeded demo data.
+Load real check-engine results into MongoDB.
 
-Maps one `assessment_result_<provider>.json` (produced by check_engine.py) into
-the existing `assessments`, `findings`, and `cloud_accounts` collections,
-following the exact document shapes used by seed_master.py / the API.
+Maps one `assessment_result_<provider>.json` (from check_engine.py) plus the raw
+fetch JSON into the collections the API serves to the frontend:
 
-It is idempotent: every doc is upserted by its string `id`, so re-running after
-a fresh scan just refreshes the same assessment + findings.
+  always written (scoped to this assessment, idempotent replace):
+    cloud_accounts      the scanned scope (project/account/subscription)
+    assessments         scores and counts computed from PASS/FAIL controls
+    findings            one per PASS/FAIL control, with real evidence + resources
+    resource_inventory  the real resources from the fetch JSON
+    milestones          a baseline milestone for this scan
+    remediations        one per FAILING control: real failing resources +
+                        authored fix guidance (remediation_guidance.py,
+                        tagged guidance_source="authored")
+
+  only with --real-only (dev / real-data-only environments):
+    checks, best_practices, pillar scores are REPLACED for this cloud with the
+    real WAFR structure (pillar -> domain best practice -> control check), so
+    the report's pillar/best-practice/check views show real results.
+    Remediations for this cloud that this scan didn't produce are removed.
 
 Usage:
-    # 1. fetch -> 2. assess -> 3. load
-    python check_engine.py --provider gcp --data mcp_fetch/gcp_fetch_result.json
+    python check_engine.py --provider gcp
     python load_assessment_to_db.py --result assessment_result_gcp.json \
-        --user-id usr-09 --org-id org_01
-
-Options:
-    --result     path to the engine output JSON (default assessment_result_gcp.json)
-    --user-id    owner user_id for isolation (default usr-09, the demo user)
-    --org-id     owner org_id for isolation (default org_01)
-    --dry-run    print what would be written without touching the DB
+        --user-id usr-09 --org-id org_01 [--real-only] [--dry-run]
 """
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import os
+from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
 from pymongo import MongoClient
+
+from remediation_guidance import GUIDANCE, render_cli
 
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
 DB_NAME = os.getenv("DB_NAME", "wafr_db")
 HERE = Path(__file__).parent
 NOW = datetime.now(timezone.utc).isoformat()
 
-# Engine pillar name (Title-case) -> UI pillar slug + display name.
+# Catalog pillar label -> (UI pillar id, display label). The UI's pillar ids
+# come from the `pillars` collection (reliability, security, cost,
+# operational-excellence, performance-efficiency). The UI has no Sustainability
+# pillar, so those controls are shown under Cost Optimization.
 PILLAR_MAP = {
     "security": ("security", "Security"),
     "reliability": ("reliability", "Reliability"),
+    "cost optimization": ("cost", "Cost Optimization"),
     "cost": ("cost", "Cost Optimization"),
-    "performance": ("performance", "Performance Efficiency"),
-    "operations": ("operations", "Operational Excellence"),
-    "operational excellence": ("operations", "Operational Excellence"),
-    "sustainability": ("operations", "Operational Excellence"),
+    "sustainability": ("cost", "Cost Optimization"),
+    "operational excellence": ("operational-excellence", "Operational Excellence"),
+    "operations": ("operational-excellence", "Operational Excellence"),
+    "performance efficiency": ("performance-efficiency", "Performance Efficiency"),
+    "performance": ("performance-efficiency", "Performance Efficiency"),
 }
-PILLAR_SLUGS = ["security", "reliability", "cost", "operations", "performance"]
+PILLAR_IDS = ["reliability", "security", "cost", "operational-excellence", "performance-efficiency"]
+# Older code paths read short keys; write both so every reader gets real values.
+PILLAR_ALIASES = {"operational-excellence": "operations", "performance-efficiency": "performance"}
 
-# Engine severity (UPPERCASE) -> finding severity (lowercase; schema has only
-# high/medium/low, so CRITICAL folds into high) + a risk label.
+# Finding severity is lowercase high/medium/low (CRITICAL folds into high, as
+# the findings API expects). Checks/remediations keep 'critical'.
 SEV_MAP = {
-    "CRITICAL": ("high", "Critical Risk"),
-    "HIGH": ("high", "High Risk"),
-    "MEDIUM": ("medium", "Medium Risk"),
-    "LOW": ("low", "Low Risk"),
+    "CRITICAL": ("high", "critical", "Critical Risk"),
+    "HIGH": ("high", "high", "High Risk"),
+    "MEDIUM": ("medium", "medium", "Medium Risk"),
+    "LOW": ("low", "low", "Low Risk"),
 }
 
-# Which engine verdicts become real findings. UNKNOWN / NOT_APPLICABLE /
-# NOT_IMPLEMENTED are NOT pass/fail facts, so they are not written as findings
-# (they'd distort scores and the findings schema has no such state). They are
-# still counted for transparency in the assessment doc.
 FINDING_VERDICTS = {"FAIL", "PASS"}
 
-
-def pillar_of(control: dict) -> tuple[str, str]:
-    raw = (control.get("pillar") or "security").strip().lower()
-    return PILLAR_MAP.get(raw, ("security", "Security"))
-
-
-def severity_of(control: dict) -> tuple[str, str]:
-    return SEV_MAP.get((control.get("severity") or "MEDIUM").upper(), ("medium", "Medium Risk"))
-
-
-def ensure_cloud_account(db, provider: str, scope: str, user_id: str, org_id: str, dry: bool):
-    """Make sure a cloud_account exists for this scope so /api/assessments
-    isolation+reconciliation will surface the assessment."""
-    existing = db["cloud_accounts"].find_one({"id": scope})
-    if existing:
-        return existing["id"]
-    doc = {
-        "id": scope,
-        "cloud": provider,
-        "account_name": scope,
-        "account_identifier": scope,
-        "auth_type": "service-account" if provider == "gcp" else "role",
-        "default_region": "us-central1" if provider == "gcp" else "us-east-1",
-        "status": "connected",
-        "is_active": True,
-        "is_global": False,
-        "user_id": user_id,
-        "org_id": org_id,
-        "last_connected_at": NOW,
-        "created_at": NOW,
-    }
-    if provider == "gcp":
-        doc["gcp_project"] = scope
-    if not dry:
-        db["cloud_accounts"].update_one({"id": scope}, {"$set": doc}, upsert=True)
-    print(f"  [cloud_account] ensured '{scope}' ({provider})")
-    return scope
-
-
-def build_assessment(provider: str, scope: str, controls: list[dict],
-                     user_id: str, org_id: str, fetched_at: str | None) -> tuple[dict, list[dict]]:
-    """Produce one assessment doc + its findings docs from the per-scope results."""
-    asm_id = f"A-{provider.upper()}-{scope}"
-    findings: list[dict] = []
-
-    # Per-pillar tallies for pillar_scores / pillar_high_risks.
-    pillar_total = {s: 0 for s in PILLAR_SLUGS}
-    pillar_pass = {s: 0 for s in PILLAR_SLUGS}
-    pillar_high = {s: 0 for s in PILLAR_SLUGS}
-
-    counts = {"FAIL": 0, "PASS": 0, "UNKNOWN": 0, "NOT_APPLICABLE": 0, "NOT_IMPLEMENTED": 0}
-    high = medium = low = 0
-
-    for ctrl in controls:
-        res = (ctrl.get("results") or {}).get(scope)
-        if not res:
-            continue
-        verdict = res.get("verdict", "NOT_IMPLEMENTED")
-        counts[verdict] = counts.get(verdict, 0) + 1
-
-        pslug, pname = pillar_of(ctrl)
-        sev, risk = severity_of(ctrl)
-
-        # Only PASS/FAIL controls count toward score + become findings.
-        if verdict in FINDING_VERDICTS:
-            pillar_total[pslug] += 1
-            if verdict == "PASS":
-                pillar_pass[pslug] += 1
-
-        if verdict == "FAIL":
-            if sev == "high":
-                high += 1
-                pillar_high[pslug] += 1
-            elif sev == "medium":
-                medium += 1
-            else:
-                low += 1
-
-            failing = [r for r in res.get("resources", []) if r.get("status") == "FAIL"]
-            evidence = "; ".join(r.get("evidence", "") for r in failing[:6]) or ctrl.get("title", "")
-            resources = [r.get("resource") for r in failing if r.get("resource")]
-        elif verdict == "PASS":
-            evidence = "Compliant per live scan."
-            resources = [r.get("resource") for r in res.get("resources", []) if r.get("resource")]
-        else:
-            # UNKNOWN / NOT_APPLICABLE / NOT_IMPLEMENTED -> not a finding.
-            continue
-
-        findings.append({
-            "id": f"FND-{asm_id}-{ctrl['control_id']}",
-            "assessment_id": asm_id,
-            "check_id": ctrl["control_id"],
-            "cloud": provider,
-            "pillar_id": pslug,
-            "pillar": pname,
-            "severity": sev,
-            "title": ctrl.get("title", ctrl["control_id"]),
-            "description": evidence,
-            "status": "fail" if verdict == "FAIL" else "pass",
-            "effort": "Medium Effort",
-            "risk": risk,
-            "resources": resources,
-            # framework mappings carried through for compliance scoring later
-            "cis_gcp": ctrl.get("cis_gcp"),
-            "cis_aws": ctrl.get("cis_aws"),
-            "cis_azure": ctrl.get("cis_azure"),
-            "soc2_ids": ctrl.get("soc2_ids"),
-            "iso27001_ids": ctrl.get("iso27001_ids"),
-            "hipaa_ids": ctrl.get("hipaa_ids"),
-            "created_at": NOW,
-            "updated_at": NOW,
-        })
-
-    total_scored = counts["FAIL"] + counts["PASS"]
-    passed = counts["PASS"]
-    failed = counts["FAIL"]
-    score = round((passed / total_scored) * 100) if total_scored else 0
-
-    pillar_scores = {}
-    for s in PILLAR_SLUGS:
-        pillar_scores[s] = round((pillar_pass[s] / pillar_total[s]) * 100) if pillar_total[s] else 0
-
-    assessment = {
-        "id": asm_id,
-        "name": f"{provider.upper()} Live Well-Architected Review — {scope}",
-        "cloud": provider,
-        "cloud_account_id": scope,
-        "account_name": scope,
-        "account_identifier": scope,
-        "region": "us-central1" if provider == "gcp" else "us-east-1",
-        "lens": {
-            "gcp": "google-cloud-architecture-framework",
-            "aws": "aws-well-architected",
-            "azure": "azure-well-architected",
-        }.get(provider, "well-architected"),
-        "status": "FAIL" if failed > 0 else "COMPLETED",
-        "score": score,
-        "checks_count": total_scored,
-        "total_checks": total_scored,
-        "passed_checks": passed,
-        "failed_checks": failed,
-        "total_best_practices": len(PILLAR_SLUGS),
-        "passed_bps": sum(1 for s in PILLAR_SLUGS if pillar_scores[s] >= 70),
-        "failed_bps": sum(1 for s in PILLAR_SLUGS if pillar_total[s] and pillar_scores[s] < 70),
-        "high_risks": high,
-        "medium_risks": medium,
-        "low_risks": low,
-        "pillar_scores": pillar_scores,
-        "pillar_high_risks": pillar_high,
-        # transparency: non-pass/fail controls recorded but not scored
-        "unknown_controls": counts["UNKNOWN"],
-        "not_applicable_controls": counts["NOT_APPLICABLE"],
-        "not_implemented_controls": counts["NOT_IMPLEMENTED"],
-        "rerun_count": 0,
-        "is_global": False,
-        "user_id": user_id,
-        "org_id": org_id,
-        "source": "live-scan",
-        "last_run_at": fetched_at or NOW,
-        "created_at": NOW,
-        "updated_at": NOW,
-    }
-    return assessment, findings
-
-
-# Fetch service-key -> inventory resource "type" + the field holding the name.
-# Only the common, resource-bearing services are surfaced in the inventory UI.
+# Fetch service key -> inventory resource "type".
 INVENTORY_TYPES = {
     "compute_instances": "compute_instance",
     "compute_disks": "compute_disk",
@@ -248,132 +93,323 @@ INVENTORY_TYPES = {
 }
 
 
-def build_resources(provider: str, scope: str, assessment_id: str,
-                    fetch_data_path: Path | None) -> list[dict]:
-    """Flatten the raw fetch JSON into resource_inventory docs so the UI's
-    Resources tab shows the real estate that was scanned."""
-    if not fetch_data_path or not fetch_data_path.exists():
+def short(v) -> str:
+    return v.rsplit("/", 1)[-1] if isinstance(v, str) else str(v)
+
+
+def pillar_of(control: dict) -> tuple[str, str]:
+    raw = (control.get("pillar") or "security").strip().lower()
+    return PILLAR_MAP.get(raw, ("security", "Security"))
+
+
+def severity_of(control: dict) -> tuple[str, str, str]:
+    return SEV_MAP.get((control.get("severity") or "MEDIUM").upper(), ("medium", "medium", "Medium Risk"))
+
+
+def load_catalog(path: Path) -> dict[str, dict]:
+    with open(path, encoding="utf-8") as f:
+        return {r["control_id"]: r for r in csv.DictReader(f)}
+
+
+def scope_services(fetch: dict, scope: str) -> dict:
+    scopes = fetch.get("projects") or fetch.get("accounts") or fetch.get("subscriptions") or {}
+    return (scopes.get(scope) or {}).get("services", {})
+
+
+def items(services: dict, key: str) -> list:
+    svc = services.get(key)
+    if not svc or not svc.get("ok"):
         return []
-    fetch = json.loads(fetch_data_path.read_text(encoding="utf-8"))
-    scopes = fetch.get("projects") or fetch.get("accounts") \
-        or fetch.get("subscriptions") or {}
-    services = (scopes.get(scope) or {}).get("services", {})
-    out: list[dict] = []
-    for svc_key, rtype in INVENTORY_TYPES.items():
-        svc = services.get(svc_key)
-        if not svc or not svc.get("ok"):
+    d = svc.get("data")
+    return d if isinstance(d, list) else ([d] if isinstance(d, dict) else [])
+
+
+def location_index(services: dict) -> dict[str, str]:
+    """resource name -> zone/region from the fetch, for rendering fix commands."""
+    idx: dict[str, str] = {}
+    for key in ("compute_instances", "compute_disks"):
+        for it in items(services, key):
+            idx.setdefault(it.get("name", ""), short(it.get("zone", "")))
+    for it in items(services, "addresses_static_ip"):
+        idx.setdefault(it.get("name", ""), short(it.get("region", "")))
+    for it in items(services, "cloud_functions"):
+        # projects/P/locations/L/functions/N
+        parts = str(it.get("name", "")).split("/")
+        if len(parts) >= 6:
+            idx.setdefault(parts[-1], parts[3])
+    return idx
+
+
+def split_resource(res: str, loc_idx: dict[str, str]) -> tuple[str, str]:
+    """Return (name, loc). Subnet results are 'region/name'."""
+    if "/" in res and not res.startswith("projects/"):
+        loc, name = res.split("/", 1)
+        return name, loc
+    return res, loc_idx.get(res, "")
+
+
+def ensure_cloud_account(db, provider, scope, user_id, org_id, dry):
+    doc = {
+        "id": scope, "cloud": provider, "account_name": scope, "account_identifier": scope,
+        "auth_type": "service-account" if provider == "gcp" else "role",
+        "status": "connected", "is_active": True, "is_global": False,
+        "user_id": user_id, "org_id": org_id, "source": "live-scan",
+        "updated_at": NOW,
+    }
+    if provider == "gcp":
+        doc["gcp_project"] = scope
+    if not dry:
+        db["cloud_accounts"].update_one({"id": scope}, {"$set": doc, "$setOnInsert": {"created_at": NOW}}, upsert=True)
+    print(f"  [cloud_account] {scope} ({provider})")
+
+
+def build(provider, scope, controls, catalog, services, user_id, org_id, fetched_at):
+    asm_id = f"A-{provider.upper()}-{scope}"
+    loc_idx = location_index(services)
+
+    findings, checks, remediations = [], [], []
+    bp_checks: dict[tuple[str, str], list[dict]] = defaultdict(list)
+    p_total = {p: 0 for p in PILLAR_IDS}
+    p_pass = {p: 0 for p in PILLAR_IDS}
+    p_high = {p: 0 for p in PILLAR_IDS}
+    counts = defaultdict(int)
+    sev_counts = {"high": 0, "medium": 0, "low": 0}
+
+    for ctrl in controls:
+        res = (ctrl.get("results") or {}).get(scope)
+        if not res:
             continue
-        data = svc.get("data")
-        items = data if isinstance(data, list) else ([data] if isinstance(data, dict) else [])
-        for i, item in enumerate(items):
-            if not isinstance(item, dict):
+        verdict = res.get("verdict", "NOT_IMPLEMENTED")
+        counts[verdict] += 1
+        if verdict not in FINDING_VERDICTS:
+            continue
+
+        cid = ctrl["control_id"]
+        cat = catalog.get(cid, {})
+        pid, plabel = pillar_of(ctrl)
+        f_sev, c_sev, risk = severity_of(ctrl)
+        rlist = res.get("resources", [])
+        failing = [r for r in rlist if r.get("status") == "FAIL"]
+        status = "fail" if verdict == "FAIL" else "pass"
+
+        p_total[pid] += 1
+        if status == "pass":
+            p_pass[pid] += 1
+        else:
+            sev_counts[f_sev] += 1
+            if f_sev == "high":
+                p_high[pid] += 1
+
+        if status == "fail":
+            evidence = "; ".join(r.get("evidence", "") for r in failing[:6])
+            res_names = [r["resource"] for r in failing if r.get("resource")]
+        else:
+            evidence = "Compliant per live scan."
+            res_names = [r["resource"] for r in rlist if r.get("resource")]
+
+        rem_id = f"REM-{provider.upper()}-{cid}"
+        g = GUIDANCE.get(cid, {})
+        findings.append({
+            "id": f"FND-{asm_id}-{cid}", "assessment_id": asm_id, "check_id": cid,
+            "remediation_id": rem_id if status == "fail" else None,
+            "cloud": provider, "pillar_id": pid, "pillar": plabel,
+            "severity": f_sev, "title": ctrl.get("title", cid), "description": evidence,
+            "status": status, "effort": g.get("effort", "Medium Effort"), "risk": risk,
+            "resources": res_names,
+            "cis_gcp": ctrl.get("cis_gcp"), "cis_aws": ctrl.get("cis_aws"), "cis_azure": ctrl.get("cis_azure"),
+            "soc2_ids": ctrl.get("soc2_ids"), "iso27001_ids": ctrl.get("iso27001_ids"),
+            "hipaa_ids": ctrl.get("hipaa_ids"),
+            "source": "live-scan", "created_at": NOW, "updated_at": NOW,
+        })
+
+        domain_id = cat.get("domain_id") or cid.split("-")[0]
+        domain_name = cat.get("domain_name") or domain_id
+        bp_id = f"BP-{pid}-{domain_id}"
+        check = {
+            "id": cid, "pillar_id": pid, "best_practice_id": bp_id,
+            "title": ctrl.get("title", cid),
+            "description": evidence if status == "fail" else (cat.get("description") or ""),
+            "severity": c_sev, "status": status,
+            "effort": g.get("effort", "Medium Effort").split()[0],
+            "cloud_provider": provider, "assessment_id": asm_id, "source": "live-scan",
+        }
+        checks.append(check)
+        bp_checks[(pid, bp_id)].append({**check, "_domain_name": domain_name})
+
+        if status == "fail":
+            pairs = [split_resource(n, loc_idx) for n in res_names]
+            steps = [{"step": i + 1, "title": t, "consolePath": cp, "instruction": ins}
+                     for i, (t, cp, ins) in enumerate(g.get("steps", []))]
+            if g.get("warning"):
+                steps.insert(0, {"step": 0, "title": "Before you start",
+                                 "consolePath": "", "instruction": g["warning"]})
+            remediations.append({
+                "id": rem_id, "check_id": cid, "cloud": provider, "assessment_id": asm_id,
+                "pillar": plabel, "pillarId": pid, "severity": c_sev,
+                "title": ctrl.get("title", cid), "effort": g.get("effort", "Medium Effort"),
+                "estTime": g.get("estTime", ""), "risk": risk,
+                "description": evidence, "rationale": cat.get("description", ""),
+                "resources": res_names,
+                "manualSteps": steps,
+                "cli": {"command": render_cli(cid, scope, pairs),
+                        "explanation": g.get("explanation", "")},
+                "iac": {"tf": "# No Terraform snippet authored for this control yet.",
+                        "cf": "# Not applicable to GCP."},
+                "guidance_source": "authored" if g else "none",
+                "source": "live-scan", "updated_at": NOW,
+            })
+
+    # Best practices = (pillar, catalog domain). A BP fails if any check fails.
+    best_practices = []
+    for (pid, bp_id), chks in bp_checks.items():
+        best_practices.append({
+            "id": bp_id, "pillar_id": pid, "title": chks[0]["_domain_name"],
+            "description": f"{len(chks)} control(s) evaluated in this domain by the live scan.",
+            "status": "fail" if any(c["status"] == "fail" for c in chks) else "pass",
+            "cloud_provider": provider, "source": "live-scan",
+        })
+
+    scored = counts["PASS"] + counts["FAIL"]
+    pillar_scores = {p: (round(p_pass[p] / p_total[p] * 100) if p_total[p] else 0) for p in PILLAR_IDS}
+    pillar_high = dict(p_high)
+    for full, alias in PILLAR_ALIASES.items():
+        pillar_scores[alias] = pillar_scores[full]
+        pillar_high[alias] = pillar_high[full]
+
+    failed_bps = sum(1 for b in best_practices if b["status"] == "fail")
+    inventory = build_inventory(provider, scope, asm_id, services)
+
+    assessment = {
+        "id": asm_id,
+        "name": f"{provider.upper()} Live Well-Architected Review — {scope}",
+        "cloud": provider, "cloud_account_id": scope,
+        "account_name": scope, "account_identifier": scope,
+        # The fetch covers every region of the project, not one region.
+        "region": "global",
+        "lens": {"gcp": "google-cloud-architecture-framework", "aws": "aws-well-architected",
+                 "azure": "azure-well-architected"}.get(provider, "well-architected"),
+        "status": "FAIL" if counts["FAIL"] else "COMPLETED",
+        "score": round(counts["PASS"] / scored * 100) if scored else 0,
+        "checks_count": scored, "total_checks": scored,
+        "passed_checks": counts["PASS"], "failed_checks": counts["FAIL"],
+        "total_best_practices": len(best_practices),
+        "passed_bps": len(best_practices) - failed_bps, "failed_bps": failed_bps,
+        "high_risks": sev_counts["high"], "medium_risks": sev_counts["medium"],
+        "low_risks": sev_counts["low"],
+        "pillar_scores": pillar_scores, "pillar_high_risks": pillar_high,
+        "unknown_controls": counts["UNKNOWN"],
+        "not_applicable_controls": counts["NOT_APPLICABLE"],
+        "not_implemented_controls": counts["NOT_IMPLEMENTED"],
+        "resources_scanned": len(inventory),
+        "rerun_count": 0, "is_global": False,
+        "user_id": user_id, "org_id": org_id, "source": "live-scan",
+        "last_run_at": fetched_at or NOW, "updated_at": NOW,
+    }
+    for c in checks:
+        c.pop("_domain_name", None)
+    return assessment, findings, checks, best_practices, remediations, inventory
+
+
+def build_inventory(provider, scope, asm_id, services):
+    out = []
+    for key, rtype in INVENTORY_TYPES.items():
+        for i, it in enumerate(items(services, key)):
+            if not isinstance(it, dict):
                 continue
-            raw_name = item.get("name") or item.get("email") or item.get("id") or f"{rtype}-{i}"
-            name = raw_name.rsplit("/", 1)[-1] if isinstance(raw_name, str) else str(raw_name)
+            raw = it.get("name") or it.get("email") or it.get("id") or f"{rtype}-{i}"
             out.append({
-                "id": f"res-{assessment_id}-{svc_key}-{i}",
-                "assessment_id": assessment_id,
-                "cloud": provider,
-                "type": rtype,
-                "name": name,
-                "arn": item.get("selfLink") or item.get("name") or name,
-                "region": (item.get("region") or item.get("zone") or item.get("location")
-                           or "global"),
-                "account_id": scope,
+                "id": f"res-{asm_id}-{key}-{i}", "assessment_id": asm_id, "cloud": provider,
+                "type": rtype, "name": short(raw),
+                "arn": it.get("selfLink") or it.get("name") or short(raw),
+                "region": short(it.get("region") or it.get("zone") or it.get("location") or "global"),
+                "account_id": scope, "source": "live-scan",
             })
     return out
 
 
-def build_milestone(assessment: dict) -> dict:
-    """A baseline milestone so the assessment's history/milestone view renders."""
-    return {
-        "id": f"MLST-{assessment['id']}-baseline",
-        "assessment_id": assessment["id"],
-        "milestone_number": 1,
-        "milestone_name": "Live Scan Baseline",
-        "version": "v1.0.0",
-        "score": assessment["score"],
-        "total_checks": assessment["total_checks"],
-        "passed_checks": assessment["passed_checks"],
-        "failed_checks": assessment["failed_checks"],
-        "total_best_practices": assessment["total_best_practices"],
-        "passed_bps": assessment["passed_bps"],
-        "failed_bps": assessment["failed_bps"],
-        "high_risks": assessment["high_risks"],
-        "medium_risks": assessment["medium_risks"],
-        "low_risks": assessment["low_risks"],
-        "pillar_scores": assessment["pillar_scores"],
-        "pillar_high_risks": assessment["pillar_high_risks"],
-        "notes": "Baseline from live cloud scan via check engine.",
-        "recorded_by": "Live Scanner",
-        "recorded_at": assessment["last_run_at"],
-        "created_at": NOW,
-    }
+def build_milestone(a: dict) -> dict:
+    keys = ("score", "total_checks", "passed_checks", "failed_checks", "total_best_practices",
+            "passed_bps", "failed_bps", "high_risks", "medium_risks", "low_risks",
+            "pillar_scores", "pillar_high_risks")
+    return {"id": f"MLST-{a['id']}-baseline", "assessment_id": a["id"], "milestone_number": 1,
+            "milestone_name": "Live Scan Baseline", "version": "v1.0.0",
+            **{k: a[k] for k in keys},
+            "notes": "Baseline from live cloud scan via check engine.",
+            "recorded_by": "Live Scanner", "recorded_at": a["last_run_at"],
+            "source": "live-scan", "created_at": NOW}
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--result", default=str(HERE / "assessment_result_gcp.json"))
-    ap.add_argument("--fetch", default=None,
-                    help="Raw fetch JSON for resource inventory "
-                         "(default mcp_fetch/<provider>_fetch_result.json).")
+    ap.add_argument("--fetch", default=None, help="Raw fetch JSON (default mcp_fetch/<provider>_fetch_result.json)")
+    ap.add_argument("--catalog", default=str(HERE / "seed_data" / "control_catalog.csv"))
     ap.add_argument("--user-id", default="usr-09")
     ap.add_argument("--org-id", default="org_01")
+    ap.add_argument("--real-only", action="store_true",
+                    help="Replace this cloud's checks/best practices/pillar scores with the real structure.")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
     result = json.loads(Path(args.result).read_text(encoding="utf-8"))
     provider = result["provider"]
-    controls = result["controls"]
+    fetch_path = Path(args.fetch) if args.fetch else HERE / "mcp_fetch" / f"{provider}_fetch_result.json"
+    if not fetch_path.exists():
+        raise SystemExit(f"fetch JSON not found: {fetch_path}")
+    fetch = json.loads(fetch_path.read_text(encoding="utf-8"))
+    catalog = load_catalog(Path(args.catalog))
     fetched_at = (result.get("generatedFrom") or {}).get("fetchedAt")
 
-    fetch_path = Path(args.fetch) if args.fetch else \
-        HERE / "mcp_fetch" / f"{provider}_fetch_result.json"
+    db = MongoClient(MONGO_URI)[DB_NAME]
+    print(f"Loading {provider} from {args.result} -> {MONGO_URI}/{DB_NAME} "
+          f"(real-only={args.real_only}, dry-run={args.dry_run})")
 
-    client = MongoClient(MONGO_URI)
-    db = client[DB_NAME]
-
-    print(f"Loading {provider} results from {args.result}")
-    print(f"Target: {MONGO_URI}/{DB_NAME}  (dry-run={args.dry_run})")
-
+    all_checks, all_bps, all_rems, scores = [], [], [], {}
     for scope in result["scopes"]:
         print(f"\nScope: {scope}")
         ensure_cloud_account(db, provider, scope, args.user_id, args.org_id, args.dry_run)
-        assessment, findings = build_assessment(
-            provider, scope, controls, args.user_id, args.org_id, fetched_at)
-
-        print(f"  [assessment] {assessment['id']}  score={assessment['score']}  "
-              f"status={assessment['status']}  pass={assessment['passed_checks']} "
-              f"fail={assessment['failed_checks']}  findings={len(findings)}")
-        print(f"             unknown={assessment['unknown_controls']} "
-              f"n/a={assessment['not_applicable_controls']} "
-              f"not_impl={assessment['not_implemented_controls']}")
-
-        resources = build_resources(provider, scope, assessment["id"], fetch_path)
-        milestone = build_milestone(assessment)
-        print(f"  [resources] {len(resources)} inventory items"
-              f"{'' if fetch_path.exists() else ' (fetch JSON not found)'}")
-        print(f"  [milestone] {milestone['id']}")
-
+        a, fnd, chks, bps, rems, inv = build(provider, scope, result["controls"], catalog,
+                                             scope_services(fetch, scope), args.user_id,
+                                             args.org_id, fetched_at)
+        m = build_milestone(a)
+        print(f"  [assessment] {a['id']} score={a['score']} pass={a['passed_checks']} "
+              f"fail={a['failed_checks']} bps={a['total_best_practices']} "
+              f"(failed {a['failed_bps']}) resources={len(inv)}")
+        print(f"  [findings] {len(fnd)}  [remediations] {len(rems)} "
+              f"(authored guidance: {sum(1 for r in rems if r['guidance_source'] == 'authored')})")
+        print("  [pillar scores] " + ", ".join(f"{p}={a['pillar_scores'][p]}" for p in PILLAR_IDS))
+        all_checks += chks
+        all_bps += bps
+        all_rems += rems
+        scores = a["pillar_scores"]
         if args.dry_run:
             continue
+        db["assessments"].update_one({"id": a["id"]}, {"$set": a, "$setOnInsert": {"created_at": NOW}}, upsert=True)
+        for coll, docs in (("findings", fnd), ("resource_inventory", inv)):
+            db[coll].delete_many({"assessment_id": a["id"]})
+            if docs:
+                db[coll].insert_many(docs)
+        db["milestones"].update_one({"id": m["id"]}, {"$set": m}, upsert=True)
+        for r in rems:
+            db["remediations"].update_one({"id": r["id"]}, {"$set": r}, upsert=True)
 
-        db["assessments"].update_one({"id": assessment["id"]}, {"$set": assessment}, upsert=True)
-        # Replace this assessment's findings so re-runs don't accumulate stale ones.
-        db["findings"].delete_many({"assessment_id": assessment["id"]})
-        if findings:
-            db["findings"].insert_many(findings)
-        # Resource inventory for this assessment (idempotent replace).
-        db["resource_inventory"].delete_many({"assessment_id": assessment["id"]})
-        if resources:
-            db["resource_inventory"].insert_many(resources)
-        # Baseline milestone (idempotent upsert).
-        db["milestones"].update_one({"id": milestone["id"]}, {"$set": milestone}, upsert=True)
+    if args.real_only and not args.dry_run:
+        # Replace this cloud's WAFR structure with the real one.
+        db["checks"].delete_many({"cloud_provider": provider})
+        if all_checks:
+            db["checks"].insert_many(all_checks)
+        db["best_practices"].delete_many({"$or": [{"cloud_provider": provider},
+                                                  {"cloud_provider": {"$exists": False}}]})
+        if all_bps:
+            db["best_practices"].insert_many(all_bps)
+        db["remediations"].delete_many({"cloud": provider, "id": {"$nin": [r["id"] for r in all_rems]}})
+        for p in PILLAR_IDS:
+            db["pillars"].update_one({"id": p}, {"$set": {"score": scores.get(p, 0)},
+                                                 "$unset": {"bestPractices": ""}})
+        print(f"\n[real-only] replaced {provider} checks={len(all_checks)} "
+              f"best_practices={len(all_bps)}, pillar scores updated")
 
-    if not args.dry_run:
-        print("\n[OK] Loaded into MongoDB.")
-    else:
-        print("\n[DRY RUN] Nothing written.")
+    print("\n[DRY RUN] nothing written." if args.dry_run else "\n[OK] Loaded into MongoDB.")
 
 
 if __name__ == "__main__":

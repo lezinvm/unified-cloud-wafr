@@ -17,6 +17,7 @@ import {
 } from './data/complianceData';
 import { PillarData, PILLARS_DATA } from './data/wafrData';
 import { api } from './services/apiClient';
+import { REAL_DATA_ONLY } from './config/realData';
 
 
 export type Cloud = 'aws' | 'azure' | 'gcp';
@@ -858,6 +859,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
               highRisks: n(a.high_risks),
               mediumRisks: n(a.medium_risks),
               lowRisks: n(a.low_risks),
+              // Only live-scan assessments record this; undefined otherwise.
+              resourcesScanned: a.resources_scanned != null ? n(a.resources_scanned) : undefined,
             };
           });
 
@@ -937,7 +940,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
         // Also sync scheduled assessments, pillars, compliance, integrations, logs, and questions from MongoDB
         try {
-          const detectedCloud = ((dbAssessments?.[0]?.cloud || awsAcc?.cloud || azAcc?.cloud || gcpAcc?.cloud || cloud || 'aws') as string).toLowerCase();
+          // awsAcc/azAcc/gcpAcc were block-scoped above, so referencing them here
+          // threw whenever there were no assessments and skipped this whole sync.
+          const firstAccountCloud = Array.isArray(dbAccounts) ? dbAccounts[0]?.cloud : undefined;
+          const detectedCloud = ((dbAssessments?.[0]?.cloud || firstAccountCloud || cloud || 'aws') as string).toLowerCase();
           const [
             dbSchedules,
             dbPillars,
@@ -1666,6 +1672,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     region: string;
     name?: string;
   }): { isRerun: boolean; assessment: AssessmentInfo } => {
+    // Real-data-only: this function invents scores for new assessments and
+    // re-runs; refuse and leave every record untouched.
+    if (REAL_DATA_ONLY) {
+      showToast('Re-runs and new assessments are turned off here. Results come only from the scanner.', 'info');
+      return { isRerun: true, assessment: assessments[0] };
+    }
     // If it was a new user, they now have created an assessment
     setIsNewUser(false);
 

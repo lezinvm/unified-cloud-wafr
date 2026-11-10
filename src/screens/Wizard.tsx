@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { REAL_DATA_ONLY } from '../config/realData';
+import { RealDataNotice, SCANNER_REASON } from '../components/RealDataNotice';
 import { useApp, Cloud } from '../context';
 import { AwsWordmark, AzureMark, GcpMark, CloudifyOpsSymbol } from '../components/CloudLogo';
 import { INITIAL_ORG_QUESTIONS } from '../data/questionnaireData';
@@ -1996,6 +1998,13 @@ function Step3({
 
 /* ── Main Wizard Component ── */
 export function Wizard() {
+  if (REAL_DATA_ONLY) {
+    return <RealDataNotice feature="New assessment" reason={'The wizard creates an assessment with preset scores instead of scanning. ' + SCANNER_REASON} />;
+  }
+  return <WizardInner />;
+}
+
+function WizardInner() {
   const { go, cloud, setWizardStep, wizardStep: globalStep, orgQuestions, isCloudConfigured, getConfiguredAccount, runOrUpdateAssessment } = useApp();
   const [step, setStep] = useState<1 | 2 | 3>(globalStep <= 3 ? (globalStep as 1 | 2 | 3) : 1);
   const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);

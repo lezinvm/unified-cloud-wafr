@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { REAL_DATA_ONLY } from '../config/realData';
+import { RealDataNotice, SCANNER_REASON } from './RealDataNotice';
 import { useApp } from '../context';
 
 export interface DiagramNode {
@@ -59,7 +61,16 @@ interface ArchitectureDiagramModalProps {
   onGoToRemediation?: (findingId?: string) => void;
 }
 
-export function ArchitectureDiagramModal({
+export function ArchitectureDiagramModal(props: ArchitectureDiagramModalProps) {
+  if (REAL_DATA_ONLY) {
+    return props.isOpen
+      ? <RealDataNotice feature="Architecture diagram" reason={'The diagram is a fixed sample topology. ' + SCANNER_REASON} onClose={props.onClose} />
+      : null;
+  }
+  return <ArchitectureDiagramModalInner {...props} />;
+}
+
+function ArchitectureDiagramModalInner({
   isOpen,
   onClose,
   onGoToRemediation,

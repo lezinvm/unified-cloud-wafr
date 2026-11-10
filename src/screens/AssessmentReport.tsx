@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { demoOr } from '../config/realData';
 import { useApp, LIGHT, DARK, Tokens } from '../context';
 import { AppLayout } from '../components/AppLayout';
 import { StatusPill } from '../components/StatusPill';
@@ -1379,7 +1380,7 @@ export function AssessmentReport() {
               <div className="flex items-center gap-3 mt-1.5 flex-wrap">
                 <StatusPill status={currentAssessment?.status === 'complete' ? 'complete' : 'warning'} dark={isDark} />
                 <span className="text-xs" style={{ color: T.textSub }}>
-                  {currentAssessment?.accountName || 'acme-production'} ({currentAssessment?.accountId || '124890123456'}) · {currentAssessment?.region || 'us-east-1'} · {totalBps} Best Practices ({allChecks.length} Checks) · Completed {currentAssessment?.lastRun || '2h ago'}
+                  {currentAssessment?.accountName || demoOr('acme-production', '')} ({currentAssessment?.accountId || demoOr('124890123456', '')}) · {currentAssessment?.region || 'us-east-1'} · {totalBps} Best Practices ({allChecks.length} Checks) · Completed {currentAssessment?.lastRun || '2h ago'}
                 </span>
               </div>
             </div>

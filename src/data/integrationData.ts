@@ -1,3 +1,5 @@
+import { REAL_DATA_ONLY } from '../config/realData';
+
 export interface SlackIntegration {
   connected: boolean;
   webhookUrl: string;
@@ -63,7 +65,7 @@ export interface AlertLogItem {
   assessmentName?: string;
 }
 
-export const INITIAL_INTEGRATIONS: IntegrationsState = {
+const SAMPLE_INTEGRATIONS: IntegrationsState = {
   slack: {
     connected: true,
     webhookUrl: 'https://hooks.slack.com/services/T04A99/B06X11/99248a91283',
@@ -124,6 +126,16 @@ export interface LinkedJiraTicket {
   createdAt: string;
   url: string;
 }
+
+// Real-data-only builds start with every integration disconnected and blank
+// (the sample shows Slack/Jira/Chat "connected" with made-up webhooks).
+export const INITIAL_INTEGRATIONS: IntegrationsState = REAL_DATA_ONLY
+  ? {
+      slack: { ...SAMPLE_INTEGRATIONS.slack, connected: false, webhookUrl: '', channel: '', lastTested: '' },
+      jira: { ...SAMPLE_INTEGRATIONS.jira, connected: false, host: '', projectKey: '', userEmail: '', apiToken: '', defaultAssignee: '', lastTested: '' },
+      gchat: { ...SAMPLE_INTEGRATIONS.gchat, connected: false, webhookUrl: '', spaceName: '', lastTested: '' },
+    }
+  : SAMPLE_INTEGRATIONS;
 
 export const INITIAL_JIRA_TICKETS: Record<string, LinkedJiraTicket> = {};
 
