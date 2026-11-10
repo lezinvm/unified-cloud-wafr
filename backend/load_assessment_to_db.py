@@ -266,7 +266,7 @@ def build(provider, scope, controls, catalog, services, user_id, org_id, fetched
             "id": bp_id, "pillar_id": pid, "title": chks[0]["_domain_name"],
             "description": f"{len(chks)} control(s) evaluated in this domain by the live scan.",
             "status": "fail" if any(c["status"] == "fail" for c in chks) else "pass",
-            "cloud_provider": provider, "source": "live-scan",
+            "cloud_provider": provider, "assessment_id": asm_id, "source": "live-scan",
         })
 
     scored = counts["PASS"] + counts["FAIL"]

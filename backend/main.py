@@ -8,28 +8,45 @@ import urllib.request
 import urllib.parse
 import urllib.error
 from typing import Optional, List, Dict, Any
-from fastapi import FastAPI, Query, HTTPException
+from fastapi import FastAPI, Query, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 try:
     from backend.database import db, check_db_connection  # local dev (run from project root)
-    from backend import scan_runner
+    from backend import scan_runner, auth as authn, tenancy
 except ModuleNotFoundError:
     from database import db, check_db_connection  # Docker (WORKDIR is /app = backend/)
     import scan_runner
+    import auth as authn
+    import tenancy
+
+_auth_problems = authn.config_problems()
+if _auth_problems:
+    raise RuntimeError("AUTH_MODE=keycloak is misconfigured: " + "; ".join(_auth_problems))
 
 app = FastAPI(
     title="Unified Cloud WAFR API",
     description="Backend API serving assessments, findings, accounts, and inventory data from MongoDB.",
-    version="1.0.0"
+    version="1.0.0",
+    # API docs would list every route to anyone; close them when auth is on.
+    docs_url=None if authn.AUTH_ENABLED else "/docs",
+    redoc_url=None if authn.AUTH_ENABLED else "/redoc",
+    openapi_url=None if authn.AUTH_ENABLED else "/openapi.json",
 )
 
-# Enable CORS for React frontend (Vite)
+# Authorization + tenant isolation (no-op unless AUTH_MODE=keycloak).
+app.add_middleware(tenancy.TenancyMiddleware, db=db)
+
+# CORS is added last so it is the outermost layer (preflights get headers).
+# The API uses bearer tokens, not cookies, so credentials are never needed.
+_cors = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
+if authn.AUTH_ENABLED and not _cors:
+    raise RuntimeError("AUTH_MODE=keycloak requires CORS_ORIGINS (comma-separated allowed origins).")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_cors or ["*"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 # Real-data-only mode (dev): disable endpoints that fabricate or guess results.
@@ -229,8 +246,11 @@ async def get_organizations():
 
 @app.get("/api/users")
 async def get_users(org_id: Optional[str] = None, email: Optional[str] = None):
-    # Strict synchronization with Keycloak user list
-    await sync_keycloak_users_to_db()
+    # Legacy mode mirrors the Keycloak user list on every read. With real auth,
+    # users are registered from verified tokens instead (tenancy middleware),
+    # and org_id is forced to the caller's org.
+    if not authn.AUTH_ENABLED:
+        await sync_keycloak_users_to_db()
     query = {}
     if org_id:
         query["org_id"] = org_id
@@ -244,8 +264,9 @@ async def sync_users():
     users = await sync_keycloak_users_to_db()
     return {"status": "synced", "count": len(users), "users": users}
 
-# Demo tenant orgs that share the pre-seeded demo estate
-DEMO_ORGS = {"org_01", "org_lezin_menath", "org_admin", "global"}
+# Demo tenant orgs that share the pre-seeded demo estate. Never with real auth:
+# an org must only ever see its own data.
+DEMO_ORGS = set() if authn.AUTH_ENABLED else {"org_01", "org_lezin_menath", "org_admin", "global"}
 
 @app.get("/api/cloud-accounts")
 async def get_cloud_accounts(org_id: Optional[str] = None, user_id: Optional[str] = None):
@@ -324,15 +345,16 @@ async def get_assessment_detail(assessment_id: str):
 
 @app.get("/api/findings")
 async def get_findings(
+    request: Request,
     assessment_id: Optional[str] = None,
     cloud: Optional[str] = None,
     severity: Optional[str] = None,
     service: Optional[str] = None,
     limit: int = Query(default=100, le=500)
 ):
-    query = {}
+    query = await tenancy.assessment_scope(request, db)
     if assessment_id:
-        query["assessment_id"] = assessment_id
+        query["assessment_id"] = assessment_id  # ownership already checked by middleware
     if cloud and cloud.lower() != 'all':
         query["cloud"] = cloud.lower()
     if severity:
@@ -395,19 +417,24 @@ async def update_or_create_finding(payload: Dict[str, Any]):
 # --- REMEDIATIONS API ---
 @app.get("/api/remediations")
 async def get_remediations(
+    request: Request,
     cloud: Optional[str] = None,
     pillar_id: Optional[str] = None,
     check_id: Optional[str] = None,
     assessment_id: Optional[str] = None
 ):
-    query = {}
+    clauses = [await tenancy.catalog_or_owned(request, db)]
     if cloud and cloud.lower() != 'all':
-        query["cloud"] = cloud.lower()
+        clauses.append({"cloud": cloud.lower()})
     if pillar_id:
-        query["$or"] = [{"pillar_id": pillar_id.lower()}, {"pillarId": pillar_id.lower()}]
+        clauses.append({"$or": [{"pillar_id": pillar_id.lower()}, {"pillarId": pillar_id.lower()}]})
     if check_id:
-        query["check_id"] = check_id
-    remediations = await db["remediations"].find(query, {"_id": 0}).to_list(100)
+        clauses.append({"check_id": check_id})
+    if assessment_id:
+        clauses.append({"assessment_id": assessment_id})
+    clauses = [c for c in clauses if c]
+    query = {"$and": clauses} if clauses else {}
+    remediations = await db["remediations"].find(query, {"_id": 0}).to_list(500)
     return remediations
 
 @app.post("/api/remediations")
@@ -422,8 +449,11 @@ async def create_or_update_remediation(payload: Dict[str, Any]):
     return {"status": "success", "id": payload["id"]}
 
 @app.get("/api/remediations/status")
-async def get_remediation_statuses(assessment_id: Optional[str] = None, user_id: Optional[str] = None):
-    query = {}
+async def get_remediation_statuses(request: Request, assessment_id: Optional[str] = None, user_id: Optional[str] = None):
+    query = await tenancy.assessment_scope(request, db)
+    if query:
+        # With auth, statuses are shared by everyone in the org, not per user.
+        user_id = None
     if assessment_id:
         query["assessment_id"] = assessment_id
     if user_id:
@@ -445,11 +475,12 @@ async def save_remediation_status(payload: Dict[str, Any]):
 
 @app.get("/api/resources")
 async def get_resources(
+    request: Request,
     assessment_id: Optional[str] = None,
     cloud: Optional[str] = None,
     service: Optional[str] = None
 ):
-    query = {}
+    query = await tenancy.assessment_scope(request, db)
     if assessment_id:
         query["assessment_id"] = assessment_id
     if cloud:
@@ -460,17 +491,18 @@ async def get_resources(
     return resources
 
 @app.get("/api/pillars")
-async def get_pillars(cloud: Optional[str] = None):
+async def get_pillars(request: Request, cloud: Optional[str] = None):
+    scope = await tenancy.catalog_or_owned(request, db)
     pillars = await db["pillars"].find({}, {"_id": 0}).sort("display_order", 1).to_list(50)
-    bps = await db["best_practices"].find({}, {"_id": 0}).to_list(100)
+    bps = await db["best_practices"].find(scope, {"_id": 0}).to_list(500)
 
-    chk_query = {}
+    chk_query = dict(scope)
     if cloud and cloud.lower() != 'all':
         chk_query["cloud_provider"] = cloud.lower()
     else:
         chk_query["cloud_provider"] = "aws"
 
-    checks = await db["checks"].find(chk_query, {"_id": 0}).to_list(500)
+    checks = await db["checks"].find(chk_query, {"_id": 0}).to_list(1000)
 
     bp_map = {}
     for bp in bps:
@@ -492,20 +524,26 @@ async def get_compliance_frameworks():
     return frameworks
 
 @app.get("/api/compliance-scores")
-async def get_compliance_scores(assessment_id: Optional[str] = None):
-    query = {"assessment_id": assessment_id} if assessment_id else {}
+async def get_compliance_scores(request: Request, assessment_id: Optional[str] = None):
+    query = await tenancy.assessment_scope(request, db)
+    if assessment_id:
+        query["assessment_id"] = assessment_id
     scores = await db["assessment_compliance_scores"].find(query, {"_id": 0}).to_list(100)
     return scores
 
 @app.get("/api/milestones")
-async def get_milestones(assessment_id: Optional[str] = None):
-    query = {"assessment_id": assessment_id} if assessment_id else {}
-    milestones = await db["milestones"].find(query, {"_id": 0}).to_list(100)
+async def get_milestones(request: Request, assessment_id: Optional[str] = None):
+    query = await tenancy.assessment_scope(request, db)
+    if assessment_id:
+        query["assessment_id"] = assessment_id
+    milestones = await db["milestones"].find(query, {"_id": 0}).to_list(500)
     return milestones
 
 @app.get("/api/questionnaires")
-async def get_questionnaires(assessment_id: Optional[str] = None):
-    query = {"assessment_id": assessment_id} if assessment_id else {}
+async def get_questionnaires(request: Request, assessment_id: Optional[str] = None):
+    query = await tenancy.assessment_scope(request, db)
+    if assessment_id:
+        query["assessment_id"] = assessment_id
     responses = await db["questionnaire_responses"].find(query, {"_id": 0}).to_list(200)
     questions = await db["questionnaire_questions"].find({}, {"_id": 0}).to_list(200)
     return {
@@ -578,8 +616,10 @@ async def start_scan(payload: Dict[str, Any]):
         raise HTTPException(status_code=409, detail=str(e))
 
 @app.get("/api/scans")
-async def list_scans(assessment_id: Optional[str] = None, limit: int = Query(default=5, le=50)):
-    query = {"assessment_id": assessment_id} if assessment_id else {}
+async def list_scans(request: Request, assessment_id: Optional[str] = None, limit: int = Query(default=5, le=50)):
+    query = await tenancy.assessment_scope(request, db)
+    if assessment_id:
+        query["assessment_id"] = assessment_id
     return await db["scans"].find(query, {"_id": 0}).sort("started_at", -1).to_list(limit)
 
 @app.get("/api/scans/{scan_id}")
@@ -1026,13 +1066,14 @@ async def update_questionnaire_question(payload: Dict[str, Any]):
 # --- CHECKS & BEST PRACTICES ---
 @app.get("/api/checks")
 async def get_checks(
+    request: Request,
     pillar_id: Optional[str] = None,
     best_practice_id: Optional[str] = None,
     severity: Optional[str] = None,
     status: Optional[str] = None,
     cloud: Optional[str] = None
 ):
-    query = {}
+    query = await tenancy.catalog_or_owned(request, db)
     if pillar_id:
         query["pillar_id"] = pillar_id
     if best_practice_id:
@@ -1047,8 +1088,10 @@ async def get_checks(
     return checks
 
 @app.get("/api/best-practices")
-async def get_best_practices(pillar_id: Optional[str] = None):
-    query = {"pillar_id": pillar_id} if pillar_id else {}
+async def get_best_practices(request: Request, pillar_id: Optional[str] = None):
+    query = await tenancy.catalog_or_owned(request, db)
+    if pillar_id:
+        query["pillar_id"] = pillar_id
     bps = await db["best_practices"].find(query, {"_id": 0}).to_list(100)
     return bps
 
