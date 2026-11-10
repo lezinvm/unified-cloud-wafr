@@ -16,6 +16,8 @@
 #   rebuild     restart backend and force a frontend rebuild (after git pull)
 #   reset-data  wipe demo data from the dev DB, then run check engine + loader
 #               on backend/mcp_fetch/gcp_fetch_result.json
+#   scan        live fetch (gcloud MCP, VM identity) -> check engine -> loader.
+#               Keeps the previous data if the fetch is mostly blocked.
 #
 # Env overrides: DEV_HOST (public IP the browser uses), DEV_API_PORT,
 # DEV_WEB_PORT, DEV_KEEP_EMAIL (user kept by reset-data).
@@ -128,6 +130,45 @@ print(u['id'], u.get('org_id') or 'org_' + u['id'])")
   )
 }
 
+scan() {
+  # Real scan: fetch live GCP data via the official gcloud MCP server using the
+  # VM's own identity, then check engine + loader into the dev DB.
+  # Does NOT wipe the DB; it refreshes this project's assessment in place.
+  local project="${DEV_GCP_PROJECT:-lens-wafr-gcp}"
+  local fetch="$ROOT/backend/mcp_fetch/gcp_fetch_result.json"
+  local tmp="$RUN/gcp_fetch_new.json"
+  echo "identity: $(gcloud auth list --filter=status:ACTIVE --format='value(account)' 2>/dev/null)"
+  echo "fetching $project (several minutes; log: $RUN/fetch.log)..."
+  ( cd "$ROOT/backend/mcp_fetch" && node gcp_fetch_all.mjs --project "$project" --out "$tmp" > "$RUN/fetch.log" 2>&1 ) || {
+    echo "fetch failed; see $RUN/fetch.log (previous data kept)"; exit 1; }
+  # Refuse to replace good data with a mostly-blocked fetch (permission problem).
+  local ok
+  ok=$(python3 -c "
+import json,sys
+s=json.load(open('$tmp'))['projects']['$project']['services']
+print(sum(1 for v in s.values() if v.get('ok')))")
+  if [ "$ok" -lt 20 ]; then
+    echo "only $ok services readable: the VM identity lacks access. Previous data kept."
+    echo "see $RUN/fetch.log"; exit 1
+  fi
+  mv "$tmp" "$fetch"
+  echo "fetch ok ($ok services readable)"
+  start_mongo
+  (
+    cd "$ROOT/backend"
+    venv
+    export MONGO_URI="$DEV_MONGO_URI" DB_NAME=wafr_db
+    python check_engine.py --provider gcp > "$RUN/check_engine.log"
+    sed -n '1,10p' "$RUN/check_engine.log"
+    read -r uid org < <(python -c "
+import os
+from pymongo import MongoClient
+u = MongoClient(os.environ['MONGO_URI'])[os.environ['DB_NAME']]['users'].find_one({'email': '$KEEP_EMAIL'})
+print(u['id'], u.get('org_id') or 'org_' + u['id'])")
+    python load_assessment_to_db.py --user-id "$uid" --org-id "$org" --real-only
+  )
+}
+
 status() {
   local host; host="$(host_ip)"
   echo "mongo    : $(docker ps -f name=^${MONGO_NAME}$ --format '{{.Status}} {{.Ports}}' | head -1 || true)"
@@ -140,9 +181,10 @@ case "${1:-}" in
   rebuild)    rm -rf "$ROOT/dist"; stop_pid "$RUN/web.pid" frontend; stop_pid "$RUN/backend.pid" backend
               start_mongo; start_backend; start_frontend; sleep 4; status ;;
   reset-data) reset_data ;;
+  scan)       scan ;;
   stop)       stop_pid "$RUN/web.pid" frontend; stop_pid "$RUN/backend.pid" backend
               docker stop "$MONGO_NAME" >/dev/null 2>&1 && echo "stopped mongo" || true ;;
   restart)    "$0" stop; "$0" start ;;
   status)     status ;;
-  *) echo "usage: $0 start|stop|restart|status|rebuild|reset-data"; exit 1 ;;
+  *) echo "usage: $0 start|stop|restart|status|rebuild|reset-data|scan"; exit 1 ;;
 esac
