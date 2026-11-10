@@ -39,7 +39,8 @@ except ModuleNotFoundError:
     import scan_providers
 
 BACKEND = Path(__file__).parent
-RUN_DIR = BACKEND.parent / ".dev-run"
+# Scan logs and intermediate files. Containers point this at a volume.
+RUN_DIR = Path(os.getenv("LENS_RUN_DIR") or (BACKEND.parent / ".dev-run"))
 
 SCAN_ENABLED = os.getenv("SCAN_ENABLED", "").lower() in ("1", "true", "yes")
 FETCH_TIMEOUT_S = 40 * 60
@@ -138,7 +139,7 @@ async def _execute(db, scan_id: str, assessment_id: str, target: dict):
     RUN_DIR.mkdir(parents=True, exist_ok=True)
     log_path = RUN_DIR / f"{scan_id}.log"
     tmp = RUN_DIR / f"{scan_id}-fetch.json"
-    result_file = BACKEND / f"assessment_result_{prov.name}.json"
+    result_file = RUN_DIR / f"assessment_result_{prov.name}.json"
     scope = target["project"]
     async with _lock:
         with open(log_path, "w", encoding="utf-8") as log:
@@ -146,6 +147,7 @@ async def _execute(db, scan_id: str, assessment_id: str, target: dict):
             try:
                 await _set(db, scan_id, status="running", stage="fetch", **{"stages.fetch": "running"})
                 await _run(prov.fetch_cmd(scope, tmp), scan_providers.FETCH_DIR, log, FETCH_TIMEOUT_S)
+                prov.fetch_file.parent.mkdir(parents=True, exist_ok=True)
                 fetched = json.loads(tmp.read_text(encoding="utf-8"))
                 services = ((fetched.get(prov.scope_key) or {}).get(scope) or {}).get("services", {})
                 readable = sum(1 for v in services.values() if v.get("ok"))

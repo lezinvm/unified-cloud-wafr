@@ -132,9 +132,14 @@ const KMS_LOCATIONS = [
 ];
 
 // ---- MCP plumbing ----
-const srv = spawn('npx', ['-y', '@google-cloud/gcloud-mcp'], {
-  env, shell: true, stdio: ['pipe', 'pipe', 'pipe'],
-});
+// GCLOUD_MCP_BIN: a pre-installed server binary (the container image installs
+// @google-cloud/gcloud-mcp globally). Otherwise run the pinned version via npx.
+const GCLOUD_MCP_VERSION = '0.5.3';
+const srv = process.env.GCLOUD_MCP_BIN
+  ? spawn(process.env.GCLOUD_MCP_BIN, [], { env, stdio: ['pipe', 'pipe', 'pipe'] })
+  : spawn('npx', ['-y', `@google-cloud/gcloud-mcp@${GCLOUD_MCP_VERSION}`], {
+      env, shell: true, stdio: ['pipe', 'pipe', 'pipe'],
+    });
 let buf = '';
 const pending = new Map();
 let nextId = 1;

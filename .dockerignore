@@ -1,0 +1,19 @@
+# Keep images small and free of local data/secrets.
+.git
+node_modules
+dist
+.venv
+.dev-run
+handoff
+**/__pycache__
+**/*.pyc
+.env
+**/*.env
+deploy/dev/dev.env
+backend/mcp_fetch/*.json
+backend/assessment_result*.json
+backend/platform_data_dump.json
+lens-wafr-gcp-*.json
+*.pdf
+*.docx
+*.png

@@ -1,42 +1,39 @@
 #!/usr/bin/env bash
-# Dev environment runner (runs alongside prod on the same VM, shares nothing).
+# DEV environment, isolated from prod on the same VM.
 #
-#   Mongo     : docker container wafr-dev-mongo   -> 127.0.0.1:27018 (prod uses :27017)
-#   Backend   : uvicorn backend.main:app          -> :8001   (prod uses :8000)
-#   Frontend  : vite preview of a dev build       -> :8444   (prod uses :8443)
-#   Auth      : realm lens-dev on the prod Keycloak (:8080), set up with
-#               scripts/keycloak-dev-realm.sh. Frontend signs in with OIDC
-#               code+PKCE; backend runs AUTH_MODE=keycloak (every call needs
-#               a token; org/user come from it). The prod realm is untouched.
-#   Data      : REAL ONLY. Backend runs with REAL_DATA_ONLY=1 and the frontend
-#               is built with VITE_REAL_DATA_ONLY=true (no demo fallbacks, no
-#               simulated scans/re-runs).
+#   Prod (untouched): compose project "wafr-app" (~/wafr-app), host nginx :80.
+#   Dev:              compose project "lens-dev" (this repo, deploy/dev/):
+#                       backend  127.0.0.1:8001  (not public)
+#                       mongo    no published port, volume wafr_dev_mongo
+#                     host nginx :8444 serves dist/ and proxies /api to :8001.
+#   Shared:           host nginx (separate server blocks) and Keycloak
+#                     (separate realms: lens-realm vs lens-dev).
 #
-# Usage:  scripts/dev-env.sh start|stop|restart|status|rebuild|reset-data
-#   start       start mongo + backend + frontend (builds the frontend if needed)
-#   rebuild     restart backend and force a frontend rebuild (after git pull)
-#   reset-data  wipe demo data from the dev DB, then run check engine + loader
-#               on backend/mcp_fetch/gcp_fetch_result.json
-#   scan <id>   live scan of one assessment, any provider (scan_runner.py).
-#               Keeps the previous data if the fetch is mostly blocked.
-#   reset-data  (above) loads every provider with a fetch JSON on disk.
+# Usage: scripts/dev-env.sh <command>
+#   up            write config, build frontend + backend image, start, install nginx site
+#   rebuild       same as up but always rebuilds the frontend (after git pull)
+#   down          stop dev containers (data volumes are kept)
+#   status        containers + health through nginx
+#   logs          follow backend logs
+#   scan <id>     live scan of one assessment (any provider), same pipeline as the UI
+#   reset-data    wipe demo data, reload every provider that has a fetch file
+#   migrate       one-time: stop the old hand-run dev processes and container
 #
-# Env overrides: DEV_HOST (public IP the browser uses), DEV_API_PORT,
-# DEV_WEB_PORT, DEV_KEEP_EMAIL (user kept by reset-data).
+# Env overrides: DEV_HOST, DEV_WEB_PORT (8444), DEV_API_PORT (8001), DEV_REALM,
+# DEV_CLIENT, DEV_KEEP_EMAIL.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-RUN="$ROOT/.dev-run"
-mkdir -p "$RUN"
-
-API_PORT="${DEV_API_PORT:-8001}"
+COMPOSE=(docker compose -f "$ROOT/deploy/dev/docker-compose.yml")
+ENV_FILE="$ROOT/deploy/dev/dev.env"
+NGINX_SITE=/etc/nginx/conf.d/lens-dev.conf
 WEB_PORT="${DEV_WEB_PORT:-8444}"
-KEEP_EMAIL="${DEV_KEEP_EMAIL:-lezin.menath@cloudifyops.com}"
+API_PORT="${DEV_API_PORT:-8001}"
 REALM="${DEV_REALM:-lens-dev}"
 CLIENT="${DEV_CLIENT:-lens-dev-app}"
-MONGO_PORT=27018
-MONGO_NAME=wafr-dev-mongo
-DEV_MONGO_URI="mongodb://localhost:${MONGO_PORT}"
+KEEP_EMAIL="${DEV_KEEP_EMAIL:-lezin.menath@cloudifyops.com}"
+PNPM_VERSION=12.11.2
+NODE_IMAGE=node:20.18.0-bookworm-slim
 
 host_ip() {
   if [ -n "${DEV_HOST:-}" ]; then echo "$DEV_HOST"; return; fi
@@ -45,158 +42,144 @@ host_ip() {
     || echo "localhost"
 }
 
-is_running() { [ -f "$1" ] && kill -0 "$(cat "$1")" 2>/dev/null; }
-
-stop_pid() {
-  local f="$1" name="$2"
-  if is_running "$f"; then
-    kill "$(cat "$f")" 2>/dev/null || true
-    echo "stopped $name"
-  fi
-  rm -f "$f"
-}
-
-start_mongo() {
-  if [ "$(docker ps -q -f name=^${MONGO_NAME}$)" ]; then
-    echo "mongo already running"
-  elif [ "$(docker ps -aq -f name=^${MONGO_NAME}$)" ]; then
-    docker start "$MONGO_NAME" >/dev/null && echo "mongo started"
-  else
-    # Bound to localhost only: this Mongo has no auth, so it must never be
-    # reachable from outside the VM, whatever the firewall says.
-    docker run -d --name "$MONGO_NAME" -p "127.0.0.1:${MONGO_PORT}:27017" \
-      -v wafr_dev_mongo:/data/db mongo:7 >/dev/null && echo "mongo created"
-  fi
-}
-
-venv() {
-  [ -d "$ROOT/.venv" ] || { echo "missing $ROOT/.venv (create venv + pip install first)"; exit 1; }
-  # shellcheck disable=SC1091
-  source "$ROOT/.venv/bin/activate"
-}
-
-start_backend() {
-  if is_running "$RUN/backend.pid"; then echo "backend already running"; return; fi
-  (
-    cd "$ROOT"
-    venv
-    local host; host="$(host_ip)"
-    # AUTH_MODE=keycloak: every API call needs a token from realm $REALM;
-    # org/user come from the token. Tokens are issued for the public host, so
-    # the issuer uses it; signing keys are fetched over localhost.
-    # KEYCLOAK_URL stays dead so the legacy admin-API code can't reach Keycloak.
-    MONGO_URI="$DEV_MONGO_URI" DB_NAME=wafr_db \
-    AUTH_MODE=keycloak \
-    KEYCLOAK_ISSUER="http://$host:8080/realms/$REALM" \
-    KEYCLOAK_JWKS_URL="http://127.0.0.1:8080/realms/$REALM/protocol/openid-connect/certs" \
-    KEYCLOAK_CLIENT_ID="$CLIENT" \
-    CORS_ORIGINS="http://$host:$WEB_PORT" \
-    KEYCLOAK_URL="http://127.0.0.1:1" REAL_DATA_ONLY=1 SCAN_ENABLED=1 \
-      nohup python -m uvicorn backend.main:app --host 0.0.0.0 --port "$API_PORT" \
-      > "$RUN/backend.log" 2>&1 &
-    echo $! > "$RUN/backend.pid"
-  )
-  echo "backend starting on :$API_PORT (keycloak auth, real data only)"
+write_env() {
+  local host; host="$(host_ip)"
+  umask 077
+  cat > "$ENV_FILE" <<EOF
+# Generated by scripts/dev-env.sh; do not commit.
+AUTH_MODE=keycloak
+KEYCLOAK_ISSUER=http://$host:8080/realms/$REALM
+KEYCLOAK_JWKS_URL=http://host.docker.internal:8080/realms/$REALM/protocol/openid-connect/certs
+KEYCLOAK_CLIENT_ID=$CLIENT
+CORS_ORIGINS=http://$host:$WEB_PORT
+# Dead on purpose: legacy admin-API code must never reach a Keycloak.
+KEYCLOAK_URL=http://127.0.0.1:1
+REAL_DATA_ONLY=1
+SCAN_ENABLED=1
+EOF
+  echo "wrote $ENV_FILE"
 }
 
 build_frontend() {
   local host; host="$(host_ip)"
-  echo "building frontend (API=http://$host:$API_PORT/api, OIDC realm $REALM, real data only)"
-  (
-    cd "$ROOT"
-    npx -y pnpm install --frozen-lockfile
-    VITE_API_URL="http://$host:$API_PORT/api" VITE_REAL_DATA_ONLY=true \
-    VITE_AUTH_MODE=oidc VITE_KEYCLOAK_URL="http://$host:8080" \
-    VITE_KEYCLOAK_REALM="$REALM" VITE_KEYCLOAK_CLIENT_ID="$CLIENT" \
-      npx -y pnpm build
-  )
+  echo "building frontend in a container (same-origin /api, OIDC realm $REALM)..."
+  docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
+    -e VITE_API_URL=/api -e VITE_REAL_DATA_ONLY=true -e VITE_AUTH_MODE=oidc \
+    -e VITE_KEYCLOAK_URL="http://$host:8080" -e VITE_KEYCLOAK_REALM="$REALM" \
+    -e VITE_KEYCLOAK_CLIENT_ID="$CLIENT" \
+    -v "$ROOT:/src" -w /src "$NODE_IMAGE" \
+    sh -c "npx -y pnpm@$PNPM_VERSION install --frozen-lockfile && npx -y pnpm@$PNPM_VERSION build"
 }
 
-start_frontend() {
-  if is_running "$RUN/web.pid"; then echo "frontend already running"; return; fi
-  [ -d "$ROOT/dist" ] || build_frontend
-  (
-    cd "$ROOT"
-    PORT="$WEB_PORT" nohup ./node_modules/.bin/vite preview \
-      > "$RUN/web.log" 2>&1 &
-    echo $! > "$RUN/web.pid"
-  )
-  echo "frontend starting on :$WEB_PORT"
+install_nginx_site() {
+  sed -e "s#__ROOT__#$ROOT#g" -e "s#__WEB_PORT__#$WEB_PORT#g" -e "s#__API_PORT__#$API_PORT#g" \
+    "$ROOT/deploy/dev/nginx-lens-dev.conf.template" | sudo tee "$NGINX_SITE" >/dev/null
+  # Validate before reloading so a bad dev site can never take prod's nginx down.
+  if sudo nginx -t 2>/tmp/lens-nginx-test.log; then
+    sudo systemctl reload nginx
+    echo "nginx site installed: $NGINX_SITE (port $WEB_PORT)"
+  else
+    cat /tmp/lens-nginx-test.log
+    sudo rm -f "$NGINX_SITE"
+    echo "nginx config test failed; dev site removed, prod nginx unchanged"; exit 1
+  fi
 }
 
-owner() {
-  # "<user id> <org id>" of the dev user (KEEP_EMAIL), for loaded data.
-  python -c "
-import os
-from pymongo import MongoClient
-u = MongoClient(os.environ['MONGO_URI'])[os.environ['DB_NAME']]['users'].find_one({'email': '$KEEP_EMAIL'})
-print(u['id'], u.get('org_id') or 'org_' + u['id'])"
+port_in_use_by_other() {
+  # True if something other than nginx/docker holds the port.
+  sudo ss -ltnp "( sport = :$1 )" | tail -n +2 | grep -vqE 'nginx|docker-proxy' && return 0 || return 1
 }
 
-reset_data() {
-  # Wipe demo data, then load every cloud that has fetched data on disk
-  # (backend/mcp_fetch/<provider>_fetch_result.json).
-  start_mongo
-  (
-    cd "$ROOT/backend"
-    venv
-    export MONGO_URI="$DEV_MONGO_URI" DB_NAME=wafr_db
-    local clouds
-    clouds=$(python -c "import scan_providers as s; print(' '.join(n for n, p in s.PROVIDERS.items() if p.fetch_file.exists()))")
-    [ -n "$clouds" ] || { echo "no fetch JSON in backend/mcp_fetch/ (run a scan or upload one)"; exit 1; }
-    python reset_dev_real_only.py --keep-email "$KEEP_EMAIL" --yes
-    read -r uid org < <(owner)
-    for p in $clouds; do
-      echo "== $p =="
-      # Log to a file: piping into head/sed would break the pipe and trip pipefail.
-      python check_engine.py --provider "$p" --out "assessment_result_$p.json" > "$RUN/check_engine_$p.log"
-      sed -n '1,10p' "$RUN/check_engine_$p.log"
-      python load_assessment_to_db.py --provider "$p" --result "assessment_result_$p.json" \
-        --user-id "$uid" --org-id "$org" --real-only
-    done
-  )
+up() {
+  if port_in_use_by_other "$WEB_PORT" || port_in_use_by_other "$API_PORT"; then
+    echo "ports $WEB_PORT/$API_PORT are held by old dev processes; run: scripts/dev-env.sh migrate"; exit 1
+  fi
+  write_env
+  { [ -d "$ROOT/dist" ] && [ "${1:-}" != "--rebuild" ]; } || build_frontend
+  "${COMPOSE[@]}" up -d --build
+  install_nginx_site
+  sleep 5
+  status
 }
+
+status() {
+  local host; host="$(host_ip)"
+  "${COMPOSE[@]}" ps
+  echo -n "health via nginx: "
+  curl -s -m 5 "http://127.0.0.1:$WEB_PORT/api/health" || echo "unreachable"
+  echo
+  echo "dev app: http://$host:$WEB_PORT"
+}
+
+in_backend() { "${COMPOSE[@]}" exec -T backend bash -c "cd /app/backend && $1"; }
 
 scan() {
-  # Real scan of one assessment, any provider: the same pipeline the UI runs
-  # (scan_runner.py). Keeps previous data if the fetch is mostly blocked.
   local aid="${1:-}"
-  start_mongo
-  (
-    cd "$ROOT/backend"
-    venv
-    export MONGO_URI="$DEV_MONGO_URI" DB_NAME=wafr_db
-    if [ -z "$aid" ]; then
-      echo "usage: scripts/dev-env.sh scan <assessment-id>"
-      echo "assessments:"
-      python -c "
+  if [ -z "$aid" ]; then
+    echo "usage: scripts/dev-env.sh scan <assessment-id>"; echo "assessments:"
+    in_backend "python -c \"
 import os
 from pymongo import MongoClient
 db = MongoClient(os.environ['MONGO_URI'])[os.environ['DB_NAME']]
 for a in db['assessments'].find({}, {'_id': 0, 'id': 1, 'cloud': 1, 'cloud_account_id': 1}):
-    print('  ', a['id'], '(' + str(a.get('cloud')) + ', ' + str(a.get('cloud_account_id')) + ')')"
-      exit 1
-    fi
-    echo "scanning $aid (several minutes; log in $RUN/)..."
-    python scan_runner.py --assessment-id "$aid"
-  )
+    print('  ', a['id'], '(' + str(a.get('cloud')) + ', ' + str(a.get('cloud_account_id')) + ')')\""
+    exit 1
+  fi
+  [[ "$aid" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "invalid assessment id"; exit 1; }
+  echo "scanning $aid (several minutes)..."
+  in_backend "python scan_runner.py --assessment-id '$aid'"
 }
-status() {
-  local host; host="$(host_ip)"
-  echo "mongo    : $(docker ps -f name=^${MONGO_NAME}$ --format '{{.Status}} {{.Ports}}' | head -1 || true)"
-  is_running "$RUN/backend.pid" && echo "backend  : running  http://$host:$API_PORT/api/health" || echo "backend  : stopped"
-  is_running "$RUN/web.pid"     && echo "frontend : running  http://$host:$WEB_PORT" || echo "frontend : stopped"
+
+reset_data() {
+  [[ "$KEEP_EMAIL" =~ ^[A-Za-z0-9._%+@-]+$ ]] || { echo "invalid DEV_KEEP_EMAIL"; exit 1; }
+  in_backend "set -e
+clouds=\$(python -c \"import scan_providers as s; print(' '.join(n for n, p in s.PROVIDERS.items() if p.fetch_file.exists()))\")
+[ -n \"\$clouds\" ] || { echo 'no fetch data yet: run a scan first'; exit 1; }
+python reset_dev_real_only.py --keep-email '$KEEP_EMAIL' --yes
+read -r uid org < <(python -c \"
+import os
+from pymongo import MongoClient
+u = MongoClient(os.environ['MONGO_URI'])[os.environ['DB_NAME']]['users'].find_one({'email': '$KEEP_EMAIL'})
+print(u['id'], u.get('org_id') or 'org_' + u['id'])\")
+for p in \$clouds; do
+  echo \"== \$p ==\"
+  python check_engine.py --provider \$p --out /data/run/assessment_result_\$p.json > /data/run/check_engine_\$p.log
+  sed -n '1,10p' /data/run/check_engine_\$p.log
+  python load_assessment_to_db.py --provider \$p --result /data/run/assessment_result_\$p.json \
+    --user-id \"\$uid\" --org-id \"\$org\" --real-only
+done"
+}
+
+migrate() {
+  # Stop the earlier hand-run dev setup so the containers can take over.
+  local run="$ROOT/.dev-run"
+  for f in "$run/web.pid" "$run/backend.pid"; do
+    if [ -f "$f" ] && kill -0 "$(cat "$f")" 2>/dev/null; then kill "$(cat "$f")" && echo "stopped $(basename "$f" .pid)"; fi
+    rm -f "$f"
+  done
+  pkill -f "uvicorn backend.main:app --host 0.0.0.0 --port $API_PORT" 2>/dev/null && echo "stopped stray backend" || true
+  pkill -f "vite.js preview" 2>/dev/null && echo "stopped stray frontend" || true
+  if docker ps -a --format '{{.Names}}' | grep -qx wafr-dev-mongo; then
+    docker rm -f wafr-dev-mongo >/dev/null && echo "removed old wafr-dev-mongo container (volume wafr_dev_mongo kept)"
+  fi
+  # Carry over the last fetch so reset-data works without a new scan.
+  local old="$ROOT/backend/mcp_fetch/gcp_fetch_result.json"
+  if [ -f "$old" ]; then
+    docker run --rm -v lens_dev_scan_data:/data -v "$old:/src.json:ro" "$NODE_IMAGE" \
+      sh -c 'mkdir -p /data/fetch /data/run && cp /src.json /data/fetch/gcp_fetch_result.json && chown -R 10001:10001 /data' \
+      && echo "copied last GCP fetch into the dev data volume"
+  fi
+  echo "done; now run: scripts/dev-env.sh up"
 }
 
 case "${1:-}" in
-  start)      start_mongo; start_backend; start_frontend; sleep 4; status ;;
-  rebuild)    rm -rf "$ROOT/dist"; stop_pid "$RUN/web.pid" frontend; stop_pid "$RUN/backend.pid" backend
-              start_mongo; start_backend; start_frontend; sleep 4; status ;;
-  reset-data) reset_data ;;
-  scan)       scan "${2:-}" ;;
-  stop)       stop_pid "$RUN/web.pid" frontend; stop_pid "$RUN/backend.pid" backend
-              docker stop "$MONGO_NAME" >/dev/null 2>&1 && echo "stopped mongo" || true ;;
-  restart)    "$0" stop; "$0" start ;;
+  up)         up ;;
+  rebuild)    up --rebuild ;;
+  down)       "${COMPOSE[@]}" down ;;
   status)     status ;;
-  *) echo "usage: $0 start|stop|restart|status|rebuild|reset-data|scan"; exit 1 ;;
+  logs)       "${COMPOSE[@]}" logs -f --tail=100 backend ;;
+  scan)       scan "${2:-}" ;;
+  reset-data) reset_data ;;
+  migrate)    migrate ;;
+  *) sed -n '2,24p' "$0"; exit 1 ;;
 esac

@@ -1,0 +1,58 @@
+# DEV stack: isolated from prod (separate project, network, database, volumes,
+# config). Prod runs as compose project "wafr-app" from ~/wafr-app.
+#
+#   docker compose -f deploy/dev/docker-compose.yml up -d --build
+#
+# Exposed: backend on 127.0.0.1:8001 only (reached via host nginx :8444/api).
+# The database has no published port at all.
+name: lens-dev
+
+services:
+  mongo:
+    image: mongo:7.0.14
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db
+    networks: [net]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand('ping').ok"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    mem_limit: 512m
+
+  backend:
+    build:
+      context: ../..
+      dockerfile: deploy/backend.Dockerfile
+    image: lens-dev-backend:latest
+    restart: unless-stopped
+    env_file: dev.env
+    environment:
+      LENS_ENV: dev
+      MONGO_URI: mongodb://mongo:27017
+      DB_NAME: wafr_db
+    volumes:
+      - scan_data:/data
+    ports:
+      - "127.0.0.1:8001:8000"
+    extra_hosts:
+      # Lets the container fetch Keycloak signing keys from the host's :8080.
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      mongo:
+        condition: service_healthy
+    networks: [net]
+    mem_limit: 768m
+
+volumes:
+  # Existing dev data (created by the earlier dev setup) is reused, not copied.
+  mongo_data:
+    external: true
+    name: wafr_dev_mongo
+  scan_data:
+    name: lens_dev_scan_data
+
+networks:
+  net:
+    name: lens-dev-net

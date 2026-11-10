@@ -18,13 +18,17 @@ Adding a cloud = one ScanProvider entry:
 """
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
 BACKEND = Path(__file__).parent
-FETCH_DIR = BACKEND / "mcp_fetch"
+FETCH_DIR = BACKEND / "mcp_fetch"  # fetcher scripts
+# Where fetch results are written. Containers point this at a volume so data
+# survives image rebuilds; defaults to the scripts folder for local runs.
+DATA_DIR = Path(os.getenv("LENS_DATA_DIR") or FETCH_DIR)
 
 
 def _short(v) -> str:
@@ -60,7 +64,7 @@ class ScanProvider:
 
     @property
     def fetch_file(self) -> Path:
-        return FETCH_DIR / f"{self.name}_fetch_result.json"
+        return DATA_DIR / f"{self.name}_fetch_result.json"
 
     @property
     def can_scan(self) -> bool:

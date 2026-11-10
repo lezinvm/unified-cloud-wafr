@@ -49,8 +49,11 @@ def main() -> None:
                     help="Allow a MONGO_URI other than the dev Mongo on :27018.")
     args = ap.parse_args()
 
-    if ":27018" not in MONGO_URI and not args.i_know_this_is_not_prod:
-        sys.exit(f"REFUSING: MONGO_URI={MONGO_URI} is not the dev Mongo (:27018).")
+    # Dev only: the legacy dev Mongo on :27018, or the dev compose stack, which
+    # sets LENS_ENV=dev (prod never does).
+    is_dev = ":27018" in MONGO_URI or os.getenv("LENS_ENV") == "dev"
+    if not is_dev and not args.i_know_this_is_not_prod:
+        sys.exit(f"REFUSING: MONGO_URI={MONGO_URI} is not a dev database (set LENS_ENV=dev in the dev stack).")
 
     db = MongoClient(MONGO_URI, serverSelectionTimeoutMS=4000)[DB_NAME]
     keep = args.keep_email.strip().lower()
