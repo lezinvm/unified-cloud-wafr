@@ -205,7 +205,29 @@ export function parseResourceInfo(raw: string): ResourceInfo {
     return { raw, shortName: shortName || raw, type, region, service };
   }
 
+  if (REAL_DATA_ONLY) {
+    // Live-scan subnet results are "region/name"; plain names carry no
+    // location, so show none rather than inventing one.
+    const m = raw.match(/^([a-z]+-[a-z]+\d+)\/([^/]+)$/);
+    if (m) return { raw, shortName: m[2], type: 'Subnet', region: m[1], service: 'gcp-compute' };
+    return { raw, shortName: raw, type: 'Cloud Resource', region: '—', service: 'cloud' };
+  }
   return { raw, shortName: raw, type: 'Cloud Resource', region: 'us-east-1', service: 'cloud' };
+}
+
+/**
+ * Remediation maps are keyed by both check_id and id, so Object.values()
+ * returns each item twice. Use this to list or count them.
+ */
+export function uniqueRemediations(map: Record<string, CheckRemediationData>): CheckRemediationData[] {
+  const seen = new Set<CheckRemediationData>();
+  return Object.values(map).filter(r => (seen.has(r) ? false : (seen.add(r), true)));
+}
+
+/** True when a real Terraform snippet exists (not a placeholder comment). */
+export function hasIaC(r: CheckRemediationData): boolean {
+  const tf = (r.iac?.tf || '').trim();
+  return tf.length > 0 && !tf.startsWith('#');
 }
 
 export function getResourceSpecificRemediation(checkData: CheckRemediationData, selectedArn: string) {

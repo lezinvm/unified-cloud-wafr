@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { REAL_DATA_ONLY } from '../config/realData';
 import { useApp } from '../context';
 import { AppLayout } from '../components/AppLayout';
 import { SeverityPill } from '../components/FindingUI';
@@ -139,6 +140,7 @@ export function AIFix() {
   const [cantFixNote, setCantFixNote] = useState('');
 
   const handleRerunResourceCheck = (checkId: string, arn: string) => {
+    if (REAL_DATA_ONLY) { showToast('Not available here: this action only simulates a result. Results come only from the scanner.', 'info'); return; }
     setVerifyingResourceKeys(prev => ({ ...prev, [arn]: true }));
     const targetAssessment = selectedAssessmentId || currentAssessment?.id || 'A-001';
     api.rerunCheck({
@@ -171,6 +173,7 @@ export function AIFix() {
   };
 
   const handleRerunFindingCheck = (checkId: string) => {
+    if (REAL_DATA_ONLY) { showToast('Not available here: this action only simulates a result. Results come only from the scanner.', 'info'); return; }
     setVerifyingFindingCheck(true);
     setCheckRerunFeedback(null);
     const targetAssessment = selectedAssessmentId || currentAssessment?.id || 'A-001';
@@ -245,6 +248,7 @@ export function AIFix() {
   };
 
   const handleSimulate = () => {
+    if (REAL_DATA_ONLY) { showToast('Not available here: this action only simulates a result. Results come only from the scanner.', 'info'); return; }
     setSimulating(true);
     setSimulationSuccess(false);
     setTimeout(() => {

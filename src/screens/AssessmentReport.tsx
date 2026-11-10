@@ -19,6 +19,7 @@ import { REMEDIATION_DATABASE } from './AIRemediation';
 import {
   fetchRemediationsFromDb,
   getFallbackRemediations,
+  uniqueRemediations,
   type CheckRemediationData,
 } from '../data/remediationData';
 
@@ -1222,7 +1223,7 @@ export function AssessmentReport() {
     let cantFix = 0;
     let pending = 0;
 
-    const allDbChecks = Object.values(remediationsDb);
+    const allDbChecks = uniqueRemediations(remediationsDb);
     allDbChecks.forEach(c => {
       const st = getCheckRemediationStatus(c.id, c.resources || []);
       if (st === 'fixed') fixed++;

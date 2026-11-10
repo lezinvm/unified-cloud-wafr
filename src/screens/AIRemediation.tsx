@@ -71,8 +71,10 @@ import {
   fetchRemediationsFromDb,
   REMEDIATION_DATABASE,
   EMPTY_REMEDIATION,
+  uniqueRemediations,
+  hasIaC,
 } from '../data/remediationData';
-import { demoOr } from '../config/realData';
+import { REAL_DATA_ONLY, demoOr } from '../config/realData';
 export { REMEDIATION_DATABASE };
 
 export function AIRemediation() {
@@ -172,7 +174,7 @@ export function AIRemediation() {
   }, [activeCloud]);
 
   const allChecksList = useMemo(() => {
-    return Object.values(remediationsDb);
+    return uniqueRemediations(remediationsDb);
   }, [remediationsDb]);
 
   // Active check in check-by-check remediation
@@ -207,7 +209,7 @@ export function AIRemediation() {
   const [fixModalOpen, setFixModalOpen] = useState(false);
   const [solvedResourceArns, setSolvedResourceArns] = useState<Record<string, boolean>>({});
   const [showAllResourcesList, setShowAllResourcesList] = useState(false);
-  const [methodTab, setMethodTab] = useState<'manual' | 'cli' | 'iac'>('iac');
+  const [methodTab, setMethodTab] = useState<'manual' | 'cli' | 'iac'>(demoOr<'manual' | 'cli' | 'iac'>('iac', 'manual'));
   const [iacLanguage, setIacLanguage] = useState<'tf' | 'cf'>('tf');
   const [copied, setCopied] = useState(false);
   const [cliCopied, setCliCopied] = useState(false);
@@ -258,6 +260,7 @@ export function AIRemediation() {
 
   // Handle Git Validation & Connect (Authenticate Repo)
   const handleConnectGit = () => {
+    if (REAL_DATA_ONLY) { showToast('Not available here: this action only simulates a result. Results come only from the scanner.', 'info'); return; }
     if (!patInput.trim()) {
       setPatError('Please enter your GitHub Personal Access Token (PAT)');
       return;
@@ -415,6 +418,8 @@ export function AIRemediation() {
   };
 
   const handleRerunResourceCheck = (checkId: string, arn: string) => {
+
+    if (REAL_DATA_ONLY) { showToast('Not available here: this action only simulates a result. Results come only from the scanner.', 'info'); return; }
     setVerifyingResourceKeys(prev => ({ ...prev, [arn]: true }));
     const targetAssessment = activeAssessmentId || selectedAssessmentId || 'A-001';
     api.rerunCheck({
@@ -447,6 +452,8 @@ export function AIRemediation() {
   };
 
   const handleRerunFindingCheck = (checkId: string) => {
+
+    if (REAL_DATA_ONLY) { showToast('Not available here: this action only simulates a result. Results come only from the scanner.', 'info'); return; }
     setVerifyingFindingCheck(true);
     setCheckRerunFeedback(null);
     const targetAssessment = activeAssessmentId || selectedAssessmentId || 'A-001';
@@ -485,6 +492,8 @@ export function AIRemediation() {
   };
 
   const handleRerunModalResource = () => {
+
+    if (REAL_DATA_ONLY) { showToast('Not available here: this action only simulates a result. Results come only from the scanner.', 'info'); return; }
     if (!activeResourceArn) return;
     setVerifyingModalResource(true);
     const targetAssessment = activeAssessmentId || selectedAssessmentId || 'A-001';
@@ -535,6 +544,8 @@ export function AIRemediation() {
   };
 
   const handleSimulate = () => {
+
+    if (REAL_DATA_ONLY) { showToast('Not available here: this action only simulates a result. Results come only from the scanner.', 'info'); return; }
     setSimulating(true);
     setSimulationSuccess(false);
     setTimeout(() => {
@@ -544,6 +555,8 @@ export function AIRemediation() {
   };
 
   const handleGenerateIaC = () => {
+
+    if (REAL_DATA_ONLY) { showToast('Not available here: this action only simulates a result. Results come only from the scanner.', 'info'); return; }
     setGeneratingIaC(true);
     setIacGenerated(false);
     setTimeout(() => {
@@ -553,6 +566,8 @@ export function AIRemediation() {
   };
 
   const handleCreatePullRequest = () => {
+
+    if (REAL_DATA_ONLY) { showToast('Not available here: this action only simulates a result. Results come only from the scanner.', 'info'); return; }
     if (!gitConfig.connected) {
       handleOpenGitSettings();
       return;
@@ -562,6 +577,8 @@ export function AIRemediation() {
   };
 
   const handleSubmitPullRequest = () => {
+
+    if (REAL_DATA_ONLY) { showToast('Not available here: this action only simulates a result. Results come only from the scanner.', 'info'); return; }
     setPrSubmitting(true);
     setTimeout(() => {
       setPrSubmitting(false);
@@ -1077,7 +1094,7 @@ export function AIRemediation() {
 
                       <div className="flex items-center justify-between text-[10px] pt-1" style={{ color: T.muted }}>
                         <span>{item.pillar}</span>
-                        <span className="font-mono font-medium text-emerald-600 dark:text-emerald-400">IaC Ready</span>
+                        {hasIaC(item) && <span className="font-mono font-medium text-emerald-600 dark:text-emerald-400">IaC Ready</span>}
                       </div>
                     </button>
                   );
@@ -1251,6 +1268,7 @@ export function AIRemediation() {
                 </h2>
 
                 {/* Notice Banner: Check Rerun vs Full Assessment Status */}
+                {!REAL_DATA_ONLY && (
                 <div
                   className="p-3.5 rounded-xl border flex items-center justify-between gap-3 text-xs leading-relaxed flex-wrap"
                   style={{
@@ -1296,7 +1314,7 @@ export function AIRemediation() {
                     </svg>
                     <span>Rerun Full Assessment</span>
                   </button>
-                </div>
+                </div>)}
 
                 {checkRerunFeedback && checkRerunFeedback.checkId === checkData.id && (
                   <div

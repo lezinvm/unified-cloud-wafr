@@ -208,7 +208,7 @@ interface AppState {
   updateIntegrations: (updates: Partial<IntegrationsState>) => void;
   jiraTickets: Record<string, LinkedJiraTicket>;
   alertLogs: AlertLogItem[];
-  createJiraTicketForCheck: (checkId: string, title: string, severity?: string, details?: string) => LinkedJiraTicket;
+  createJiraTicketForCheck: (checkId: string, title: string, severity?: string, details?: string) => LinkedJiraTicket | undefined;
   updateJiraTicketStatus: (checkId: string, status: LinkedJiraTicket['status']) => void;
   sendSlackNotification: (payload: { title: string; message: string; severity?: 'critical' | 'high' | 'info'; channel?: string; checkId?: string }) => void;
   sendGChatNotification: (payload: { title: string; message: string; severity?: 'critical' | 'high' | 'info'; spaceName?: string; checkId?: string }) => void;
@@ -473,7 +473,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     title: string,
     severity: string = 'high',
     details?: string
-  ): LinkedJiraTicket => {
+  ): LinkedJiraTicket | undefined => {
+    if (REAL_DATA_ONLY) { showToast('Not available here: this action only simulates a result. Results come only from the scanner.', 'info'); return; }
     const nextNum = 140 + Object.keys(jiraTickets).length + 1;
     const projectKey = integrations.jira.projectKey || 'WAFR';
     const key = `${projectKey}-${nextNum}`;
@@ -572,6 +573,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     channel?: string;
     checkId?: string;
   }) => {
+    if (REAL_DATA_ONLY) { showToast('Not available here: this action only simulates a result. Results come only from the scanner.', 'info'); return; }
     const channel = payload.channel || integrations.slack.channel || '#cloud-security-alerts';
     addAlertLog({
       service: 'slack',
@@ -604,6 +606,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const bulkCreateJiraTickets = (checks: { id: string; title: string; severity: string }[]): number => {
+    if (REAL_DATA_ONLY) { showToast('Not available here: this action only simulates a result. Results come only from the scanner.', 'info'); return 0; }
     let createdCount = 0;
     checks.forEach(c => {
       if (!jiraTickets[c.id]) {
