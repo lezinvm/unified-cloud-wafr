@@ -95,6 +95,7 @@ up() {
     echo "ports $WEB_PORT/$API_PORT are held by old dev processes; run: scripts/dev-env.sh migrate"; exit 1
   fi
   write_env
+  docker volume inspect lens_dev_scan_data >/dev/null 2>&1 || docker volume create lens_dev_scan_data >/dev/null
   { [ -d "$ROOT/dist" ] && [ "${1:-}" != "--rebuild" ]; } || build_frontend
   "${COMPOSE[@]}" up -d --build
   install_nginx_site

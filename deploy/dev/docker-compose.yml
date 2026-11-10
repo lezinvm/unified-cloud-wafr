@@ -50,7 +50,9 @@ volumes:
   mongo_data:
     external: true
     name: wafr_dev_mongo
+  # Created by dev-env.sh (migrate/up) so it can be pre-filled before first start.
   scan_data:
+    external: true
     name: lens_dev_scan_data
 
 networks:
