@@ -316,13 +316,14 @@ class TenancyMiddleware:
         if time.time() - self._seen.get(p.sub, 0) < 300:
             return
         now = datetime.now(timezone.utc).isoformat()
-        await self.db["users"].update_one(
-            {"id": p.sub},
-            {"$set": {"email": p.email, "name": p.name or p.email, "org_id": p.org_id,
-                      "role": "admin" if p.is_admin else "user", "status": "Active",
-                      "lastActive": now},
-             "$setOnInsert": {"id": p.sub, "createdAt": now}},
-            upsert=True)
+        fields = {"email": p.email, "name": p.name or p.email, "org_id": p.org_id,
+                  "role": "admin" if p.is_admin else "user", "status": "Active", "lastActive": now}
+        res = await self.db["users"].update_one({"id": p.sub}, {"$set": fields})
+        if res.matched_count == 0 and p.email:
+            # A record created before SSO (same email, old id): adopt it.
+            res = await self.db["users"].update_one({"email": p.email}, {"$set": {**fields, "id": p.sub}})
+        if res.matched_count == 0:
+            await self.db["users"].insert_one({**fields, "id": p.sub, "createdAt": now})
         self._seen[p.sub] = time.time()
 
     @staticmethod

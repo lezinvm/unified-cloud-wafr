@@ -2,6 +2,8 @@
  * API client to connect the React UI to the FastAPI backend.
  */
 
+import { OIDC_ENABLED, getAccessToken, login as oidcLogin } from './oidc';
+
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
 
 export type ScanStage = 'fetch' | 'check' | 'load';
@@ -23,12 +25,21 @@ export interface LiveScanStatus {
 async function apiRequest<T>(endpoint: string, options?: RequestInit): Promise<T> {
   const url = `${API_BASE_URL}${endpoint}`;
   try {
-    const res = await fetch(url, {
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      ...options,
-    });
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (OIDC_ENABLED) {
+      const token = await getAccessToken();
+      if (!token) {
+        // Session gone (expired refresh token): go back through sign-in.
+        oidcLogin();
+        throw new Error('Signed out');
+      }
+      headers.Authorization = `Bearer ${token}`;
+    }
+    const res = await fetch(url, { ...options, headers });
+    if (OIDC_ENABLED && res.status === 401) {
+      oidcLogin();
+      throw new Error('Session expired');
+    }
     if (!res.ok) {
       let message = `API Error [${res.status}]: ${res.statusText}`;
       try {

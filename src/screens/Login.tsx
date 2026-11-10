@@ -24,8 +24,16 @@ export function CloudifyOpsLogo({ height = 38, className = '' }: { height?: numb
 }
 
 import { isPersonalEmail } from '../utils/validation';
+import { OIDC_ENABLED } from '../services/oidc';
+import { OidcSignIn } from './OidcSignIn';
 
 export function Login() {
+  // Build-time constant: OIDC builds never render the password form below.
+  if (OIDC_ENABLED) return <OidcSignIn />;
+  return <LegacyLogin />;
+}
+
+function LegacyLogin() {
   const { loginUser } = useApp();
   const [mode, setMode] = useState<'signin' | 'signup'>('signin');
 

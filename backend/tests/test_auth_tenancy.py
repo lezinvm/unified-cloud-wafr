@@ -213,6 +213,13 @@ def test_user_record_created_from_token(client, mongo):
     assert u and u["org_id"] == "org_a" and u["role"] == "user"
 
 
+def test_pre_sso_user_record_is_adopted_not_duplicated(client, mongo):
+    mongo["users"].insert_one({"id": "usr-legacy", "email": "legacy@example.com", "org_id": "org_a"})
+    client.get("/api/assessments", headers=A(sub="kc-legacy", email="legacy@example.com"))
+    docs = list(mongo["users"].find({"email": "legacy@example.com"}))
+    assert len(docs) == 1 and docs[0]["id"] == "kc-legacy"
+
+
 def test_cors_preflight_allowed_origin_only(client):
     ok = client.options("/api/assessments", headers={
         "Origin": "http://localhost:8444", "Access-Control-Request-Method": "GET"})

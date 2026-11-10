@@ -4,9 +4,10 @@
 #   Mongo     : docker container wafr-dev-mongo   -> 127.0.0.1:27018 (prod uses :27017)
 #   Backend   : uvicorn backend.main:app          -> :8001   (prod uses :8000)
 #   Frontend  : vite preview of a dev build       -> :8444   (prod uses :8443)
-#   Keycloak  : NONE. Frontend uses VITE_AUTH_MODE=mock. The backend's
-#               KEYCLOAK_URL points at a dead address on purpose so it can
-#               never sync with or mutate the PROD Keycloak on :8080.
+#   Auth      : realm lens-dev on the prod Keycloak (:8080), set up with
+#               scripts/keycloak-dev-realm.sh. Frontend signs in with OIDC
+#               code+PKCE; backend runs AUTH_MODE=keycloak (every call needs
+#               a token; org/user come from it). The prod realm is untouched.
 #   Data      : REAL ONLY. Backend runs with REAL_DATA_ONLY=1 and the frontend
 #               is built with VITE_REAL_DATA_ONLY=true (no demo fallbacks, no
 #               simulated scans/re-runs).
@@ -30,6 +31,8 @@ mkdir -p "$RUN"
 API_PORT="${DEV_API_PORT:-8001}"
 WEB_PORT="${DEV_WEB_PORT:-8444}"
 KEEP_EMAIL="${DEV_KEEP_EMAIL:-lezin.menath@cloudifyops.com}"
+REALM="${DEV_REALM:-lens-dev}"
+CLIENT="${DEV_CLIENT:-lens-dev-app}"
 MONGO_PORT=27018
 MONGO_NAME=wafr-dev-mongo
 DEV_MONGO_URI="mongodb://localhost:${MONGO_PORT}"
@@ -76,24 +79,34 @@ start_backend() {
   (
     cd "$ROOT"
     venv
-    # SCAN_ENABLED lets the UI start real scans. The API has no auth, so this
-    # relies on the firewall allowing only your IP to reach :8001.
+    local host; host="$(host_ip)"
+    # AUTH_MODE=keycloak: every API call needs a token from realm $REALM;
+    # org/user come from the token. Tokens are issued for the public host, so
+    # the issuer uses it; signing keys are fetched over localhost.
+    # KEYCLOAK_URL stays dead so the legacy admin-API code can't reach Keycloak.
     MONGO_URI="$DEV_MONGO_URI" DB_NAME=wafr_db \
+    AUTH_MODE=keycloak \
+    KEYCLOAK_ISSUER="http://$host:8080/realms/$REALM" \
+    KEYCLOAK_JWKS_URL="http://127.0.0.1:8080/realms/$REALM/protocol/openid-connect/certs" \
+    KEYCLOAK_CLIENT_ID="$CLIENT" \
+    CORS_ORIGINS="http://$host:$WEB_PORT" \
     KEYCLOAK_URL="http://127.0.0.1:1" REAL_DATA_ONLY=1 SCAN_ENABLED=1 \
       nohup python -m uvicorn backend.main:app --host 0.0.0.0 --port "$API_PORT" \
       > "$RUN/backend.log" 2>&1 &
     echo $! > "$RUN/backend.pid"
   )
-  echo "backend starting on :$API_PORT (real data only)"
+  echo "backend starting on :$API_PORT (keycloak auth, real data only)"
 }
 
 build_frontend() {
   local host; host="$(host_ip)"
-  echo "building frontend (API=http://$host:$API_PORT/api, auth=mock, real data only)"
+  echo "building frontend (API=http://$host:$API_PORT/api, OIDC realm $REALM, real data only)"
   (
     cd "$ROOT"
     npx -y pnpm install --frozen-lockfile
-    VITE_API_URL="http://$host:$API_PORT/api" VITE_AUTH_MODE=mock VITE_REAL_DATA_ONLY=true \
+    VITE_API_URL="http://$host:$API_PORT/api" VITE_REAL_DATA_ONLY=true \
+    VITE_AUTH_MODE=oidc VITE_KEYCLOAK_URL="http://$host:8080" \
+    VITE_KEYCLOAK_REALM="$REALM" VITE_KEYCLOAK_CLIENT_ID="$CLIENT" \
       npx -y pnpm build
   )
 }

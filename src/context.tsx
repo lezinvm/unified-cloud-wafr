@@ -18,6 +18,7 @@ import {
 import { PillarData, PILLARS_DATA } from './data/wafrData';
 import { api, type LiveScanStatus } from './services/apiClient';
 import { REAL_DATA_ONLY } from './config/realData';
+import { OIDC_ENABLED, logout as oidcLogout } from './services/oidc';
 
 
 export type Cloud = 'aws' | 'azure' | 'gcp';
@@ -1371,6 +1372,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const switchUser = (userId: string) => {
+    // Identity comes from the signed-in token; client-side switching would be impersonation.
+    if (OIDC_ENABLED) return;
     const target = PRESET_USERS.find(u => u.id === userId) || {
       id: userId,
       name: 'Switched User',
@@ -1396,6 +1399,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     } catch {}
     setUserRole('user');
+    if (OIDC_ENABLED) {
+      oidcLogout(); // also ends the Keycloak session, then returns to the app
+      return;
+    }
     navigate('login');
   };
 

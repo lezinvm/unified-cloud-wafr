@@ -54,8 +54,10 @@ export const DEFAULT_KEYCLOAK_CONFIG: KeycloakConfig = {
   serverUrl: (import.meta.env.VITE_KEYCLOAK_URL as string) || 'http://localhost:8080',
   realm: 'lens-realm',
   clientId: 'lens-app',
-  adminUsername: 'admin',
-  adminPassword: 'admin',
+  // Legacy-only: OIDC builds never call the Keycloak admin API from the browser,
+  // and the minifier drops these literals from those bundles.
+  adminUsername: (import.meta.env.VITE_AUTH_MODE as string) === 'oidc' ? '' : 'admin',
+  adminPassword: (import.meta.env.VITE_AUTH_MODE as string) === 'oidc' ? '' : 'admin',
   // Build-time switch: set VITE_AUTH_MODE=mock for environments without a
   // Keycloak (e.g. the dev instance). Anything else keeps the default 'live'.
   mode: (import.meta.env.VITE_AUTH_MODE as string) === 'mock' ? 'mock' : 'live',
