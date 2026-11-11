@@ -154,7 +154,8 @@ def test_duplicate_assessment_rejected_and_rerun_suggested(mongo, fake_gcp, adb)
         with pytest.raises(scan_runner.ScanError) as excinfo:
             await _new(db, "cfg-dup", environment="dev", regions=["us-central1"])
         assert "already exists" in str(excinfo.value)
-        assert excinfo.value.hint  # contains the existing assessment id for rerun
+        first = mongo["assessments"].find_one({"cloud_account_id": "cfg-dup"})
+        assert first["id"] in str(excinfo.value)  # tells the user which one to rerun
 
         # Different environment (prod) for same account and region succeeds
         await _new(db, "cfg-dup", environment="prod", regions=["us-central1"])
@@ -165,6 +166,30 @@ def test_duplicate_assessment_rejected_and_rerun_suggested(mongo, fake_gcp, adb)
         assert mongo["assessments"].count_documents({"cloud_account_id": "cfg-dup"}) == 3
 
     asyncio.run(go())
+
+
+def test_duplicate_all_regions_detected_and_legacy_counts(mongo, fake_gcp, adb):
+    import scan_runner
+    _account(mongo, "cfg-all", "all-proj")
+    asyncio.run(_new(adb(), "cfg-all", environment="prod"))
+    with pytest.raises(scan_runner.ScanError, match="already exists"):
+        asyncio.run(_new(adb(), "cfg-all", environment="prod"))
+    # Older assessment: no environment (= prod), region label "global" (= all regions).
+    _account(mongo, "cfg-old", "old-proj")
+    mongo["assessments"].insert_one({"id": "A-GCP-old-proj", "cloud": "gcp", "cloud_account_id": "cfg-old",
+                                     "org_id": "org_a", "user_id": "user-a", "region": "global"})
+    with pytest.raises(scan_runner.ScanError, match="A-GCP-old-proj"):
+        asyncio.run(_new(adb(), "cfg-old", environment="prod"))
+    asyncio.run(_new(adb(), "cfg-old", environment="prod", regions=["us-central1"]))  # different scope: ok
+
+
+def test_duplicate_check_is_per_org_and_reveals_nothing(mongo, fake_gcp, adb):
+    _account(mongo, "cfg-orga", "shared-dup-proj")
+    _account(mongo, "cfg-orgb", "shared-dup-proj", org="org_b", user="user-b")
+    asyncio.run(_new(adb(), "cfg-orga", environment="prod", regions=["us-central1"], name="Org A secret name"))
+    # Org B has its own account on the same project: not a duplicate, nothing leaked.
+    s = asyncio.run(_new(adb(), "cfg-orgb", environment="prod", regions=["us-central1"]))
+    assert mongo["assessments"].find_one({"id": s["assessment_id"]})["org_id"] == "org_b"
 
 
 def test_gcp_region_of_items():

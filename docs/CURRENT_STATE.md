@@ -70,10 +70,17 @@ accounts / Azure subscriptions, in any number of orgs:
   (`dev` | `pre-prod` | `prod`, the "Account type / environment" choice) + `regions` (`[]` = all).
   `POST /api/scans` takes `{assessment_id}` (rescan, keeps its name/environment/regions) **or**
   `{cloud_account_id, environment, regions?, name?}` (always creates a **new** assessment
-  `A-<PROVIDER>-<scope>-<6hex>` owned by the account's org, then scans it). UI: New assessment form
-  (`src/screens/NewAssessmentReal.tsx`, shown by `Wizard` in real-only builds; Settings > account >
-  "New assessment"). CLI: `scan_runner.py --assessment-id` / `--cloud-account-id --environment [--regions]`.
-  Needs `SCAN_ENABLED=1`.
+  `A-<PROVIDER>-<scope>-<6hex>` owned by the account's org, then scans it). CLI:
+  `scan_runner.py --assessment-id` / `--cloud-account-id --environment [--regions]`. Needs `SCAN_ENABLED=1`.
+- **No duplicates (per org):** a new assessment with the same account + environment + region set as an
+  existing one **of the same org** is refused (409, message names the id to rerun). Older assessments
+  without `environment` count as prod; region label `global`/`All regions` = all regions
+  (`scan_runner.find_duplicate`, `stored_regions`). Another org on the same project is independent
+  and is never revealed.
+- **UI:** the 3-step `Wizard` (Antigravity `29312cf`) is used in all builds; in real-only builds it
+  lists the user's real accounts, warns about duplicates and offers "Rerun Assessment", and starts
+  `startAccountScan` with one region. `src/screens/NewAssessmentReal.tsx` (account + environment +
+  all/many regions) exists but is no longer routed. Settings > account > "New assessment" opens the wizard.
 - **Regions.** The fetch always covers the whole scope (stored once per scope). Each scan checks a
   copy filtered to the assessment's regions (`ScanProvider.filter_regions`). Items with no region
   (IAM policy, service accounts, org policies, VPC networks, firewall rules, routes, global
@@ -160,7 +167,7 @@ accounts / Azure subscriptions, in any number of orgs:
 ## 8. Verification
 
 ```bash
-cd backend && python -m pytest tests -q          # 91 tests; needs a reachable MongoDB
+cd backend && python -m pytest tests -q          # 94 tests; needs a reachable MongoDB
 pnpm build                                       # frontend
 pnpm exec tsc --noEmit -p .                      # 0 errors
 ```
