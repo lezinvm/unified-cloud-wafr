@@ -83,7 +83,10 @@ def get_provider(name: str) -> Provider:
     """Import the provider module on demand and return its Provider."""
     if name not in PROVIDERS:
         # Import the matching module so its @provider.check decorators run.
-        __import__(f"checks.{name}_checks")
+        try:
+            __import__(f"backend.checks.{name}_checks")
+        except ModuleNotFoundError:
+            __import__(f"checks.{name}_checks")
     if name not in PROVIDERS:
         raise ValueError(f"Unknown provider '{name}'. Available: {sorted(PROVIDERS)}")
     return PROVIDERS[name]

@@ -43,12 +43,14 @@ CHECK_SERVICES_MAP: Dict[str, List[str]] = {
     "NET-01": ["firewall_rules"],
     "NET-02": ["firewall_rules"],
     "NET-03": ["subnets"],
-    "NET-04": ["routes"],
-    "NET-05": ["firewall_rules"],
+    "NET-04": ["networks_vpc"],
+    "NET-05": ["routes"],
     "NET-06": ["firewall_rules"],
-    "NET-07": ["security_policies", "forwarding_rules"],
-    "NET-08": ["subnets"],
-    "NET-09": ["networks_vpc"],
+    "NET-07": ["firewall_rules"],
+    "NET-08": ["security_policies"],
+    "NET-09": ["subnets"],
+    "NET-10": ["networks_vpc"],
+    "NET-11": ["security_policies"],
 
     # Cost & Compute checks
     "CST-01": ["compute_instances"],
@@ -178,12 +180,13 @@ async def rerun_single_check(
 
     prov_name = (asm.get("cloud") or "gcp").lower()
     prov = scan_providers.get(prov_name)
+    provider_registry = get_provider(prov_name)
     acct = await db["cloud_accounts"].find_one({"id": asm.get("cloud_account_id")}, {"_id": 0}) or {}
     scope = acct.get(prov.account_scope_field) or acct.get("account_identifier") or asm.get("accountId") or "lens-wafr-gcp"
 
     catalog = load_control_catalog()
     ctrl = catalog.get(check_id.upper()) or {}
-    tokens_str = ctrl.get(prov.catalog_column, "")
+    tokens_str = ctrl.get(provider_registry.catalog_column, "") if provider_registry else ctrl.get(f"{prov_name}_checks", "")
     tokens = [t.strip() for t in tokens_str.split(";") if t.strip()]
 
     # 1. Fetch targeted live data from the cloud

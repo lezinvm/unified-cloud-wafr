@@ -67,6 +67,10 @@ class ScanProvider:
         return DATA_DIR / f"{self.name}_fetch_result.json"
 
     @property
+    def catalog_column(self) -> str:
+        return f"{self.name}_checks"
+
+    @property
     def can_scan(self) -> bool:
         return self.fetch_cmd is not None
 
