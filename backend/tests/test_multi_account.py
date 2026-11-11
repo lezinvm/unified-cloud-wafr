@@ -31,9 +31,10 @@ def _verify(scope):
 
 
 @pytest.fixture
-def fake_gcp(monkeypatch):
+def fake_gcp(monkeypatch, tmp_path):
     import scan_providers
     import scan_runner
+    monkeypatch.setattr(scan_providers, "DATA_DIR", tmp_path / "data")  # per-test scan files
     gcp = dataclasses.replace(scan_providers.GCP, fetch_cmd=_fake_fetch, verify_cmd=_verify)
     monkeypatch.setitem(scan_providers.PROVIDERS, "gcp", gcp)
     monkeypatch.setattr(scan_runner, "_worker", None)
@@ -55,6 +56,13 @@ def _account(mongo, acct_id, scope, org="org_a", user="user-a", **extra):
                                         "org_id": org, "user_id": user, **extra})
 
 
+async def _new(db, acct, background=False, **spec):
+    """Create a new assessment for an account and scan it."""
+    import scan_runner
+    return await scan_runner.start_scan(db, cloud_account_id=acct, spec={"environment": "prod", **spec},
+                                        background=background, require_enabled=False)
+
+
 def test_scan_new_accounts_creates_assessments_and_keeps_files_apart(mongo, fake_gcp, adb):
     import scan_runner
     _account(mongo, "cfg-111", "team-open-one")
@@ -62,17 +70,17 @@ def test_scan_new_accounts_creates_assessments_and_keeps_files_apart(mongo, fake
 
     async def go():
         db = adb()
-        s1 = await scan_runner.start_scan(db, cloud_account_id="cfg-111", background=False, require_enabled=False)
-        s2 = await scan_runner.start_scan(db, cloud_account_id="cfg-222", background=False, require_enabled=False)
-        return s1, s2
+        return await _new(db, "cfg-111"), await _new(db, "cfg-222")
 
     s1, s2 = asyncio.run(go())
     d1, d2 = (mongo["scans"].find_one({"id": s["id"]}) for s in (s1, s2))
     assert d1["status"] == "done", d1.get("error")
     assert d2["status"] == "done", d2.get("error")
 
-    a1 = mongo["assessments"].find_one({"id": "A-GCP-team-open-one"})
-    a2 = mongo["assessments"].find_one({"id": "A-GCP-team-closed-two"})
+    a1 = mongo["assessments"].find_one({"id": d1["assessment_id"]})
+    a2 = mongo["assessments"].find_one({"id": d2["assessment_id"]})
+    assert a1["id"].startswith("A-GCP-team-open-one-")
+    assert a1["environment"] == "prod" and a1["regions"] == [] and a1["region"] == "All regions"
     # Results attach to the user's own account record, owned by its org.
     assert a1["cloud_account_id"] == "cfg-111" and a2["cloud_account_id"] == "cfg-222"
     assert a1["org_id"] == "org_a" and "placeholder" not in a1
@@ -84,9 +92,71 @@ def test_scan_new_accounts_creates_assessments_and_keeps_files_apart(mongo, fake
     assert mongo["checks"].find_one({"assessment_id": a2["id"], "id": "NET-01"})["status"] == "pass"
     # One fetch file per project.
     assert fake_gcp.stored_scopes() == ["team-closed-two", "team-open-one"]
-    # Rescanning the account reuses its assessment.
-    asyncio.run(scan_runner.start_scan(adb(), cloud_account_id="cfg-111", background=False, require_enabled=False))
+    # Rescanning an assessment keeps it (and its name); no new one.
+    mongo["assessments"].update_one({"id": a1["id"]}, {"$set": {"name": "My review"}})
+    asyncio.run(scan_runner.start_scan(adb(), a1["id"], background=False, require_enabled=False))
     assert mongo["assessments"].count_documents({"cloud_account_id": "cfg-111"}) == 1
+    assert mongo["assessments"].find_one({"id": a1["id"]})["name"] == "My review"
+
+
+def test_one_account_many_assessments_by_environment_and_region(mongo, fake_gcp, adb):
+    _account(mongo, "cfg-multi", "multi-region-proj")
+
+    async def go():
+        db = adb()
+        return (await _new(db, "cfg-multi", environment="prod", regions=["europe-west1"]),
+                await _new(db, "cfg-multi", environment="dev", regions=["us-central1"]),
+                await _new(db, "cfg-multi", environment="pre-prod"))
+
+    scans = asyncio.run(go())
+    docs = [mongo["scans"].find_one({"id": s["id"]}) for s in scans]
+    assert all(d["status"] == "done" for d in docs), [d.get("error") for d in docs]
+    eu, us, allr = (mongo["assessments"].find_one({"id": d["assessment_id"]}) for d in docs)
+    assert len({eu["id"], us["id"], allr["id"]}) == 3
+    assert (eu["environment"], us["environment"], allr["environment"]) == ("prod", "dev", "pre-prod")
+    assert eu["region"] == "europe-west1" and allr["region"] == "All regions"
+
+    def vms(a):
+        return {r["name"] for r in mongo["resource_inventory"].find({"assessment_id": a["id"],
+                                                                     "type": "compute_instance"})}
+    # Regional resources follow each assessment's regions.
+    assert vms(eu) == {"vm-eu-multi-region-proj"}
+    assert vms(us) == {"vm-us-multi-region-proj"}
+    assert vms(allr) == {"vm-eu-multi-region-proj", "vm-us-multi-region-proj"}
+    # Account-wide items (global firewall rule) are in every assessment.
+    for a in (eu, us, allr):
+        assert mongo["checks"].find_one({"assessment_id": a["id"], "id": "NET-01"})["status"] == "fail"
+    # One stored fetch for the account, not one per assessment.
+    assert fake_gcp.stored_scopes() == ["multi-region-proj"]
+
+
+def test_bad_environment_or_region_creates_nothing(mongo, fake_gcp, adb):
+    import scan_runner
+    _account(mongo, "cfg-v", "valid-proj")
+    for spec in ({"environment": "qa"}, {"environment": "prod", "regions": ["not a region"]},
+                 {"environment": "prod", "regions": "us-central1"}):
+        with pytest.raises(scan_runner.ScanError):
+            asyncio.run(scan_runner.start_scan(adb(), cloud_account_id="cfg-v", spec=spec, require_enabled=False))
+    assert mongo["assessments"].count_documents({"cloud_account_id": "cfg-v"}) == 0
+
+
+def test_gcp_region_of_items():
+    import scan_providers as sp
+    gcp = sp.get("gcp")
+    assert gcp.region_of({"zone": "https://x/projects/p/zones/us-central1-a"}) == "us-central1"
+    assert gcp.region_of({"region": "projects/p/regions/europe-west1"}) == "europe-west1"
+    assert gcp.region_of({"location": "US-CENTRAL1"}) == "us-central1"
+    assert gcp.region_of({"name": "projects/p/locations/asia-south1/functions/f"}) == "asia-south1"
+    assert gcp.region_of({"name": "allow-ssh", "selfLink": "projects/p/global/firewalls/allow-ssh"}) is None
+    # Multi-region bucket "US" belongs to US regions, not Europe.
+    assert gcp.in_regions({"location": "US"}, ["us-east1"])
+    assert not gcp.in_regions({"location": "US"}, ["europe-west1"])
+    assert gcp.in_regions({"bindings": []}, ["europe-west1"])  # IAM policy: account-wide
+    run = {"metadata": {"labels": {"cloud.googleapis.com/location": "us-central1"}}}
+    assert gcp.region_of(run) == "us-central1"  # Cloud Run
+    assert gcp.in_regions({"locationId": "nam5"}, ["us-east1"]) and not gcp.in_regions({"locationId": "nam5"}, ["asia-east1"])
+    assert gcp.region_counts({"projects": {"p": {"services": {"x": {"ok": True, "data": [
+        {"location": "US"}, {"zone": "us-east1-b"}]}}}}}, "p") == {"us-east1": 1}
 
 
 def test_same_project_in_two_orgs_stays_separate(mongo, fake_gcp, adb):
@@ -97,7 +167,7 @@ def test_same_project_in_two_orgs_stays_separate(mongo, fake_gcp, adb):
     async def go():
         db = adb()
         for acct in ("cfg-a", "cfg-b"):
-            await scan_runner.start_scan(db, cloud_account_id=acct, background=False, require_enabled=False)
+            await _new(db, acct)
     asyncio.run(go())
 
     a = list(mongo["assessments"].find({"account_identifier": "shared-project"}, {"_id": 0}))
@@ -110,8 +180,7 @@ def test_same_project_in_two_orgs_stays_separate(mongo, fake_gcp, adb):
 def test_no_access_fails_fast_with_grant_hint(mongo, fake_gcp, adb):
     import scan_runner
     _account(mongo, "cfg-x", "noaccess-proj")
-    s = asyncio.run(scan_runner.start_scan(adb(), cloud_account_id="cfg-x", background=False,
-                                           require_enabled=False))
+    s = asyncio.run(_new(adb(), "cfg-x"))
     d = mongo["scans"].find_one({"id": s["id"]})
     assert d["status"] == "failed" and d["stages"]["verify"] == "failed"
     assert d["stages"]["fetch"] == "pending"  # never started the slow fetch
@@ -125,7 +194,7 @@ def test_invalid_stored_scope_creates_nothing(mongo, fake_gcp, adb):
     import scan_runner
     _account(mongo, "cfg-bad", "Not A Project!")
     with pytest.raises(scan_runner.ScanError, match="not a valid"):
-        asyncio.run(scan_runner.start_scan(adb(), cloud_account_id="cfg-bad", require_enabled=False))
+        asyncio.run(_new(adb(), "cfg-bad", background=True))
     assert mongo["assessments"].count_documents({"cloud_account_id": "cfg-bad"}) == 0
 
 
@@ -139,11 +208,11 @@ def test_scans_queue_instead_of_being_refused(mongo, fake_gcp, adb, monkeypatch)
 
     async def go():
         db = adb()
-        s1 = await scan_runner.start_scan(db, cloud_account_id="cfg-q1", require_enabled=False)
-        s2 = await scan_runner.start_scan(db, cloud_account_id="cfg-q2", require_enabled=False)
+        s1 = await _new(db, "cfg-q1", background=True)
+        s2 = await _new(db, "cfg-q2", background=True)
         # A second scan of the same assessment is refused while one is waiting.
         with pytest.raises(scan_runner.ScanError, match="already queued or running"):
-            await scan_runner.start_scan(db, cloud_account_id="cfg-q2", require_enabled=False)
+            await scan_runner.start_scan(db, s2["assessment_id"], require_enabled=False)
         deadline = time.time() + 120
         while time.time() < deadline:
             docs = await db["scans"].find({"id": {"$in": [s1["id"], s2["id"]]}}).to_list(5)
@@ -215,6 +284,8 @@ def test_api_account_access_info(client, mongo):
     body = r.json()
     assert body["scope"] == "visible-proj" and body["valid_scope"] and body["can_scan"]
     assert "visible-proj" in body["hint"]
+    assert "us-central1" in body["regions"] and set(body["environments"]) == {"dev", "pre-prod", "prod"}
+    assert body["region_resources"] == {}  # never fetched yet
     assert client.get("/api/cloud-accounts/cfg-acc/access", headers=B()).status_code == 404
 
 
@@ -231,7 +302,7 @@ def test_targeted_recheck_keeps_full_fetch_and_uses_own_scope(mongo, fake_gcp, a
         monkeypatch.setitem(mod.PROVIDERS, "gcp",
                             dataclasses.replace(mod.GCP, fetch_cmd=_fake_fetch, verify_cmd=_verify))
     _account(mongo, "cfg-rc", "recheck-proj")
-    asyncio.run(scan_runner.start_scan(adb(), cloud_account_id="cfg-rc", background=False, require_enabled=False))
+    asyncio.run(_new(adb(), "cfg-rc"))
     stored = fake_gcp.fetch_path("recheck-proj")
     before = stored.read_bytes()
 

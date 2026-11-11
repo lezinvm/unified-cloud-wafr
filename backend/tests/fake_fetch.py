@@ -18,6 +18,13 @@ services["firewall_rules"]["data"] = [{
     "sourceRanges": ["10.0.0.0/8" if "closed" in scope else "0.0.0.0/0"],
     "allowed": [{"IPProtocol": "tcp", "ports": ["22"]}], "logConfig": {"enable": False},
 }]
+# One VM in each of two regions, for region-filtered assessments.
+services["compute_instances"]["data"] = [
+    {"name": f"vm-us-{scope}", "zone": f"projects/{scope}/zones/us-central1-a",
+     "networkInterfaces": [{"accessConfigs": []}], "serviceAccounts": [], "metadata": {}},
+    {"name": f"vm-eu-{scope}", "zone": f"projects/{scope}/zones/europe-west1-b",
+     "networkInterfaces": [{"accessConfigs": []}], "serviceAccounts": [], "metadata": {}},
+]
 if only:
     services = {k: v for k, v in services.items() if k in only}
 with open(out, "w", encoding="utf-8") as f:

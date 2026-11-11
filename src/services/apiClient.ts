@@ -30,6 +30,27 @@ export interface LiveScanStatus {
   result: { score: number; passed: number; failed: number; resources: number } | null;
 }
 
+export type Environment = 'dev' | 'pre-prod' | 'prod';
+/** A new assessment of one cloud account. regions: [] = all regions. */
+export interface NewAssessmentSpec {
+  name?: string;
+  environment: Environment;
+  regions: string[];
+}
+export interface CloudAccountAccess {
+  provider: string;
+  scope_label: string;
+  scope: string;
+  valid_scope: boolean;
+  can_scan: boolean;
+  hint: string;
+  regions: string[];
+  /** Resources per region from the last fetch of this account. */
+  region_resources: Record<string, number>;
+  last_fetched_at: string | null;
+  environments: Record<Environment, string>;
+}
+
 async function apiRequest<T>(endpoint: string, options?: RequestInit): Promise<T> {
   const url = `${API_BASE_URL}${endpoint}`;
   try {
@@ -275,15 +296,14 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ assessment_id: assessmentId }),
     }),
-  /** Scan a stored cloud account; its assessment is created on the first scan. */
-  startAccountScan: (cloudAccountId: string) =>
+  /** Create a new assessment for a stored cloud account and scan it. */
+  startAccountScan: (cloudAccountId: string, spec: NewAssessmentSpec) =>
     apiRequest<LiveScanStatus>('/scans', {
       method: 'POST',
-      body: JSON.stringify({ cloud_account_id: cloudAccountId }),
+      body: JSON.stringify({ cloud_account_id: cloudAccountId, ...spec }),
     }),
   getCloudAccountAccess: (cloudAccountId: string) =>
-    apiRequest<{ provider: string; scope_label: string; scope: string; valid_scope: boolean; can_scan: boolean; hint: string }>(
-      `/cloud-accounts/${encodeURIComponent(cloudAccountId)}/access`),
+    apiRequest<CloudAccountAccess>(`/cloud-accounts/${encodeURIComponent(cloudAccountId)}/access`),
   getScan: (scanId: string) => apiRequest<LiveScanStatus>(`/scans/${encodeURIComponent(scanId)}`),
   getScans: (assessmentId?: string, limit = 1) => {
     const params = new URLSearchParams({ limit: String(limit) });

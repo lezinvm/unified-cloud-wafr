@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { REAL_DATA_ONLY } from '../config/realData';
-import { RealDataNotice, SCANNER_REASON } from '../components/RealDataNotice';
 import { useApp, Cloud } from '../context';
+import { NewAssessmentReal } from './NewAssessmentReal';
 import { AwsWordmark, AzureMark, GcpMark, CloudifyOpsSymbol } from '../components/CloudLogo';
 import { INITIAL_ORG_QUESTIONS } from '../data/questionnaireData';
 import { AccountCredentialsModal } from '../components/AccountCredentialsModal';
@@ -1998,9 +1998,9 @@ function Step3({
 
 /* ── Main Wizard Component ── */
 export function Wizard() {
-  if (REAL_DATA_ONLY) {
-    return <RealDataNotice feature="New assessment" reason={'The wizard creates an assessment with preset scores instead of scanning. ' + SCANNER_REASON} />;
-  }
+  // Build-time constant, so this never changes hook order. Real builds use the
+  // real form (account + environment + regions -> real scan).
+  if (REAL_DATA_ONLY) return <NewAssessmentReal />;
   return <WizardInner />;
 }
 

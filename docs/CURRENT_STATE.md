@@ -44,7 +44,7 @@ Shared: host nginx (separate server blocks) and the Keycloak container `wafr-key
 git pull origin dev-lezin && scripts/dev-env.sh rebuild   # update + restart dev
 scripts/dev-env.sh status | logs | down
 scripts/dev-env.sh scan <assessment-id>                    # rescan, same pipeline as the UI "Scan now"
-scripts/dev-env.sh scan-account <cloud-account-id>         # scan any stored account (creates its assessment)
+scripts/dev-env.sh scan-account <id> <dev|pre-prod|prod> [regions]   # new assessment for an account + scan
 scripts/dev-env.sh reset-data                              # wipe demo data, reload every stored project/account
 scripts/keycloak-dev-realm.sh <email> <org_id> [admin]     # create/refresh dev realm + user
 ```
@@ -66,10 +66,22 @@ load   backend/load_assessment_to_db.py       assessment, findings, remediations
 **Multi-cloud, multi-account.** Nothing is tied to one project. Any number of GCP projects / AWS
 accounts / Azure subscriptions, in any number of orgs:
 
-- `POST /api/scans` takes `{assessment_id}` (rescan) **or** `{cloud_account_id}` (scan an account;
-  its assessment `A-<PROVIDER>-<scope>` is created on the first scan, owned by the account's org; if
-  another org already has that id, the account id is appended). CLI: `scan_runner.py --assessment-id`
-  / `--cloud-account-id`. Needs `SCAN_ENABLED=1`.
+- **One account, many assessments.** An assessment = cloud account + `environment`
+  (`dev` | `pre-prod` | `prod`, the "Account type / environment" choice) + `regions` (`[]` = all).
+  `POST /api/scans` takes `{assessment_id}` (rescan, keeps its name/environment/regions) **or**
+  `{cloud_account_id, environment, regions?, name?}` (always creates a **new** assessment
+  `A-<PROVIDER>-<scope>-<6hex>` owned by the account's org, then scans it). UI: New assessment form
+  (`src/screens/NewAssessmentReal.tsx`, shown by `Wizard` in real-only builds; Settings > account >
+  "New assessment"). CLI: `scan_runner.py --assessment-id` / `--cloud-account-id --environment [--regions]`.
+  Needs `SCAN_ENABLED=1`.
+- **Regions.** The fetch always covers the whole scope (stored once per scope). Each scan checks a
+  copy filtered to the assessment's regions (`ScanProvider.filter_regions`). Items with no region
+  (IAM policy, service accounts, org policies, VPC networks, firewall rules, routes, global
+  addresses, secrets...) are **account-wide and included in every assessment**. Multi-region
+  locations (`US`, `EU`, `nam5`) match the regions in that geography. Region of an item:
+  `ScanProvider.item_region` (GCP: region/zone/location fields, `/locations|regions|zones/` in the
+  name, Cloud Run location label). `GET /api/cloud-accounts/{id}/access` returns resources per
+  region from the last fetch for the form.
 - Scope id comes from the stored account via the provider's `scope_of` (GCP `gcp_project`; AWS 12-digit
   `account_identifier` or the account in `role_arn`; Azure `subscription_id`), never from the request.
 - Results attach to the user's own cloud account (`--cloud-account-id` on the loader); the loader no
@@ -84,7 +96,9 @@ accounts / Azure subscriptions, in any number of orgs:
   returns scope + hint for the UI.
 - **To add a new GCP project:** grant `lens-scanner@lens-wafr-gcp.iam.gserviceaccount.com`
   `roles/viewer` and `roles/iam.securityReviewer` on it, add the account in Settings with its project
-  id, press "Scan".
+  id, press "New assessment", pick environment + regions.
+- **Fetch memory:** every gcloud call is a ~100 MB process; the fetcher caps calls in flight
+  (`GCP_FETCH_CONCURRENCY`, default 4, dev 3). Dev backend `mem_limit: 1g`.
 - Targeted re-checks (`/api/checks/rerun`) fetch into a temp file and never replace the stored full fetch.
 - A fetch with fewer than 20 readable services is rejected and previous data kept.
 - Last real result for `A-GCP-lens-wafr-gcp`: 42 services readable, score 20, 33 fail / 8 pass, 42 unknown, 43 n/a, 137 resources.
@@ -127,7 +141,7 @@ accounts / Azure subscriptions, in any number of orgs:
 
 ## 6. Data model notes
 
-- Assessment id for scans: `A-<PROVIDER>-<scope>`; finding `FND-<assessment>-<control>`; remediation `REM-<assessment>-<control>`; check `id` = control id (UI links by it) + `assessment_id`.
+- Assessment id for scans: `A-<PROVIDER>-<scope>-<6hex>` (older ones `A-<PROVIDER>-<scope>`); fields `environment`, `regions`, `region` (display label); finding `FND-<assessment>-<control>`; remediation `REM-<assessment>-<control>`; check `id` = control id (UI links by it) + `assessment_id`.
 - `/api/pillars` returns one assessment's tree and scores (`assessment_id`, or the caller's latest for that cloud).
 
 ## 7. Open work (priority order)
@@ -146,7 +160,7 @@ accounts / Azure subscriptions, in any number of orgs:
 ## 8. Verification
 
 ```bash
-cd backend && python -m pytest tests -q          # 88 tests; needs a reachable MongoDB
+cd backend && python -m pytest tests -q          # 91 tests; needs a reachable MongoDB
 pnpm build                                       # frontend
 pnpm exec tsc --noEmit -p .                      # 0 errors
 ```

@@ -68,6 +68,18 @@ class ScanProvider:
     access_hint: Callable[[str], str] | None = None
     # scope_of(cloud_account_doc): the scope id held by a stored cloud account.
     scope_of: Callable[[dict], str] | None = None
+    # Regions an assessment can be limited to (empty assessment list = all).
+    # The list can lag behind the cloud, so any id matching region_id_re is
+    # accepted too (and regions seen in a fetch are offered in the UI).
+    regions: tuple[str, ...] = ()
+    region_id_re: re.Pattern | None = None
+    # item_region(item): region of a fetched item, or None when it is global /
+    # account-wide (IAM, org policy, global networks...). Global items are in
+    # every assessment of the account regardless of its regions.
+    item_region: Callable[[dict], str | None] | None = None
+    # region_matches(item_region, selected_region): for multi-region locations
+    # (e.g. GCP "us" buckets); default is equality.
+    region_matches: Callable[[str, str], bool] | None = None
     min_readable_services: int = 20    # below this the fetch is treated as blocked
     inventory_types: dict[str, str] = field(default_factory=dict)
     resource_ref: Callable[[dict, str], tuple[str, str, str]] | None = None
@@ -113,6 +125,56 @@ class ScanProvider:
 
     def hint(self, scope: str) -> str:
         return self.access_hint(scope) if self.access_hint else ""
+
+    # ---- regions -------------------------------------------------------------
+
+    def region_of(self, item) -> str | None:
+        if not isinstance(item, dict) or not self.item_region:
+            return None
+        r = self.item_region(item)
+        return r.lower() if r else None
+
+    def valid_region(self, region: str) -> bool:
+        return region in self.regions or bool(self.region_id_re and self.region_id_re.match(region))
+
+    def in_regions(self, item, regions: list[str]) -> bool:
+        """Keep an item for an assessment limited to `regions` ([] = all)."""
+        if not regions:
+            return True
+        r = self.region_of(item)
+        if r is None or r == "global":
+            return True  # account-wide: applies to every region
+        match = self.region_matches or (lambda a, b: a == b)
+        return any(match(r, sel) for sel in regions)
+
+    def filter_regions(self, fetch: dict, scope: str, regions: list[str]) -> dict:
+        """Copy of a fetch for one scope with only the items in `regions`,
+        plus every global item. Single-object services (policies) are kept."""
+        body = ((fetch.get(self.scope_key) or {}).get(scope)) or {}
+        services = {}
+        for key, svc in (body.get("services") or {}).items():
+            data = svc.get("data") if isinstance(svc, dict) else None
+            if isinstance(data, list):
+                kept = [it for it in data if self.in_regions(it, regions)]
+                services[key] = {**svc, "data": kept, "count": len(kept)}
+            else:
+                services[key] = svc
+        out = {k: v for k, v in fetch.items() if k != self.scope_key}
+        out[self.scope_key] = {scope: {**body, "services": services}}
+        out["regionFilter"] = list(regions)
+        return out
+
+    def region_counts(self, fetch: dict, scope: str) -> dict[str, int]:
+        """Resources per region in a fetch (global items excluded)."""
+        counts: dict[str, int] = {}
+        body = ((fetch.get(self.scope_key) or {}).get(scope)) or {}
+        for svc in (body.get("services") or {}).values():
+            data = svc.get("data") if isinstance(svc, dict) else None
+            for it in data if isinstance(data, list) else []:
+                r = self.region_of(it)
+                if r and self.valid_region(r):  # multi-regions (us, nam5) aren't regions
+                    counts[r] = counts.get(r, 0) + 1
+        return dict(sorted(counts.items(), key=lambda kv: -kv[1]))
 
     def inventory_ref(self, item: dict, fallback: str) -> tuple[str, str, str]:
         if self.resource_ref:
@@ -194,6 +256,60 @@ def _gcp_scope(acct: dict) -> str:
     return str(acct.get("gcp_project") or acct.get("account_identifier") or "")
 
 
+# Public GCP regions (gcloud compute regions list). Update when Google adds one.
+GCP_REGIONS = (
+    "africa-south1", "asia-east1", "asia-east2", "asia-northeast1", "asia-northeast2",
+    "asia-northeast3", "asia-south1", "asia-south2", "asia-southeast1", "asia-southeast2",
+    "asia-southeast3", "australia-southeast1", "australia-southeast2", "europe-central2", "europe-north1",
+    "europe-north2", "europe-southwest1", "europe-west1", "europe-west2", "europe-west3",
+    "europe-west4", "europe-west6", "europe-west8", "europe-west9", "europe-west10",
+    "europe-west12", "me-central1", "me-central2", "me-west1", "northamerica-northeast1",
+    "northamerica-northeast2", "northamerica-south1", "southamerica-east1",
+    "southamerica-west1", "us-central1", "us-east1", "us-east4", "us-east5", "us-south1",
+    "us-west1", "us-west2", "us-west3", "us-west4",
+)
+_GCP_ZONE_RE = re.compile(r"^([a-z]+-[a-z]+\d+)-[a-z]$")
+_GCP_PATH_RE = re.compile(r"/(?:locations|regions|zones)/([A-Za-z0-9-]+)")
+# Multi-region and dual-region locations (Cloud Storage, KMS, Artifact Registry...)
+_GCP_MULTI = {"us": ("us-", "northamerica-"), "eu": ("europe-",), "asia": ("asia-",),
+              "nam4": ("us-",), "eur4": ("europe-",), "eur5": ("europe-",),
+              "eur7": ("europe-",), "eur8": ("europe-",), "asia1": ("asia-",)}
+
+
+def _gcp_norm(loc: str) -> str | None:
+    loc = _short(str(loc)).lower()
+    if not loc or loc == "global":
+        return "global" if loc == "global" else None
+    m = _GCP_ZONE_RE.match(loc)
+    return m.group(1) if m else loc  # zone -> region
+
+
+def _gcp_item_region(item: dict) -> str | None:
+    for k in ("region", "zone", "location", "_location", "locationId"):
+        v = item.get(k)
+        if isinstance(v, str) and v:
+            return _gcp_norm(v)
+    # Cloud Run / Knative-style resources keep it in a metadata label.
+    md = item.get("metadata")
+    labels = md.get("labels") if isinstance(md, dict) else None
+    if isinstance(labels, dict) and labels.get("cloud.googleapis.com/location"):
+        return _gcp_norm(labels["cloud.googleapis.com/location"])
+    for k in ("name", "selfLink"):
+        m = _GCP_PATH_RE.search(str(item.get(k) or ""))
+        if m:
+            return _gcp_norm(m.group(1))
+    return None  # global / account-wide
+
+
+def _gcp_region_matches(item_region: str, selected: str) -> bool:
+    if item_region == selected:
+        return True
+    prefixes = _GCP_MULTI.get(item_region)
+    if prefixes is None and re.match(r"^nam\d+$", item_region):  # Firestore/Spanner nam5, nam6...
+        prefixes = ("us-", "northamerica-")
+    return bool(prefixes) and selected.startswith(prefixes)
+
+
 def _gcp_ref(item: dict, fallback: str) -> tuple[str, str, str]:
     raw = item.get("name") or item.get("email") or item.get("id") or fallback
     return (_short(raw), item.get("selfLink") or item.get("name") or _short(raw),
@@ -230,6 +346,8 @@ GCP = ScanProvider(
     account_scope_field="gcp_project",
     lens="google-cloud-architecture-framework", auth_type="service-account",
     fetch_cmd=_gcp_fetch, verify_cmd=_gcp_verify, access_hint=_gcp_hint, scope_of=_gcp_scope,
+    regions=GCP_REGIONS, region_id_re=re.compile(r"^[a-z]+-[a-z]+\d+$"),
+    item_region=_gcp_item_region, region_matches=_gcp_region_matches,
     inventory_types={
         "compute_instances": "compute_instance", "compute_disks": "compute_disk",
         "storage_buckets": "storage_bucket", "networks_vpc": "vpc_network",

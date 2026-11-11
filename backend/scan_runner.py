@@ -8,12 +8,15 @@ any number of projects / accounts / subscriptions.
     load    python load_assessment_to_db.py --provider <p> --assessment-id <id>
 
 Started from the API (POST /api/scans) or the CLI:
-    python scan_runner.py --assessment-id A-GCP-my-project
-    python scan_runner.py --cloud-account-id <stored cloud account id>
+    python scan_runner.py --assessment-id A-GCP-my-project           # rescan
+    python scan_runner.py --cloud-account-id <id> --environment prod [--regions us-central1,us-east1]
 
-A scan targets either an existing assessment or a stored cloud account. For an
-account with no assessment yet, one is created (owned by the account's org and
-user) and filled by the first successful scan.
+An account can have many assessments (per environment / region set). A scan
+either rescans an existing assessment or creates a new one for a stored cloud
+account (owned by the account's org and user). The fetch always covers the
+whole scope and is stored once per scope; each assessment is checked against a
+copy filtered to its regions. Account-wide items (IAM, org policy, global
+networks/firewalls, ...) are in every assessment.
 
 Each scan is a document in the `scans` collection so the UI can poll progress:
     { id, assessment_id, cloud_account_id, provider, project,
@@ -152,61 +155,75 @@ async def resolve_target(db, assessment_id: str) -> dict:
     if not user_id or not org_id:
         raise ScanError("Assessment has no owner (user_id/org_id); cannot load results.")
     return {"provider": prov.name, "project": scope, "user_id": user_id, "org_id": org_id,
-            "cloud_account_id": acct.get("id") or a.get("cloud_account_id")}
+            "cloud_account_id": acct.get("id") or a.get("cloud_account_id"),
+            "regions": list(a.get("regions") or [])}
 
 
-def _safe_id(s: str) -> str:
-    return re.sub(r"[^A-Za-z0-9-]", "-", s)[:40].strip("-")
+ENVIRONMENTS = {"dev": "Dev", "pre-prod": "Pre-Prod", "prod": "Prod"}
 
 
-async def assessment_for_account(db, cloud_account_id: str, org_id: str | None = None) -> str:
-    """Latest assessment of a stored cloud account; creates one if none exists."""
+def region_label(regions: list[str]) -> str:
+    return ", ".join(regions) if regions else "All regions"
+
+
+def validate_spec(prov, spec: dict | None) -> dict:
+    """Name / environment / regions of a new assessment."""
+    spec = spec or {}
+    env = str(spec.get("environment") or "").lower()
+    if env not in ENVIRONMENTS:
+        raise ScanError(f"Choose an environment: {', '.join(ENVIRONMENTS)}.")
+    regions = spec.get("regions") or []
+    if not isinstance(regions, list) or not all(isinstance(r, str) for r in regions):
+        raise ScanError("regions must be a list of region ids (empty = all regions).")
+    regions = sorted({r.strip().lower() for r in regions if r.strip()})
+    unknown = [r for r in regions if not prov.valid_region(r)]
+    if unknown:
+        raise ScanError(f"Unknown {prov.label} region(s): {', '.join(unknown)}.")
+    name = str(spec.get("name") or "").strip()[:120]
+    return {"environment": env, "regions": regions, "name": name}
+
+
+async def create_assessment(db, cloud_account_id: str, spec: dict | None,
+                            org_id: str | None = None) -> str:
+    """New assessment for a stored cloud account. An account can have many
+    (per environment / region set); each scan of the account's scope is
+    filtered to the assessment's regions. Account-wide settings (IAM, org
+    policy...) are in every one of them."""
     acct = await db["cloud_accounts"].find_one({"id": cloud_account_id}, {"_id": 0})
     if not acct or (org_id and acct.get("org_id") and acct["org_id"] != org_id):
         raise ScanError("Cloud account not found.")
     prov = _provider(acct.get("cloud") or "")
     scope = _scope(prov, acct)
+    s = validate_spec(prov, spec)
     if not acct.get("user_id") or not acct.get("org_id"):
         raise ScanError("Cloud account has no owner (user_id/org_id).")
-    existing = await db["assessments"].find_one(
-        {"cloud_account_id": cloud_account_id, "cloud": prov.name, "org_id": acct["org_id"]},
-        {"_id": 0, "id": 1}, sort=[("created_at", -1)])
-    if existing:
-        return existing["id"]
-    # Same id scheme as the loader; suffixed with the account id if another
-    # account (e.g. another org scanning the same project) already has it.
-    aid = f"A-{prov.name.upper()}-{scope}"
-    if await db["assessments"].find_one({"id": aid}, {"_id": 1}):
-        aid = f"{aid}-{_safe_id(cloud_account_id)}"
-    await db["assessments"].update_one({"id": aid}, {"$setOnInsert": {
-        "id": aid, "name": f"{prov.label} Live Well-Architected Review — {scope}",
-        "cloud": prov.name, "cloud_account_id": cloud_account_id,
+    aid = f"A-{prov.name.upper()}-{scope}-{uuid.uuid4().hex[:6]}"
+    name = s["name"] or f"{acct.get('account_name') or scope} — {ENVIRONMENTS[s['environment']]} — {region_label(s['regions'])}"
+    await db["assessments"].insert_one({
+        "id": aid, "name": name, "cloud": prov.name, "cloud_account_id": cloud_account_id,
         "account_name": acct.get("account_name") or scope, "account_identifier": scope,
-        "region": "global", "lens": prov.lens, "status": "running", "placeholder": True,
+        "environment": s["environment"], "regions": s["regions"], "region": region_label(s["regions"]),
+        "lens": prov.lens, "status": "running", "placeholder": True,
         "user_id": acct["user_id"], "org_id": acct["org_id"], "source": "live-scan",
         "created_at": now(),
-    }}, upsert=True)
+    })
     return aid
 
 
 # ---- start / queue ---------------------------------------------------------
 
 async def start_scan(db, assessment_id: str | None = None, *, cloud_account_id: str | None = None,
-                     org_id: str | None = None, background: bool = True,
+                     spec: dict | None = None, org_id: str | None = None, background: bool = True,
                      require_enabled: bool = True) -> dict:
-    """Queue a scan for an assessment, or for a cloud account (creating its
-    assessment on first scan). background=False runs it now and waits."""
+    """Queue a scan: rescan an assessment, or create a new assessment for a
+    cloud account from `spec` {name, environment, regions} and scan it.
+    background=False runs it now and waits."""
     if require_enabled and not SCAN_ENABLED:
         raise ScanError("Live scanning is disabled on this environment (SCAN_ENABLED is not set).")
     if bool(assessment_id) == bool(cloud_account_id):
         raise ScanError("Give exactly one of assessment_id or cloud_account_id.")
     if cloud_account_id:
-        # Validate fully before creating anything.
-        acct = await db["cloud_accounts"].find_one({"id": cloud_account_id}, {"_id": 0})
-        if not acct or (org_id and acct.get("org_id") and acct["org_id"] != org_id):
-            raise ScanError("Cloud account not found.")
-        _scope(_provider(acct.get("cloud") or ""), acct)
-        assessment_id = await assessment_for_account(db, cloud_account_id, org_id)
+        assessment_id = await create_assessment(db, cloud_account_id, spec, org_id)
     target = await resolve_target(db, assessment_id)
     if await db["scans"].find_one({"assessment_id": assessment_id, "status": {"$in": ACTIVE}}, {"_id": 1}):
         raise ScanError("A scan of this assessment is already queued or running.")
@@ -269,6 +286,7 @@ async def _execute(db, scan: dict) -> None:
     log_path = RUN_DIR / f"{scan_id}.log"
     tmp = RUN_DIR / f"{scan_id}-fetch.json"
     result_file = RUN_DIR / f"{scan_id}-result.json"
+    scoped = RUN_DIR / f"{scan_id}-scoped.json"
     stage = "verify"
     with open(log_path, "w", encoding="utf-8") as log:
         try:
@@ -300,17 +318,26 @@ async def _execute(db, scan: dict) -> None:
             os.replace(tmp, fetch_file)
             await _set(db, scan_id, **{"stages.fetch": "done", "fetch_services": readable})
 
+            # The stored fetch covers the whole scope; this assessment sees only
+            # its regions plus account-wide items.
+            data_file = fetch_file
+            if target["regions"]:
+                scoped.write_text(json.dumps(prov.filter_regions(fetched, scope, target["regions"])),
+                                  encoding="utf-8")
+                data_file = scoped
+                log.write(f"\nregion filter: {', '.join(target['regions'])} (+ account-wide items)\n")
+
             stage = "check"
             await _set(db, scan_id, stage="check", **{"stages.check": "running"})
             await _run([sys.executable, "check_engine.py", "--provider", prov.name,
-                        "--data", str(fetch_file), "--out", str(result_file)],
+                        "--data", str(data_file), "--out", str(result_file)],
                        BACKEND, log, STEP_TIMEOUT_S)
             await _set(db, scan_id, **{"stages.check": "done"})
 
             stage = "load"
             await _set(db, scan_id, stage="load", **{"stages.load": "running"})
             load = [sys.executable, "load_assessment_to_db.py", "--provider", prov.name,
-                    "--result", str(result_file), "--fetch", str(fetch_file),
+                    "--result", str(result_file), "--fetch", str(data_file),
                     "--assessment-id", assessment_id,
                     "--user-id", target["user_id"], "--org-id", target["org_id"], "--real-only"]
             if target.get("cloud_account_id"):
@@ -337,8 +364,9 @@ async def _execute(db, scan: dict) -> None:
             await db["assessments"].update_one({"id": assessment_id, "placeholder": True},
                                                {"$set": {"status": "failed", "scan_error": msg}})
         finally:
-            if tmp.exists():
-                tmp.unlink()
+            for f in (tmp, scoped):
+                if f.exists():
+                    f.unlink()
     try:
         tail = log_path.read_text(encoding="utf-8", errors="replace").splitlines()[-25:]
         await _set(db, scan_id, log_tail="\n".join(tail))
@@ -350,16 +378,23 @@ def _cli() -> None:
     """Run one scan synchronously (same pipeline as the API)."""
     ap = argparse.ArgumentParser(description="Run a live scan for one assessment or cloud account.")
     g = ap.add_mutually_exclusive_group(required=True)
-    g.add_argument("--assessment-id")
-    g.add_argument("--cloud-account-id")
+    g.add_argument("--assessment-id", help="rescan this assessment")
+    g.add_argument("--cloud-account-id", help="create a new assessment for this account and scan it")
+    ap.add_argument("--environment", choices=list(ENVIRONMENTS), help="new assessment: dev | pre-prod | prod")
+    ap.add_argument("--regions", default="", help="new assessment: comma-separated regions (default all)")
+    ap.add_argument("--name", default="", help="new assessment: name (default generated)")
     args = ap.parse_args()
+    if args.cloud_account_id and not args.environment:
+        ap.error("--environment is required with --cloud-account-id")
+    spec = {"environment": args.environment, "name": args.name,
+            "regions": [r for r in args.regions.split(",") if r.strip()]}
 
     from motor.motor_asyncio import AsyncIOMotorClient
     db = AsyncIOMotorClient(os.getenv("MONGO_URI", "mongodb://localhost:27017"))[os.getenv("DB_NAME", "wafr_db")]
 
     async def go():
         scan = await start_scan(db, args.assessment_id, cloud_account_id=args.cloud_account_id,
-                                background=False, require_enabled=False)
+                                spec=spec, background=False, require_enabled=False)
         doc = await db["scans"].find_one({"id": scan["id"]}, {"_id": 0})
         print(f"scan {doc['id']}: {doc['status']} ({doc['provider']} {doc['project']} -> {doc['assessment_id']})")
         if doc.get("fetch_services") is not None:

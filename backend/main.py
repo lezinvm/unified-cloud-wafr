@@ -634,8 +634,9 @@ async def scans_enabled():
 
 @app.post("/api/scans", status_code=202)
 async def start_scan(payload: Dict[str, Any]):
-    """Queue a scan. Body: {assessment_id} to rescan, or {cloud_account_id} to
-    scan an account (its assessment is created on the first scan)."""
+    """Queue a scan. Body: {assessment_id} to rescan, or
+    {cloud_account_id, environment, regions?, name?} to create a new
+    assessment for that account and scan it."""
     assessment_id = payload.get("assessment_id")
     account_id = payload.get("cloud_account_id")
     if bool(assessment_id) == bool(account_id):
@@ -645,8 +646,9 @@ async def start_scan(payload: Dict[str, Any]):
     # With auth, the middleware has replaced org_id with the caller's org.
     org_id = payload.get("org_id") if authn.AUTH_ENABLED else None
     try:
+        spec = {k: payload.get(k) for k in ("name", "environment", "regions")} if account_id else None
         return await scan_runner.start_scan(db, assessment_id or None, cloud_account_id=account_id or None,
-                                            org_id=org_id)
+                                            spec=spec, org_id=org_id)
     except scan_runner.ScanError as e:
         status = 404 if str(e).endswith("not found.") else 409
         raise HTTPException(status_code=status, detail=f"{e} {e.hint}".strip())
@@ -662,9 +664,22 @@ async def cloud_account_access(account_id: str):
     except KeyError as e:
         raise HTTPException(status_code=409, detail=str(e))
     scope = prov.account_scope(acct)
+    valid = prov.valid_scope(scope)
+    # Resources per region from the last fetch of this scope (if any), so the
+    # new-assessment form can show where things actually are.
+    region_resources, fetched_at = {}, None
+    if valid and prov.fetch_path(scope).exists():
+        try:
+            fetch = json.loads(prov.fetch_path(scope).read_text(encoding="utf-8"))
+            region_resources, fetched_at = prov.region_counts(fetch, scope), fetch.get("fetchedAt")
+        except (OSError, ValueError):
+            pass
     return {"provider": prov.name, "scope_label": prov.scope_label, "scope": scope,
-            "valid_scope": prov.valid_scope(scope), "can_scan": prov.can_scan,
-            "hint": prov.hint(scope) if prov.valid_scope(scope) else ""}
+            "valid_scope": valid, "can_scan": prov.can_scan,
+            "hint": prov.hint(scope) if valid else "",
+            "regions": list(prov.regions), "region_resources": region_resources,
+            "last_fetched_at": fetched_at,
+            "environments": scan_runner.ENVIRONMENTS}
 
 @app.get("/api/scans")
 async def list_scans(request: Request, assessment_id: Optional[str] = None, limit: int = Query(default=5, le=50)):

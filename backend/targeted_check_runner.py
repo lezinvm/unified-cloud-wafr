@@ -210,6 +210,9 @@ async def rerun_single_check(
         if fetch_file.exists():
             fetch_file.unlink()
 
+    # Same region scope as the assessment (account-wide items always included).
+    if asm.get("regions"):
+        fetched_data = prov.filter_regions(fetched_data, scope, list(asm["regions"]))
     scope_data = (fetched_data.get(prov.scope_key) or {}).get(scope) or {}
     live_services = scope_data.get("services", {})
 

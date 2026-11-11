@@ -679,7 +679,7 @@ function EditCloudConfigModal({
 }
 
 function CloudConfigPanel({ T, isDark }: { T: Tokens; isDark: boolean }) {
-  const { currentUser, setConfiguredAccount, refreshFromDb, setCloudAccounts, startAccountScan, go } = useApp();
+  const { currentUser, setConfiguredAccount, refreshFromDb, setCloudAccounts, setNewAssessmentAccountId, go } = useApp();
   const [configs, setConfigs] = useState<CloudConfigItem[]>([]);
   const [editingConfig, setEditingConfig] = useState<CloudConfigItem | null>(null);
   const [isCreating, setIsCreating] = useState(false);
@@ -796,8 +796,8 @@ function CloudConfigPanel({ T, isDark }: { T: Tokens; isDark: boolean }) {
 
   const handleSyncNow = (id: string, name: string) => {
     // Sync only flips the label to 'Just now'; nothing is fetched.
-    // Real-data-only: run a real scan of this account (queued if one is running).
-    if (REAL_DATA_ONLY) { void startAccountScan(id).then(() => go('live-scan')); return; }
+    // Real-data-only: new assessment (environment + regions) for this account.
+    if (REAL_DATA_ONLY) { setNewAssessmentAccountId(id); go('wizard'); return; }
     setSyncingId(id);
     setTimeout(() => {
       setConfigs(prev =>
@@ -979,7 +979,7 @@ function CloudConfigPanel({ T, isDark }: { T: Tokens; isDark: boolean }) {
                     >
                       <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
                     </svg>
-                    <span>{REAL_DATA_ONLY ? 'Scan' : isSyncing ? 'Syncing…' : 'Sync'}</span>
+                    <span>{REAL_DATA_ONLY ? 'New assessment' : isSyncing ? 'Syncing…' : 'Sync'}</span>
                   </button>
 
                   <button

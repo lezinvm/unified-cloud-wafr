@@ -16,7 +16,7 @@ import {
   INITIAL_COMPLIANCE_FRAMEWORKS,
 } from './data/complianceData';
 import { PillarData, PILLARS_DATA } from './data/wafrData';
-import { api, type LiveScanStatus } from './services/apiClient';
+import { api, type LiveScanStatus, type NewAssessmentSpec } from './services/apiClient';
 import { REAL_DATA_ONLY } from './config/realData';
 import { OIDC_ENABLED, logout as oidcLogout } from './services/oidc';
 
@@ -274,8 +274,10 @@ interface AppState {
   /** Live scan in progress or last finished (real-data-only builds). */
   activeScan: LiveScanStatus | null;
   startLiveScan: (assessmentId: string) => Promise<void>;
-  /** Scan a stored cloud account (any cloud/project); creates its assessment on first scan. */
-  startAccountScan: (cloudAccountId: string) => Promise<void>;
+  /** New assessment (environment + regions) for a stored cloud account, then scan it. */
+  startAccountScan: (cloudAccountId: string, spec: NewAssessmentSpec) => Promise<boolean>;
+  newAssessmentAccountId: string | null;
+  setNewAssessmentAccountId: (id: string | null) => void;
 }
 
 export interface RepoConfig {
@@ -793,13 +795,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const startAccountScan = async (cloudAccountId: string) => {
+  const startAccountScan = async (cloudAccountId: string, spec: NewAssessmentSpec): Promise<boolean> => {
     try {
-      await watchNewScan(await api.startAccountScan(cloudAccountId));
+      await watchNewScan(await api.startAccountScan(cloudAccountId, spec));
+      return true;
     } catch (err: any) {
       showToast('Could not start scan', 'info', err?.message || String(err));
+      return false;
     }
   };
+
+  // Account preselected when opening the new-assessment form (e.g. Settings > Scan).
+  const [newAssessmentAccountId, setNewAssessmentAccountId] = useState<string | null>(null);
 
   // Resume watching a scan that is already running (e.g. after a page reload).
   useEffect(() => {
@@ -1813,12 +1820,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
         (a.cloud || '').toLowerCase() === config.cloud.toLowerCase() &&
         [a.id, a.account_identifier, a.gcp_project, a.subscription_id]
           .some((v: any) => v && String(v).toLowerCase() === want));
-      if (acct) {
-        void startAccountScan(acct.id);
-      } else {
+      // New assessments need an environment and regions: open the form.
+      setNewAssessmentAccountId(acct ? acct.id : null);
+      if (!acct) {
         showToast('Add this cloud account first', 'info',
-          'Save the account in Settings > Cloud accounts, then start the scan.');
+          'Save the account in Settings > Cloud accounts, then create the assessment.');
       }
+      window.setTimeout(() => navigate('wizard'), 0); // after the caller's own navigation
       return { isRerun: false, assessment: assessments[0] };
     }
 
@@ -2174,6 +2182,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         activeScan,
         startLiveScan,
         startAccountScan,
+        newAssessmentAccountId,
+        setNewAssessmentAccountId,
       }}
     >
       {children}

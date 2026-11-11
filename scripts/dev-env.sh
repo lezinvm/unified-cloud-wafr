@@ -16,7 +16,7 @@
 #   status        containers + health through nginx
 #   logs          follow backend logs
 #   scan <id>     live scan of one assessment (any provider), same pipeline as the UI
-#   scan-account <id>  live scan of a stored cloud account (creates its assessment)
+#   scan-account <id> <dev|pre-prod|prod> [regions]  new assessment for a stored account, then scan
 #   reset-data    wipe demo data, reload every stored project/account fetch
 #   migrate       one-time: stop the old hand-run dev processes and container
 #
@@ -154,9 +154,12 @@ for a in db['cloud_accounts'].find({}, {'_id': 0}):
     print('  ', a['id'], '(' + str(a.get('cloud')) + ', scope=' + (p.account_scope(a) if p else '?') + ', org=' + str(a.get('org_id')) + ')')\""
     exit 1
   fi
+  local env="${2:-}" regions="${3:-}"
   [[ "$acct" =~ ^[A-Za-z0-9._@-]+$ ]] || { echo "invalid cloud account id"; exit 1; }
-  echo "scanning account $acct (several minutes)..."
-  in_backend "python scan_runner.py --cloud-account-id '$acct'"
+  [[ "$env" =~ ^(dev|pre-prod|prod)$ ]] || { echo "usage: scripts/dev-env.sh scan-account <id> <dev|pre-prod|prod> [region,region]"; exit 1; }
+  [[ "$regions" =~ ^[a-z0-9,-]*$ ]] || { echo "invalid regions"; exit 1; }
+  echo "new $env assessment for $acct (regions: ${regions:-all}), scanning (several minutes)..."
+  in_backend "python scan_runner.py --cloud-account-id '$acct' --environment '$env' --regions '$regions'"
 }
 
 migrate() {
@@ -188,7 +191,7 @@ case "${1:-}" in
   status)     status ;;
   logs)       "${COMPOSE[@]}" logs -f --tail=100 backend ;;
   scan)       scan "${2:-}" ;;
-  scan-account) scan_account "${2:-}" ;;
+  scan-account) scan_account "${2:-}" "${3:-}" "${4:-}" ;;
   reset-data) reset_data ;;
   migrate)    migrate ;;
   *) sed -n '2,24p' "$0"; exit 1 ;;

@@ -373,6 +373,13 @@ def main() -> None:
                   f"n/a={s['not_applicable']} of {s['total_requirements']}")
         if args.dry_run:
             continue
+        existing = db["assessments"].find_one({"id": asm_id}, {"_id": 0, "name": 1, "regions": 1,
+                                                               "environment": 1})
+        if existing:
+            # User-chosen name/environment/regions stay; only results change.
+            a["name"] = existing.get("name") or a["name"]
+            if existing.get("regions") is not None:
+                a["region"] = ", ".join(existing["regions"]) or "All regions"
         db["assessments"].update_one({"id": asm_id}, {"$set": a, "$setOnInsert": {"created_at": NOW}}, upsert=True)
         for coll, docs in (("findings", fnd), ("resource_inventory", inv), ("checks", chks),
                            ("best_practices", bps), ("remediations", rems),
