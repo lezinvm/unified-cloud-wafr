@@ -1537,13 +1537,38 @@ export function AssessmentReport() {
 
               <button
                 type="button"
-                className="px-3.5 py-2 text-xs font-medium rounded-full transition-colors cursor-pointer"
-                style={{ border: `1px solid ${T.border}`, color: T.textSub }}
-                onMouseEnter={e => { e.currentTarget.style.color = T.text; }}
-                onMouseLeave={e => { e.currentTarget.style.color = T.textSub; }}
+                onClick={() => window.print()}
+                className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-full transition-all cursor-pointer shadow-xs hover:border-blue-500"
+                style={{
+                  border: `1px solid ${T.border}`,
+                  color: T.text,
+                  backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : '#FFFFFF',
+                }}
+                title="Download full Assessment Report as PDF"
               >
-                ↓ Export PDF
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-blue-500">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                <span>Export PDF</span>
               </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Printable Audit Header (Visible only when generating PDF / printing) */}
+        <div className="hidden print:block p-6 mb-2 border-b border-slate-300 bg-white text-slate-900">
+          <div className="flex justify-between items-start">
+            <div>
+              <div className="text-xl font-bold tracking-tight">L.E.N.S. Cloud Architecture Assessment Report</div>
+              <div className="text-xs text-slate-600 mt-1">
+                Assessment: <span className="font-semibold">{currentAssessment?.name || 'Architecture Review'}</span> · Cloud: <span className="font-semibold">{currentAssessment?.cloud?.toUpperCase()}</span> · Scope: <span className="font-semibold font-mono">{currentAssessment?.accountId}</span>
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-xs font-semibold">Report Date: {new Date().toLocaleDateString()}</div>
+              <div className="text-xs text-slate-600 mt-0.5">Overall Health Score: <span className="font-bold text-emerald-600">{overallScore}%</span></div>
             </div>
           </div>
         </div>

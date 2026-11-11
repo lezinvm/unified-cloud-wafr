@@ -26,6 +26,7 @@ the SAME pattern AWS and Azure use (see aws_checks.py / azure_checks.py).
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from .base import Provider, resource_list, short_name, unknown, scope_unknown
 
 # One provider per cloud. `catalog_column` picks this cloud's column in
@@ -128,6 +129,33 @@ def iam_primitive_roles(services: dict) -> list:
 
 @register("iam_service_account_key_rotated")  # IAM-03
 def sa_key_rotated(services: dict) -> list:
+    keys = _data(services, "iam_service_account_keys")
+    if keys is not None:
+        out = []
+        now = datetime.now(timezone.utc)
+        for k in keys:
+            if k.get("keyType") != "USER_MANAGED":
+                continue
+            sa_email = k.get("_saEmail") or (k.get("name", "").split("/")[-3] if "serviceAccounts" in k.get("name", "") else "sa")
+            key_id = k.get("name", "").split("/")[-1]
+            valid_after = k.get("validAfterTime")
+            if not valid_after:
+                continue
+            try:
+                created = datetime.fromisoformat(valid_after.replace("Z", "+00:00"))
+                age_days = (now - created).days
+                if age_days > 90:
+                    out.append({"resource": f"{sa_email}/{key_id}", "status": "FAIL",
+                                "evidence": f"User-managed key is {age_days} days old (>90 days)."})
+                else:
+                    out.append({"resource": f"{sa_email}/{key_id}", "status": "PASS",
+                                "evidence": f"User-managed key rotated {age_days} days ago (<=90 days)."})
+            except Exception:
+                pass
+        if not out:
+            return [{"resource": "service-accounts", "status": "PASS",
+                     "evidence": "No user-managed service account keys (VM/workload identity only)."}]
+        return out
     if not _data(services, "iam_service_accounts"):
         return []
     return _project_unknown("gcloud iam service-accounts keys list per SA (key createTime for 90-day age).")
@@ -245,6 +273,18 @@ def identity_federation_saml(services: dict) -> list:
 @register("storage_bucket_kms_encryption")  # DAT-01
 @register("storage_bucket_kms_key_customer_managed")  # DAT-06
 def bucket_cmek(services: dict) -> list:
+    details = _data(services, "storage_buckets_detailed")
+    if details:
+        out = []
+        for b in details:
+            name = b.get("_bucketName") or b.get("name", "?")
+            enc = b.get("encryption", {})
+            cmek = enc.get("defaultKmsKeyName") if isinstance(enc, dict) else None
+            ok = bool(cmek)
+            out.append({"resource": name,
+                        "status": "PASS" if ok else "FAIL",
+                        "evidence": f"defaultKmsKeyName={cmek}." if ok else "Default Google-managed encryption only (no CMEK)."})
+        return out
     buckets = _data(services, "storage_buckets")
     if not buckets:
         return []
@@ -278,6 +318,18 @@ def bucket_ubla(services: dict) -> list:
 
 @register("storage_bucket_logging_enabled")  # DAT-05
 def bucket_logging(services: dict) -> list:
+    details = _data(services, "storage_buckets_detailed")
+    if details:
+        out = []
+        for b in details:
+            name = b.get("_bucketName") or b.get("name", "?")
+            log = b.get("logging", {})
+            lb = log.get("logBucket") if isinstance(log, dict) else None
+            ok = bool(lb)
+            out.append({"resource": name,
+                        "status": "PASS" if ok else "FAIL",
+                        "evidence": f"logBucket={lb}." if ok else "Bucket access logging disabled."})
+        return out
     buckets = _data(services, "storage_buckets")
     if not buckets:
         return []
@@ -295,6 +347,19 @@ def bucket_lifecycle(services: dict) -> list:
 @register("storage_bucket_retention_policy")  # DAT-08
 @register("storage_bucket_retention_policy_locked")  # RES-03
 def bucket_retention(services: dict) -> list:
+    details = _data(services, "storage_buckets_detailed")
+    if details:
+        out = []
+        for b in details:
+            name = b.get("_bucketName") or b.get("name", "?")
+            rp = b.get("retentionPolicy", {})
+            period = rp.get("retentionPeriod") if isinstance(rp, dict) else None
+            locked = rp.get("isLocked") if isinstance(rp, dict) else False
+            ok = bool(period)
+            out.append({"resource": name,
+                        "status": "PASS" if ok else "FAIL",
+                        "evidence": f"retentionPeriod={period}s, isLocked={locked}." if ok else "No bucket retention policy configured."})
+        return out
     buckets = _data(services, "storage_buckets")
     if not buckets:
         return []
@@ -846,6 +911,20 @@ def sql_deletion_protection(services: dict) -> list:
 
 @register("sql_instance_stale_backups")  # CST-04
 def sql_stale_backups(services: dict) -> list:
+    backups = _data(services, "sql_backups")
+    if backups is not None:
+        inst = _sql(services)
+        if not inst:
+            return []
+        out = []
+        for i in inst:
+            name = i.get("name", "?")
+            inst_bk = [bk for bk in backups if bk.get("_instanceName") == name or bk.get("instance") == name]
+            has_success = any(bk.get("status") == "SUCCESSFUL" for bk in inst_bk)
+            out.append({"resource": name,
+                        "status": "PASS" if has_success else "FAIL",
+                        "evidence": f"{len(inst_bk)} backups recorded (successful={has_success})."})
+        return out
     inst = _sql(services)
     if not inst:
         return []
@@ -918,7 +997,15 @@ def forwarding_rule_protection(services: dict) -> list:
     fr = _data(services, "forwarding_rules")
     if not fr:
         return []
-    return [_unknown(f.get("name", "?"), "backend-service security-policy attachment.") for f in fr]
+    bs = _data(services, "backend_services") or []
+    sec_pols = [b.get("name") for b in bs if b.get("securityPolicy")]
+    out = []
+    has_sec = bool(sec_pols)
+    for f in fr:
+        out.append({"resource": f.get("name", "?"),
+                    "status": "PASS" if has_sec else "FAIL",
+                    "evidence": f"Cloud Armor security policy {'configured' if has_sec else 'unconfigured'} on load balancer backends."})
+    return out
 
 
 @register("apigee_environment_logging_and_auth_configured")  # APP-05
@@ -973,6 +1060,18 @@ def sinks_configured(services: dict) -> list:
 @register("logging_bucket_kms_key_protected")  # LOG-03
 @register("logging_bucket_retention_period_365_days")  # LOG-09
 def logging_bucket(services: dict) -> list:
+    l_buckets = _data(services, "logging_buckets")
+    if l_buckets:
+        out = []
+        for b in l_buckets:
+            name = b.get("name", "").split("/")[-1] or b.get("name", "?")
+            retention = int(b.get("retentionDays") or 30)
+            cmek = b.get("cmekSettings", {}).get("kmsKeyName") if isinstance(b.get("cmekSettings"), dict) else None
+            ok = retention >= 365 or bool(cmek)
+            out.append({"resource": name,
+                        "status": "PASS" if ok else "FAIL",
+                        "evidence": f"retentionDays={retention}, cmek={cmek}."})
+        return out
     return _project_unknown("gcloud logging buckets describe (CMEK + retentionDays).")
 
 
@@ -1190,6 +1289,17 @@ def dataproc(services: dict) -> list:
 
 @register("pubsub_topic_kms_encryption_enabled")  # MSG-01
 def pubsub_kms(services: dict) -> list:
+    details = _data(services, "pubsub_topics_detailed")
+    if details:
+        out = []
+        for t in details:
+            name = t.get("name", "?")
+            kms = t.get("kmsKeyName")
+            ok = bool(kms)
+            out.append({"resource": name,
+                        "status": "PASS" if ok else "FAIL",
+                        "evidence": f"kmsKeyName={kms}." if ok else "Default Google-managed encryption only (no CMEK)."})
+        return out
     topics = _data(services, "pubsub_topics")
     if not topics:
         return []
@@ -1199,6 +1309,18 @@ def pubsub_kms(services: dict) -> list:
 
 @register("pubsub_topic_restricted_iam_principals")  # MSG-02
 def pubsub_iam(services: dict) -> list:
+    details = _data(services, "pubsub_topics_detailed")
+    if details:
+        out = []
+        for t in details:
+            name = t.get("name", "?")
+            policy = t.get("iamPolicy") or {}
+            bindings = policy.get("bindings") or []
+            public = any(m in ("allUsers", "allAuthenticatedUsers") for b in bindings for m in b.get("members", []))
+            out.append({"resource": name,
+                        "status": "FAIL" if public else "PASS",
+                        "evidence": "Public IAM access detected (allUsers/allAuthenticatedUsers)." if public else "IAM access restricted to authorized principals."})
+        return out
     topics = _data(services, "pubsub_topics")
     if not topics:
         return []

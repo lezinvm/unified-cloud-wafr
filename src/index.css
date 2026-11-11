@@ -71,3 +71,42 @@ button, input, optgroup, select, textarea {
 ::-webkit-scrollbar-thumb      { background: #E5E9EF; border-radius: 99px; }
 .dark ::-webkit-scrollbar-thumb{ background: #1E293B; }
 ::-webkit-scrollbar-thumb:hover{ background: #2563EB; }
+
+/* Print / PDF Export Styles */
+@media print {
+  @page {
+    margin: 12mm 14mm;
+    size: A4 portrait;
+  }
+
+  body, #root, main {
+    background: #FFFFFF !important;
+    color: #0F172A !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  nav, aside, header, .no-print, [role="navigation"] {
+    display: none !important;
+  }
+
+  button {
+    display: none !important;
+  }
+
+  * {
+    color-adjust: exact !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .print-page-break {
+    page-break-before: always !important;
+    break-before: always !important;
+  }
+
+  .print-avoid-break {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+}

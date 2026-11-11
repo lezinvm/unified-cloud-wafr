@@ -235,6 +235,78 @@ async function fetchKms(project) {
   return { ok: true, count: keys.length, data: keys };
 }
 
+async function fetchSaKeys(project, saList) {
+  if (!Array.isArray(saList) || !saList.length) return { ok: true, count: 0, data: [] };
+  const allKeys = [];
+  const keyResults = await Promise.all(saList.map(async (sa) => {
+    const email = sa.email || sa.name;
+    if (!email) return [];
+    const r = await runGcloud(['iam', 'service-accounts', 'keys', 'list',
+      `--iam-account=${email}`, `--project=${project}`, '--format=json']);
+    return (r.ok && Array.isArray(r.data))
+      ? r.data.map(k => ({ ...k, _saEmail: email }))
+      : [];
+  }));
+  for (const list of keyResults) allKeys.push(...list);
+  return { ok: true, count: allKeys.length, data: allKeys };
+}
+
+async function fetchStorageBucketDetails(project, bucketList) {
+  if (!Array.isArray(bucketList) || !bucketList.length) return { ok: true, count: 0, data: [] };
+  const details = await Promise.all(bucketList.slice(0, 50).map(async (b) => {
+    const name = b.name || b.id;
+    if (!name) return null;
+    const r = await runGcloud(['storage', 'buckets', 'describe',
+      `gs://${name}`, `--project=${project}`, '--format=json']);
+    return r.ok && r.data ? { ...r.data, _bucketName: name } : { name, ok: false };
+  }));
+  const valid = details.filter(Boolean);
+  return { ok: true, count: valid.length, data: valid };
+}
+
+async function fetchSqlBackups(project, sqlList) {
+  if (!Array.isArray(sqlList) || !sqlList.length) return { ok: true, count: 0, data: [] };
+  const allBackups = [];
+  const results = await Promise.all(sqlList.map(async (inst) => {
+    const name = inst.name;
+    if (!name) return [];
+    const r = await runGcloud(['sql', 'backups', 'list',
+      `--instance=${name}`, `--project=${project}`, '--format=json']);
+    return (r.ok && Array.isArray(r.data))
+      ? r.data.map(bk => ({ ...bk, _instanceName: name }))
+      : [];
+  }));
+  for (const list of results) allBackups.push(...list);
+  return { ok: true, count: allBackups.length, data: allBackups };
+}
+
+async function fetchLoggingBuckets(project) {
+  const r = await runGcloud(['logging', 'buckets', 'list',
+    '--location=global', `--project=${project}`, '--format=json']);
+  return r.ok && Array.isArray(r.data)
+    ? { ok: true, count: r.data.length, data: r.data }
+    : { ok: false, error: r.error || 'Failed to list logging buckets', data: [] };
+}
+
+async function fetchPubsubDetails(project, topicList) {
+  if (!Array.isArray(topicList) || !topicList.length) return { ok: true, count: 0, data: [] };
+  const details = await Promise.all(topicList.slice(0, 30).map(async (t) => {
+    const name = t.name ? t.name.split('/').pop() : t;
+    if (!name) return null;
+    const [desc, iam] = await Promise.all([
+      runGcloud(['pubsub', 'topics', 'describe', name, `--project=${project}`, '--format=json']),
+      runGcloud(['pubsub', 'topics', 'get-iam-policy', name, `--project=${project}`, '--format=json']),
+    ]);
+    return {
+      name,
+      kmsKeyName: desc.ok && desc.data ? desc.data.kmsKeyName : null,
+      iamPolicy: iam.ok && iam.data ? iam.data : null,
+    };
+  }));
+  const valid = details.filter(Boolean);
+  return { ok: true, count: valid.length, data: valid };
+}
+
 async function main() {
   const init = await send('initialize', {
     protocolVersion: '2024-11-05', capabilities: {},
@@ -288,6 +360,52 @@ async function main() {
     } catch (e) {
       pres.services['kms_crypto_keys'] = { ok: false, error: String(e) };
       console.log('  • kms_crypto_keys: ERROR');
+    }
+
+    // Sub-resource fetches to eliminate UNKNOWN checks:
+    // 1. Service Account Keys (for 90-day key age checks)
+    try {
+      const saKeys = await fetchSaKeys(project, pres.services['iam_service_accounts']?.data);
+      pres.services['iam_service_account_keys'] = saKeys;
+      console.log(`  • iam_service_account_keys: OK (${saKeys.count})`);
+    } catch (e) {
+      pres.services['iam_service_account_keys'] = { ok: false, error: String(e) };
+    }
+
+    // 2. Storage Buckets Detailed (encryption, logging, retention)
+    try {
+      const bucketDetails = await fetchStorageBucketDetails(project, pres.services['storage_buckets']?.data);
+      pres.services['storage_buckets_detailed'] = bucketDetails;
+      console.log(`  • storage_buckets_detailed: OK (${bucketDetails.count})`);
+    } catch (e) {
+      pres.services['storage_buckets_detailed'] = { ok: false, error: String(e) };
+    }
+
+    // 3. SQL Backups (automated backups check)
+    try {
+      const sqlBk = await fetchSqlBackups(project, pres.services['sql_instances']?.data);
+      pres.services['sql_backups'] = sqlBk;
+      console.log(`  • sql_backups: OK (${sqlBk.count})`);
+    } catch (e) {
+      pres.services['sql_backups'] = { ok: false, error: String(e) };
+    }
+
+    // 4. Logging Buckets (CMEK and retention)
+    try {
+      const logBk = await fetchLoggingBuckets(project);
+      pres.services['logging_buckets'] = logBk;
+      console.log(`  • logging_buckets: OK (${logBk.count})`);
+    } catch (e) {
+      pres.services['logging_buckets'] = { ok: false, error: String(e) };
+    }
+
+    // 5. PubSub Topics Detailed (CMEK and IAM)
+    try {
+      const psDetails = await fetchPubsubDetails(project, pres.services['pubsub_topics']?.data);
+      pres.services['pubsub_topics_detailed'] = psDetails;
+      console.log(`  • pubsub_topics_detailed: OK (${psDetails.count})`);
+    } catch (e) {
+      pres.services['pubsub_topics_detailed'] = { ok: false, error: String(e) };
     }
 
     result.projects[project] = pres;
