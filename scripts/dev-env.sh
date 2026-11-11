@@ -33,7 +33,7 @@ REALM="${DEV_REALM:-lens-dev}"
 CLIENT="${DEV_CLIENT:-lens-dev-app}"
 KEEP_EMAIL="${DEV_KEEP_EMAIL:-lezin.menath@cloudifyops.com}"
 PNPM_VERSION=12.11.2
-NODE_IMAGE=node:20.18.0-bookworm-slim
+NODE_IMAGE=node:22-bookworm-slim
 
 host_ip() {
   if [ -n "${DEV_HOST:-}" ]; then echo "$DEV_HOST"; return; fi
