@@ -105,10 +105,13 @@ async def _run(args: list[str], cwd: Path, log, timeout: int) -> str:
 async def mark_interrupted(db):
     """On startup: a scan left 'running' by a previous process can never finish.
     Queued scans are kept and resumed by resume_queue()."""
-    await db["scans"].update_many(
-        {"status": "running"},
-        {"$set": {"status": "failed", "finished_at": now(),
-                  "error": "Interrupted: the backend restarted while this scan was running."}})
+    async for s in db["scans"].find({"status": "running"}, {"_id": 0, "id": 1, "stage": 1}):
+        fields = {"status": "failed", "finished_at": now(),
+                  "error": "Interrupted: the backend restarted while this scan was running "
+                           "(often the container ran out of memory during the fetch)."}
+        if s.get("stage") in STAGES:
+            fields[f"stages.{s['stage']}"] = "failed"  # don't leave a stage shown as running
+        await db["scans"].update_one({"id": s["id"], "status": "running"}, {"$set": fields})
 
 
 def resume_queue(db) -> None:

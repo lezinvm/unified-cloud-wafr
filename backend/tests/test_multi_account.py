@@ -162,9 +162,12 @@ def test_scans_queue_instead_of_being_refused(mongo, fake_gcp, adb, monkeypatch)
 
 def test_restart_keeps_queued_and_fails_running(mongo, adb):
     import scan_runner
-    mongo["scans"].insert_many([{"id": "S-run", "status": "running"}, {"id": "S-q", "status": "queued"}])
+    mongo["scans"].insert_many([{"id": "S-run", "status": "running", "stage": "fetch",
+                                 "stages": {"verify": "done", "fetch": "running"}},
+                                {"id": "S-q", "status": "queued"}])
     asyncio.run(scan_runner.mark_interrupted(adb()))
-    assert mongo["scans"].find_one({"id": "S-run"})["status"] == "failed"
+    run = mongo["scans"].find_one({"id": "S-run"})
+    assert run["status"] == "failed" and run["stages"]["fetch"] == "failed"
     assert mongo["scans"].find_one({"id": "S-q"})["status"] == "queued"
 
 

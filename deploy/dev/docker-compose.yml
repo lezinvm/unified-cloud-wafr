@@ -32,6 +32,8 @@ services:
       LENS_ENV: dev
       MONGO_URI: mongodb://mongo:27017
       DB_NAME: wafr_db
+      # Max gcloud processes the fetcher runs at once (~100 MB each).
+      GCP_FETCH_CONCURRENCY: "3"
     volumes:
       - scan_data:/data
     ports:
@@ -43,7 +45,8 @@ services:
       mongo:
         condition: service_healthy
     networks: [net]
-    mem_limit: 768m
+    # API + node fetcher + MCP server + up to GCP_FETCH_CONCURRENCY gcloud processes.
+    mem_limit: 1g
 
 volumes:
   # Existing dev data (created by the earlier dev setup) is reused, not copied.

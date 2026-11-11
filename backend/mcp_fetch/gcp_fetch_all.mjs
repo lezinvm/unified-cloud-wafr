@@ -176,13 +176,35 @@ function extractText(call) {
 
 const CALL_TIMEOUT_MS = 45000; // no single gcloud call may exceed this
 
+// Global cap on gcloud calls in flight. Every call starts a gcloud (Python)
+// process of ~100 MB, and the sub-fetches below fan out (KMS locations,
+// buckets, topics), so without a cap a large project can start dozens at once
+// and get the scanner container OOM-killed. Tune with GCP_FETCH_CONCURRENCY.
+const MAX_IN_FLIGHT = Math.max(1, parseInt(process.env.GCP_FETCH_CONCURRENCY || '4', 10) || 4);
+let inFlight = 0;
+const waiting = [];
+async function acquireSlot() {
+  if (inFlight < MAX_IN_FLIGHT) { inFlight++; return; }
+  await new Promise((res) => waiting.push(res)); // slot handed over by releaseSlot
+}
+function releaseSlot() {
+  const next = waiting.shift();
+  if (next) next(); else inFlight--;
+}
+
 async function runGcloud(args) {
   // '--quiet' disables interactive prompts (e.g. component-install) so a call
   // can never block waiting for stdin.
   const finalArgs = args.includes('--quiet') ? args : [...args, '--quiet'];
-  const callP = send('tools/call', { name: 'run_gcloud_command', arguments: { args: finalArgs } });
-  const timeoutP = new Promise((res) => setTimeout(() => res({ __timeout: true }), CALL_TIMEOUT_MS));
-  const call = await Promise.race([callP, timeoutP]);
+  await acquireSlot();
+  let call;
+  try {
+    const callP = send('tools/call', { name: 'run_gcloud_command', arguments: { args: finalArgs } });
+    const timeoutP = new Promise((res) => setTimeout(() => res({ __timeout: true }), CALL_TIMEOUT_MS));
+    call = await Promise.race([callP, timeoutP]);
+  } finally {
+    releaseSlot();
+  }
   if (call.__timeout) return { ok: false, error: 'TIMEOUT after ' + CALL_TIMEOUT_MS + 'ms' };
   const text = extractText(call);
   try { return { ok: true, data: JSON.parse(text) }; }
@@ -316,6 +338,7 @@ async function main() {
     clientInfo: { name: 'lens-gcp-fetch', version: '1.0.0' },
   });
   console.log('MCP server:', JSON.stringify(init.result?.serverInfo));
+  console.log(`gcloud calls in flight: max ${MAX_IN_FLIGHT}`);
   notify('notifications/initialized', {});
 
   // Decide which projects to scan
