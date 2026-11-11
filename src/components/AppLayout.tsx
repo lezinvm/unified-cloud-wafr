@@ -87,33 +87,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
         style={{ backgroundColor: T.card, borderBottom: `1px solid ${T.border}`, boxShadow: T.shadow }}>
 
         {/* Left: LENS Brand Logo & Context Badges */}
-        <div className="flex items-center gap-3">
-          {/* Sidebar Collapse/Expand Toggle Button */}
-          <button
-            type="button"
-            onClick={toggleSidebar}
-            className="p-1.5 rounded-lg border transition-all cursor-pointer flex items-center justify-center hover:opacity-90 active:scale-95"
-            style={{
-              borderColor: isSidebarCollapsed ? T.primary : T.border,
-              color: isSidebarCollapsed ? T.primary : T.textSub,
-              backgroundColor: isSidebarCollapsed
-                ? (isDark ? 'rgba(59,130,246,0.15)' : '#EFF6FF')
-                : (isDark ? 'rgba(255,255,255,0.03)' : '#F8FAFC'),
-            }}
-            title={isSidebarCollapsed ? "Expand sidebar (Exit fullscreen)" : "Collapse sidebar (Enter fullscreen)"}
-            aria-label="Toggle sidebar"
-          >
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-              <line x1="9" y1="3" x2="9" y2="21" />
-              {isSidebarCollapsed ? (
-                <polyline points="14 10 16 12 14 14" />
-              ) : (
-                <polyline points="6 10 4 12 6 14" />
-              )}
-            </svg>
-          </button>
-
+        <div className="flex items-center gap-4">
           <button
             onClick={() => (isAdmin ? go('admin') : go('dashboard'))}
             className="flex items-center gap-2 cursor-pointer hover:opacity-90 transition-opacity"
@@ -155,12 +129,17 @@ export function AppLayout({ children }: { children: ReactNode }) {
       {/* ── Body: sidebar + content ── */}
       <div className="flex flex-1 overflow-hidden relative">
 
-        {/* Floating edge expand button when sidebar is collapsed */}
+        {/* Simple arrow mark to expand sidebar when collapsed */}
         {isSidebarCollapsed && (
           <button
             type="button"
             onClick={toggleSidebar}
-            className="fixed left-0 top-1/2 -translate-y-1/2 z-40 bg-blue-600 hover:bg-blue-700 text-white p-1.5 rounded-r-lg shadow-lg border border-l-0 border-blue-400/30 transition-all hover:pl-2.5 cursor-pointer group"
+            className="fixed left-0 top-18 z-40 p-2 rounded-r-lg border border-l-0 shadow-md transition-all cursor-pointer flex items-center justify-center hover:opacity-90 active:scale-95"
+            style={{
+              backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
+              borderColor: T.border,
+              color: T.textSub,
+            }}
             title="Expand sidebar"
             aria-label="Expand sidebar"
           >
@@ -184,11 +163,24 @@ export function AppLayout({ children }: { children: ReactNode }) {
           {isAdmin ? (
             <div className="p-3 flex flex-col justify-between h-full">
               <div>
-                <div className="text-[10px] font-bold uppercase tracking-wider px-3 mb-2 text-emerald-400 flex items-center gap-1.5">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-                  </svg>
-                  <span>Admin Administration</span>
+                <div className="flex items-center justify-between px-3 mb-2">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                    </svg>
+                    <span>Admin Administration</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={toggleSidebar}
+                    className="p-1 rounded-md transition-colors cursor-pointer hover:bg-slate-200/60 dark:hover:bg-slate-700/60 flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-100"
+                    title="Collapse sidebar (Fullscreen)"
+                    aria-label="Collapse sidebar"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="15 18 9 12 15 6" />
+                    </svg>
+                  </button>
                 </div>
 
                 <nav className="flex flex-col gap-1">
@@ -299,8 +291,21 @@ export function AppLayout({ children }: { children: ReactNode }) {
             <>
               {/* General Navigation */}
               <div className="p-3">
-                <div className="text-[10px] font-bold uppercase tracking-wider px-3 mb-1.5" style={{ color: T.muted }}>
-                  Main Navigation
+                <div className="flex items-center justify-between px-3 mb-1.5">
+                  <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: T.muted }}>
+                    Main Navigation
+                  </span>
+                  <button
+                    type="button"
+                    onClick={toggleSidebar}
+                    className="p-1 rounded-md transition-colors cursor-pointer hover:bg-slate-200/60 dark:hover:bg-slate-700/60 flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-100"
+                    title="Collapse sidebar"
+                    aria-label="Collapse sidebar"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="15 18 9 12 15 6" />
+                    </svg>
+                  </button>
                 </div>
                 <nav className="flex flex-col gap-1">
                   {/* Home */}
