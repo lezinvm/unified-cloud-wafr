@@ -79,18 +79,24 @@ button, input, optgroup, select, textarea {
     size: A4 portrait;
   }
 
-  body, #root, main {
+  html, body, #root {
+    background: #FFFFFF !important;
+    color: #0F172A !important;
+    height: auto !important;
+    min-height: 100% !important;
+    overflow: visible !important;
+  }
+
+  main {
     background: #FFFFFF !important;
     color: #0F172A !important;
     height: auto !important;
     overflow: visible !important;
+    padding: 0 !important;
+    margin: 0 !important;
   }
 
-  nav, aside, header, .no-print, [role="navigation"] {
-    display: none !important;
-  }
-
-  button {
+  nav, aside, header, .no-print, [role="navigation"], button {
     display: none !important;
   }
 
@@ -102,11 +108,18 @@ button, input, optgroup, select, textarea {
 
   .print-page-break {
     page-break-before: always !important;
-    break-before: always !important;
+    break-before: page !important;
   }
 
   .print-avoid-break {
     page-break-inside: avoid !important;
     break-inside: avoid !important;
+  }
+
+  .wafr-print-container {
+    display: block !important;
+    background: #FFFFFF !important;
+    color: #0F172A !important;
+    width: 100% !important;
   }
 }

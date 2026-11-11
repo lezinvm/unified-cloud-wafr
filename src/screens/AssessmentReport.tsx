@@ -22,6 +22,7 @@ import {
   uniqueRemediations,
   type CheckRemediationData,
 } from '../data/remediationData';
+import { PrintableWAFRReport } from '../components/PrintableWAFRReport';
 
 /* ── Info Tooltip Component ──────────────────────────────────────────────── */
 
@@ -1173,6 +1174,7 @@ export function AssessmentReport() {
     pinnedComplianceIds,
     togglePinComplianceFramework,
     pillars,
+    addMilestone,
   } = useApp();
   const isDark = theme === 'dark';
   const T = isDark ? DARK : LIGHT;
@@ -1182,6 +1184,12 @@ export function AssessmentReport() {
   const [showCantFixModal, setShowCantFixModal] = useState(false);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [activeComplianceModal, setActiveComplianceModal] = useState<ComplianceFramework | null>(null);
+  const [showReportPreviewModal, setShowReportPreviewModal] = useState(false);
+  const [showSaveMilestoneModal, setShowSaveMilestoneModal] = useState(false);
+  const [milestoneName, setMilestoneName] = useState('');
+  const [milestoneNotes, setMilestoneNotes] = useState('');
+  const [milestoneVersion, setMilestoneVersion] = useState('');
+  const [milestoneSavedToast, setMilestoneSavedToast] = useState(false);
 
   // Jira and Slack Modal states
   const [jiraModalTarget, setJiraModalTarget] = useState<{
@@ -1347,7 +1355,17 @@ export function AssessmentReport() {
 
   return (
     <AppLayout>
-      <div className="flex flex-col" style={{ backgroundColor: T.bg, minHeight: '100%' }}>
+      {/* Dedicated WAFR Printable Report Document (visible only when generating PDF / printing) */}
+      <div className="wafr-print-container hidden print:block">
+        <PrintableWAFRReport
+          assessment={currentAssessment}
+          activePillars={activePillars}
+          overallScore={overallScore}
+          remediationsDb={remediationsDb}
+        />
+      </div>
+
+      <div className="flex flex-col print:hidden" style={{ backgroundColor: T.bg, minHeight: '100%' }}>
         {/* Page header */}
         <div className="px-6 py-4" style={{ backgroundColor: T.card, borderBottom: `1px solid ${T.border}` }}>
           <div className="flex items-center justify-between mb-2">
@@ -1502,6 +1520,28 @@ export function AssessmentReport() {
 
               <button
                 type="button"
+                onClick={() => {
+                  setMilestoneName(`Milestone ${currentMilestones.length + 1} Review`);
+                  setMilestoneVersion(`v1.${currentMilestones.length + 1}`);
+                  setMilestoneNotes('Recorded baseline review snapshot for Well-Architected Framework compliance.');
+                  setShowSaveMilestoneModal(true);
+                }}
+                className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-full transition-all cursor-pointer shadow-xs hover:border-emerald-500"
+                style={{
+                  border: `1px solid ${isDark ? 'rgba(52,211,153,0.3)' : 'rgba(5,150,105,0.2)'}`,
+                  color: isDark ? '#34D399' : '#059669',
+                  backgroundColor: isDark ? 'rgba(16,185,129,0.1)' : '#ECFDF5',
+                }}
+                title="Save current assessment state as a historical milestone snapshot"
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+                <span>Save Milestone</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={() => go('milestones')}
                 className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium rounded-full transition-colors cursor-pointer"
                 style={{ border: `1px solid ${T.border}`, color: T.textSub }}
@@ -1535,6 +1575,23 @@ export function AssessmentReport() {
                 <span>Architecture</span>
               </button>
 
+              {/* Preview Report Button */}
+              <button
+                type="button"
+                onClick={() => setShowReportPreviewModal(true)}
+                className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium rounded-full transition-colors cursor-pointer"
+                style={{ border: `1px solid ${T.border}`, color: T.textSub }}
+                onMouseEnter={e => { e.currentTarget.style.color = T.text; }}
+                onMouseLeave={e => { e.currentTarget.style.color = T.textSub; }}
+                title="Preview official Well-Architected Framework Report layout"
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+                <span>Preview Report</span>
+              </button>
+
               <button
                 type="button"
                 onClick={() => window.print()}
@@ -1553,22 +1610,6 @@ export function AssessmentReport() {
                 </svg>
                 <span>Export PDF</span>
               </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Printable Audit Header (Visible only when generating PDF / printing) */}
-        <div className="hidden print:block p-6 mb-2 border-b border-slate-300 bg-white text-slate-900">
-          <div className="flex justify-between items-start">
-            <div>
-              <div className="text-xl font-bold tracking-tight">L.E.N.S. Cloud Architecture Assessment Report</div>
-              <div className="text-xs text-slate-600 mt-1">
-                Assessment: <span className="font-semibold">{currentAssessment?.name || 'Architecture Review'}</span> · Cloud: <span className="font-semibold">{currentAssessment?.cloud?.toUpperCase()}</span> · Scope: <span className="font-semibold font-mono">{currentAssessment?.accountId}</span>
-              </div>
-            </div>
-            <div className="text-right">
-              <div className="text-xs font-semibold">Report Date: {new Date().toLocaleDateString()}</div>
-              <div className="text-xs text-slate-600 mt-0.5">Overall Health Score: <span className="font-bold text-emerald-600">{overallScore}%</span></div>
             </div>
           </div>
         </div>
@@ -2430,6 +2471,230 @@ export function AssessmentReport() {
           onTriggerJira={(target) => setJiraModalTarget(target)}
           onGoToAIFix={(checkId) => goToAIFix(checkId)}
         />
+      )}
+
+      {/* Report Preview Modal */}
+      {showReportPreviewModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in">
+          <div
+            className="w-full max-w-5xl h-[92vh] flex flex-col rounded-2xl overflow-hidden shadow-2xl border"
+            style={{
+              backgroundColor: isDark ? '#0F172A' : '#F8FAFC',
+              borderColor: isDark ? '#334155' : '#CBD5E1',
+            }}
+          >
+            {/* Modal Header */}
+            <div
+              className="flex items-center justify-between px-6 py-4 border-b shrink-0 bg-white dark:bg-slate-900"
+              style={{ borderColor: T.border }}
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-blue-500/10 text-blue-500 flex items-center justify-center font-bold">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                    <polyline points="14 2 14 8 20 8"/>
+                    <line x1="16" y1="13" x2="8" y2="13"/>
+                    <line x1="16" y1="17" x2="8" y2="17"/>
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold" style={{ color: T.text }}>
+                    Well-Architected Framework Report Document Preview
+                  </h3>
+                  <p className="text-xs" style={{ color: T.textSub }}>
+                    Multi-page industry-standard compliance layout matching cloud architecture review specifications.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white rounded-xl shadow cursor-pointer transition-opacity hover:opacity-90"
+                  style={{ backgroundColor: T.primary }}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                  </svg>
+                  <span>Download / Print PDF</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowReportPreviewModal(false)}
+                  className="w-8 h-8 rounded-xl flex items-center justify-center text-sm font-bold border transition-colors cursor-pointer"
+                  style={{ borderColor: T.border, color: T.textSub }}
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            {/* Document Container */}
+            <div className="flex-1 overflow-y-auto p-6 md:p-10 bg-slate-100 dark:bg-slate-950">
+              <div className="max-w-4xl mx-auto bg-white rounded-xl shadow-xl overflow-hidden border border-slate-200">
+                <PrintableWAFRReport
+                  assessment={currentAssessment}
+                  activePillars={activePillars}
+                  overallScore={overallScore}
+                  remediationsDb={remediationsDb}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Save Milestone Modal */}
+      {showSaveMilestoneModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in">
+          <div
+            className="w-full max-w-lg rounded-2xl border p-6 shadow-2xl flex flex-col gap-4"
+            style={{
+              backgroundColor: isDark ? '#0F172A' : '#FFFFFF',
+              borderColor: isDark ? '#334155' : '#E2E8F0',
+              color: T.text,
+            }}
+          >
+            <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: T.border }}>
+              <div className="flex items-center gap-2.5">
+                <span className="w-8 h-8 rounded-xl bg-emerald-500/15 text-emerald-600 flex items-center justify-center font-bold text-sm">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/>
+                    <line x1="4" y1="22" x2="4" y2="15"/>
+                  </svg>
+                </span>
+                <div>
+                  <h3 className="font-bold text-sm" style={{ color: T.text }}>Save Assessment Milestone</h3>
+                  <p className="text-xs" style={{ color: T.textSub }}>Record a point-in-time historical compliance snapshot</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowSaveMilestoneModal(false)}
+                className="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold border transition-colors cursor-pointer"
+                style={{ borderColor: T.border, color: T.textSub }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-4 text-xs">
+              <div>
+                <label className="block font-medium mb-1" style={{ color: T.text }}>
+                  Milestone Name <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={milestoneName}
+                  onChange={(e) => setMilestoneName(e.target.value)}
+                  placeholder="e.g. Milestone 1 - Production Baseline"
+                  className="w-full px-3 py-2 rounded-xl border text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  style={{
+                    backgroundColor: isDark ? '#1E293B' : '#F8FAFC',
+                    borderColor: T.border,
+                    color: T.text,
+                  }}
+                />
+              </div>
+
+              <div>
+                <label className="block font-medium mb-1" style={{ color: T.text }}>
+                  Version Label
+                </label>
+                <input
+                  type="text"
+                  value={milestoneVersion}
+                  onChange={(e) => setMilestoneVersion(e.target.value)}
+                  placeholder="e.g. v1.1"
+                  className="w-full px-3 py-2 rounded-xl border text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  style={{
+                    backgroundColor: isDark ? '#1E293B' : '#F8FAFC',
+                    borderColor: T.border,
+                    color: T.text,
+                  }}
+                />
+              </div>
+
+              <div>
+                <label className="block font-medium mb-1" style={{ color: T.text }}>
+                  Milestone Notes &amp; Objectives
+                </label>
+                <textarea
+                  rows={3}
+                  value={milestoneNotes}
+                  onChange={(e) => setMilestoneNotes(e.target.value)}
+                  placeholder="Record review notes, sprint goals, or audit justification..."
+                  className="w-full px-3 py-2 rounded-xl border text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  style={{
+                    backgroundColor: isDark ? '#1E293B' : '#F8FAFC',
+                    borderColor: T.border,
+                    color: T.text,
+                  }}
+                />
+              </div>
+
+              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/50 text-[11px] space-y-1">
+                <div className="font-semibold" style={{ color: T.text }}>Snapshot Details Captured:</div>
+                <div className="flex justify-between" style={{ color: T.textSub }}>
+                  <span>Overall Score: <strong className="text-emerald-600">{overallScore}%</strong></span>
+                  <span>Total Checks: <strong>{totalChecksCount}</strong></span>
+                  <span>Failing Checks: <strong className="text-red-500">{failingChecksCount}</strong></span>
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-3 border-t flex items-center justify-end gap-2 text-xs" style={{ borderColor: T.border }}>
+              <button
+                type="button"
+                onClick={() => setShowSaveMilestoneModal(false)}
+                className="px-4 py-2 rounded-xl font-medium border cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800"
+                style={{ borderColor: T.border, color: T.textSub }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  addMilestone({
+                    milestoneName: milestoneName.trim() || `Milestone ${currentMilestones.length + 1} Review`,
+                    version: milestoneVersion.trim() || `v1.${currentMilestones.length + 1}`,
+                    notes: milestoneNotes.trim() || 'Recorded baseline review snapshot for Well-Architected Framework compliance.',
+                    score: overallScore,
+                    totalBestPractices: totalBps,
+                    passedBps,
+                    failedBps,
+                    totalChecks: totalChecksCount,
+                    passedChecks: passingChecksCount,
+                    failedChecks: failingChecksCount,
+                    highRisks: highFailsCount,
+                    mediumRisks: mediumFailsCount,
+                    lowRisks: lowFailsCount,
+                  });
+                  setShowSaveMilestoneModal(false);
+                  setMilestoneSavedToast(true);
+                  setTimeout(() => setMilestoneSavedToast(false), 4000);
+                }}
+                className="px-4 py-2 rounded-xl font-semibold text-white cursor-pointer shadow hover:opacity-90 transition-opacity"
+                style={{ backgroundColor: '#059669' }}
+              >
+                Save Milestone
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Milestone Saved Toast */}
+      {milestoneSavedToast && (
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 px-4 py-3 bg-emerald-600 text-white text-xs font-semibold rounded-xl shadow-xl animate-in slide-in-from-bottom duration-200">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+          <span>Milestone successfully saved to MongoDB compliance history!</span>
+        </div>
       )}
     </AppLayout>
   );
