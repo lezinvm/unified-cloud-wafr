@@ -1,3 +1,13 @@
+# READ FIRST: project state and rules
+
+Before doing anything in this repo, read **[docs/CURRENT_STATE.md](docs/CURRENT_STATE.md)**.
+It is the authoritative status (environments, scan pipeline, auth, rules, open work)
+and supersedes older notes in `handoff/`. Key rules: work on `dev-lezin`, never touch
+prod without approval, real data only in dev, cloud-specific code only in the provider
+registries, every API route needs a policy in `backend/tenancy.py`, run the tests.
+
+---
+
 # figma-make-app
 
 React + Vite + Tailwind CSS project running inside Figma Make.
