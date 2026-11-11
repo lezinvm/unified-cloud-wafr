@@ -24,6 +24,27 @@ import {
 } from '../data/remediationData';
 import { PrintableWAFRReport } from '../components/PrintableWAFRReport';
 
+/* ── Best Practice Code Formatter ────────────────────────────────────────── */
+export function formatBpCode(raw: string): string {
+  if (!raw) return '';
+  // Convert long assessment-embedded IDs like "BP-A-GCP-lens-wafr-gcp-security-IAM" to "BP-SEC-IAM"
+  const m = raw.match(/BP-A-[A-Za-z0-9]+-(?:.*?)-(security|reliability|cost|operations|performance|sustainability)-([A-Za-z0-9]+)/i);
+  if (m) {
+    const pillarShort = m[1].slice(0, 3).toUpperCase();
+    const domain = m[2].toUpperCase();
+    return `BP-${pillarShort}-${domain}`;
+  }
+  if (raw.startsWith('BP-A-')) {
+    const parts = raw.split('-');
+    if (parts.length >= 3) {
+      const domain = parts[parts.length - 1];
+      const p = parts[parts.length - 2];
+      return `BP-${p.slice(0, 3).toUpperCase()}-${domain.toUpperCase()}`;
+    }
+  }
+  return raw;
+}
+
 /* ── Info Tooltip Component ──────────────────────────────────────────────── */
 
 function InfoTooltip({
@@ -2050,7 +2071,7 @@ export function AssessmentReport() {
                   <div
                     className="grid px-4 py-3 text-[11px] font-semibold uppercase tracking-wide"
                     style={{
-                      gridTemplateColumns: '80px 130px 80px 1fr 85px 85px 230px',
+                      gridTemplateColumns: '80px 125px 115px 1fr 85px 85px 230px',
                       backgroundColor: isDark ? 'rgba(0,0,0,.15)' : '#F8FAFC',
                       borderBottom: `1px solid ${T.border}`,
                       color: T.textSub,
@@ -2073,7 +2094,7 @@ export function AssessmentReport() {
                         key={c.id}
                         className="grid items-center px-4 py-3 transition-colors"
                         style={{
-                          gridTemplateColumns: '80px 130px 80px 1fr 85px 85px 230px',
+                          gridTemplateColumns: '80px 125px 115px 1fr 85px 85px 230px',
                           borderBottom: `1px solid ${T.border}`,
                         }}
                         onMouseEnter={e => (e.currentTarget.style.backgroundColor = isDark ? 'rgba(255,255,255,.02)' : '#F8FAFC')}
@@ -2094,14 +2115,14 @@ export function AssessmentReport() {
                         </div>
                         <div>
                           <span
-                            className="text-xs font-mono font-medium px-2 py-0.5 rounded border"
+                            className="text-[11px] font-mono font-medium px-2 py-0.5 rounded border whitespace-nowrap"
                             style={{
                               backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : '#F1F5F9',
                               borderColor: isDark ? 'rgba(255,255,255,0.1)' : '#E2E8F0',
                               color: T.textSub,
                             }}
                           >
-                            {c.bpId}
+                            {formatBpCode(c.bpId)}
                           </span>
                         </div>
                         <div className="pr-3 min-w-0">

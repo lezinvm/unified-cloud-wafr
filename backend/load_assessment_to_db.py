@@ -167,7 +167,7 @@ def build(prov, scope, asm_id, controls, catalog, services, user_id, org_id, fet
         })
 
         domain_id = cat.get("domain_id") or cid.split("-")[0]
-        bp_id = f"BP-{asm_id}-{pid}-{domain_id}"
+        bp_id = f"BP-{pid[:3].upper()}-{domain_id}"
         check = {
             # id stays the control id: the UI links checks to remediations by it.
             # Uniqueness comes from assessment_id (every query filters on it).
