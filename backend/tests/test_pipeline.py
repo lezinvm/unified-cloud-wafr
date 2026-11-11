@@ -84,6 +84,22 @@ def test_rescan_replaces_only_that_assessment(mongo, pipeline_env, tmp_path):
     assert mongo["checks"].count_documents({"assessment_id": "A-GCP-proj-closed-2"}) > 0
 
 
+def test_compliance_scores_stored_per_assessment(mongo, pipeline_env, tmp_path):
+    _load(pipeline_env, tmp_path, {"proj-open-1": True})
+    _load(pipeline_env, tmp_path, {"proj-closed-2": False})
+    for aid in ("A-GCP-proj-open-1", "A-GCP-proj-closed-2"):
+        docs = {d["framework_id"]: d for d in mongo["assessment_compliance_scores"].find({"assessment_id": aid})}
+        assert set(docs) == {"cis", "soc2", "iso27001", "hipaa"}
+        assert mongo["assessments"].find_one({"id": aid})["compliance_summary"]["soc2"]["total"] > 0
+    # NET-01 (SSH open to the internet) is recorded under SOC 2 CC6.6 per project.
+    def net01_in_cc66(aid):
+        doc = mongo["assessment_compliance_scores"].find_one({"assessment_id": aid, "framework_id": "soc2"})
+        req = next(r for r in doc["requirements"] if r["id"] == "CC6.6")
+        return req["status"], next(c["verdict"] for c in req["controls"] if c["control_id"] == "NET-01")
+    assert net01_in_cc66("A-GCP-proj-open-1") == ("fail", "FAIL")
+    assert net01_in_cc66("A-GCP-proj-closed-2")[1] == "PASS"
+
+
 def test_explicit_assessment_id_is_used(mongo, pipeline_env, tmp_path):
     _load(pipeline_env, tmp_path, {"proj-open-1": True}, assessment_id="A-custom-1")
     assert mongo["assessments"].find_one({"id": "A-custom-1"})["cloud_account_id"] == "proj-open-1"

@@ -40,6 +40,7 @@ from pathlib import Path
 
 from pymongo import MongoClient
 
+import compliance
 import scan_providers
 
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
@@ -113,7 +114,7 @@ def ensure_cloud_account(db, prov, scope, user_id, org_id, dry):
 
 def build(prov, scope, asm_id, controls, catalog, services, user_id, org_id, fetched_at):
     loc_idx = prov.locations(services)
-    findings, checks, remediations = [], [], []
+    findings, checks, remediations, control_results = [], [], [], []
     bp_checks: dict[str, list[dict]] = defaultdict(list)
     p_total = {p: 0 for p in PILLAR_IDS}
     p_pass = {p: 0 for p in PILLAR_IDS}
@@ -127,6 +128,13 @@ def build(prov, scope, asm_id, controls, catalog, services, user_id, org_id, fet
             continue
         verdict = res.get("verdict", "NOT_IMPLEMENTED")
         counts[verdict] += 1
+        # Every control (whatever its verdict) feeds compliance scoring.
+        control_results.append({
+            "control_id": ctrl["control_id"], "title": ctrl.get("title", ctrl["control_id"]),
+            "severity": (ctrl.get("severity") or "MEDIUM").lower(), "verdict": verdict,
+            "failing_resources": sum(1 for r in res.get("resources", []) if r.get("status") == "FAIL"),
+            **{k: ctrl.get(k) or "" for k in FRAMEWORK_FIELDS},
+        })
         if verdict not in FINDING_VERDICTS:
             continue
 
@@ -246,7 +254,12 @@ def build(prov, scope, asm_id, controls, catalog, services, user_id, org_id, fet
     }
     for c in checks:
         c.pop("_domain", None)
-    return assessment, findings, checks, best_practices, remediations, inventory
+    scores = compliance.build_scores(prov.name, prov.label, asm_id, control_results,
+                                     fetched_at or NOW)
+    assessment["compliance_summary"] = {
+        s["framework_id"]: {"score": s["score"], "coverage": s["coverage"],
+                            "failed": s["failed"], "total": s["total_requirements"]} for s in scores}
+    return assessment, findings, checks, best_practices, remediations, inventory, scores
 
 
 def build_inventory(prov, scope, asm_id, services):
@@ -320,7 +333,7 @@ def main() -> None:
         asm_id = args.assessment_id or assessment_id_for(prov, scope)
         print(f"\n{prov.scope_label.capitalize()}: {scope}  ->  {asm_id}")
         ensure_cloud_account(db, prov, scope, args.user_id, args.org_id, args.dry_run)
-        a, fnd, chks, bps, rems, inv = build(prov, scope, asm_id, result["controls"], catalog,
+        a, fnd, chks, bps, rems, inv, cscores = build(prov, scope, asm_id, result["controls"], catalog,
                                              scope_services(prov, fetch, scope), args.user_id,
                                              args.org_id, fetched_at)
         m = build_milestone(a)
@@ -329,11 +342,16 @@ def main() -> None:
         print(f"  [findings] {len(fnd)}  [remediations] {len(rems)} "
               f"(authored guidance: {sum(1 for r in rems if r['guidance_source'] == 'authored')})")
         print("  [pillar scores] " + ", ".join(f"{p}={a['pillar_scores'][p]}" for p in PILLAR_IDS))
+        for s in cscores:
+            print(f"  [compliance] {s['short_name']:9s} score={s['score']}% coverage={s['coverage']}% "
+                  f"pass={s['passed']} fail={s['failed']} not_assessed={s['not_assessed']} "
+                  f"n/a={s['not_applicable']} of {s['total_requirements']}")
         if args.dry_run:
             continue
         db["assessments"].update_one({"id": asm_id}, {"$set": a, "$setOnInsert": {"created_at": NOW}}, upsert=True)
         for coll, docs in (("findings", fnd), ("resource_inventory", inv), ("checks", chks),
-                           ("best_practices", bps), ("remediations", rems)):
+                           ("best_practices", bps), ("remediations", rems),
+                           ("assessment_compliance_scores", cscores)):
             replace(db, coll, asm_id, docs)
         db["milestones"].update_one({"id": m["id"]}, {"$set": m}, upsert=True)
 

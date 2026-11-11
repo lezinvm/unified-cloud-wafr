@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { REAL_DATA_ONLY } from '../config/realData';
-import { RealDataNotice } from '../components/RealDataNotice';
+import { ComplianceReal } from './ComplianceReal';
 import { useApp, LIGHT, DARK, Tokens } from '../context';
 import { AppLayout } from '../components/AppLayout';
 import { SeverityPill } from '../components/FindingUI';
@@ -176,7 +176,8 @@ function RequirementsDonut({
 /* ── Main Compliance Component ────────────────────────────────────────────── */
 export function Compliance() {
   if (REAL_DATA_ONLY) {
-    return <RealDataNotice feature="Compliance" reason="Compliance scores on this screen are sample values. Real CIS / SOC 2 / ISO 27001 / HIPAA scoring from the scan is not built yet; each real finding already carries its framework mappings for when it is." />;
+    // Real scores from the latest scan (CIS, SOC 2, ISO 27001:2022, HIPAA).
+    return <ComplianceReal />;
   }
   return <ComplianceInner />;
 }

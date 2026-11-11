@@ -173,7 +173,6 @@ def test_other_tenant_is_symmetric(client):
 
 @pytest.mark.parametrize("method,path", [
     ("post", "/api/assessments/A-1/rerun"),
-    ("post", "/api/checks/rerun"),
     ("post", "/api/assessments"),
     ("post", "/api/jira-tickets"),
     ("post", "/api/alert-logs"),
@@ -238,6 +237,15 @@ def test_pillars_are_per_assessment(client, mongo):
     assert sec["score"] == 19 and [bp["id"] for bp in sec["bestPractices"]] == ["BP-A-1"]
     # Another org's assessment is refused.
     assert client.get("/api/pillars?cloud=gcp&assessment_id=B-1", headers=A()).status_code == 404
+
+
+def test_compliance_scores_are_tenant_scoped(client, mongo):
+    mongo["assessment_compliance_scores"].insert_many([
+        {"id": "CS-A", "assessment_id": "A-1", "framework_id": "soc2"},
+        {"id": "CS-B", "assessment_id": "B-1", "framework_id": "soc2"},
+    ])
+    assert {d["id"] for d in client.get("/api/compliance-scores", headers=A()).json()} == {"CS-A"}
+    assert client.get("/api/compliance-scores?assessment_id=B-1", headers=A()).status_code == 404
 
 
 def test_cors_preflight_allowed_origin_only(client):

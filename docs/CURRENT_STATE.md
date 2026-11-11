@@ -81,6 +81,25 @@ load   backend/load_assessment_to_db.py       assessment, findings, remediations
 - Frontend `VITE_REAL_DATA_ONLY=true` (`src/config/realData.ts`): removes demo fallbacks; gates simulated features with `RealDataNotice` (wizard, schedules, architecture diagram, compliance, chat, Jira/Slack/PR, rerun/verify, fake connection tests). "Scan now" / rerun buttons start the **real** scan (`LiveScanReal` screen).
 - Backend `REAL_DATA_ONLY=1`: fabricating endpoints refuse (409).
 
+## 5b. Compliance (CIS, SOC 2, ISO 27001:2022, HIPAA)
+
+- `backend/compliance.py` scores each assessment from **real control verdicts**, written by the loader
+  on every scan into `assessment_compliance_scores` (one doc per framework, `CS-<assessment>-<fw>`),
+  plus `assessments.compliance_summary`. API: `GET /api/compliance-scores?assessment_id=` (tenant-scoped).
+- Hierarchy: framework → requirement (e.g. `CC6.1`) → catalog controls → per-cloud checks. Mappings
+  come from `control_catalog.csv`; one control serves several frameworks and runs once.
+- Requirement status: **fail** if any mapped control fails; **pass** only if none fail and none are
+  undecided; **not_assessed** if any control is UNKNOWN/NOT_IMPLEMENTED (never counted as passed);
+  **not_applicable** if all are N/A. Score = pass/(pass+fail); shown with coverage and controls-passing %.
+- CIS uses the cloud's column (`cis_gcp`/`cis_aws`/`cis_azure`). **CIS section numbers in the catalog are
+  not validated** against the benchmark text (several look wrong); the UI shows this note.
+- ISO: the catalog mixes 2013 ids (`A.9.x`, `A.6.1.3`, `A.8.1`); they are converted to 2022 ids
+  (`ISO_2013_TO_2022`) and marked as converted. The catalog file itself is unchanged.
+- Not covered: policy/procedure/training requirements (need manual attestation; parked).
+- UI: `src/screens/ComplianceReal.tsx` (real-data-only build), framework cards and requirement list,
+  failing controls link to their remediation.
+- Last result for `lens-wafr-gcp`: CIS GCP 15% (coverage 52%), SOC 2 0% (71%), ISO 0% (61%), HIPAA 0% (65%).
+
 ## 6. Data model notes
 
 - Assessment id for scans: `A-<PROVIDER>-<scope>`; finding `FND-<assessment>-<control>`; remediation `REM-<assessment>-<control>`; check `id` = control id (UI links by it) + `assessment_id`.
@@ -92,14 +111,15 @@ load   backend/load_assessment_to_db.py       assessment, findings, remediations
 2. Onboarding → real account validation → first scan (today a new user can't create a real assessment from the UI).
 3. AWS, then Azure (fetchers, credentials, checks).
 4. Real scheduled scans; scan history per run.
-5. Replace or remove remaining fake features (compliance scoring from finding mappings, integrations, PDF export, admin token usage, AI fix/chat).
+5. Replace or remove remaining fake features (integrations, PDF export, admin token usage, AI fix/chat).
+5b. Compliance: validate CIS numbering against the benchmarks; manual attestation for policy controls.
 6. Cut GCP UNKNOWNs (42) with deeper fetches.
 7. Optional: simplify dev to plain `docker compose up -d --build` with a `web` container (proposed, not done).
 
 ## 8. Verification
 
 ```bash
-cd backend && python -m pytest tests -q          # 61 tests; needs a reachable MongoDB
+cd backend && python -m pytest tests -q          # 75 tests; needs a reachable MongoDB
 pnpm build                                       # frontend
 npx tsc --noEmit -p tsconfig.json                # 7 PRE-EXISTING errors only:
 #   context.tsx: resource_raw (x3), scheduled status type (x1)
