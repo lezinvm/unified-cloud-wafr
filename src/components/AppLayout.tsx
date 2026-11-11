@@ -57,6 +57,24 @@ export function AppLayout({ children }: { children: ReactNode }) {
     'diagram',
   ].includes(screen);
 
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('lens_sidebar_collapsed') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const toggleSidebar = () => {
+    setIsSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('lens_sidebar_collapsed', String(next));
+      } catch {}
+      return next;
+    });
+  };
+
   const handleSignOut = () => {
     logoutUser();
   };
@@ -69,7 +87,33 @@ export function AppLayout({ children }: { children: ReactNode }) {
         style={{ backgroundColor: T.card, borderBottom: `1px solid ${T.border}`, boxShadow: T.shadow }}>
 
         {/* Left: LENS Brand Logo & Context Badges */}
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
+          {/* Sidebar Collapse/Expand Toggle Button */}
+          <button
+            type="button"
+            onClick={toggleSidebar}
+            className="p-1.5 rounded-lg border transition-all cursor-pointer flex items-center justify-center hover:opacity-90 active:scale-95"
+            style={{
+              borderColor: isSidebarCollapsed ? T.primary : T.border,
+              color: isSidebarCollapsed ? T.primary : T.textSub,
+              backgroundColor: isSidebarCollapsed
+                ? (isDark ? 'rgba(59,130,246,0.15)' : '#EFF6FF')
+                : (isDark ? 'rgba(255,255,255,0.03)' : '#F8FAFC'),
+            }}
+            title={isSidebarCollapsed ? "Expand sidebar (Exit fullscreen)" : "Collapse sidebar (Enter fullscreen)"}
+            aria-label="Toggle sidebar"
+          >
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+              <line x1="9" y1="3" x2="9" y2="21" />
+              {isSidebarCollapsed ? (
+                <polyline points="14 10 16 12 14 14" />
+              ) : (
+                <polyline points="6 10 4 12 6 14" />
+              )}
+            </svg>
+          </button>
+
           <button
             onClick={() => (isAdmin ? go('admin') : go('dashboard'))}
             className="flex items-center gap-2 cursor-pointer hover:opacity-90 transition-opacity"
@@ -109,11 +153,30 @@ export function AppLayout({ children }: { children: ReactNode }) {
       </header>
 
       {/* ── Body: sidebar + content ── */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden relative">
+
+        {/* Floating edge expand button when sidebar is collapsed */}
+        {isSidebarCollapsed && (
+          <button
+            type="button"
+            onClick={toggleSidebar}
+            className="fixed left-0 top-1/2 -translate-y-1/2 z-40 bg-blue-600 hover:bg-blue-700 text-white p-1.5 rounded-r-lg shadow-lg border border-l-0 border-blue-400/30 transition-all hover:pl-2.5 cursor-pointer group"
+            title="Expand sidebar"
+            aria-label="Expand sidebar"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
+          </button>
+        )}
 
         {/* Sidebar */}
-        <aside className="w-64 shrink-0 flex flex-col justify-between z-20 overflow-y-auto"
-          style={{ backgroundColor: T.card, borderRight: `1px solid ${T.border}` }}>
+        <aside
+          className={`${
+            isSidebarCollapsed ? '-ml-64 w-64 opacity-0 pointer-events-none' : 'w-64 opacity-100'
+          } shrink-0 flex flex-col justify-between z-20 overflow-y-auto transition-all duration-300 ease-in-out`}
+          style={{ backgroundColor: T.card, borderRight: `1px solid ${T.border}` }}
+        >
 
           {/* ════════════════════════════════════════════════════════
               ADMINISTRATOR SIDEBAR
