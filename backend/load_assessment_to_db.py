@@ -104,8 +104,8 @@ def ensure_cloud_account(db, prov, scope, user_id, org_id, dry):
         "status": "connected", "is_active": True, "is_global": False,
         "user_id": user_id, "org_id": org_id, "source": "live-scan", "updated_at": NOW,
     }
-    if prov.name == "gcp":
-        doc["sa_email"] = os.getenv("GCP_SCANNER_SA") or f"lens-scanner@{scope}.iam.gserviceaccount.com"
+    if prov.name == "gcp" and os.getenv("GCP_SCANNER_SA"):
+        doc["sa_email"] = os.getenv("GCP_SCANNER_SA")
     if not dry:
         db["cloud_accounts"].update_one({"id": scope}, {"$set": doc, "$setOnInsert": {"created_at": NOW}},
                                         upsert=True)
@@ -303,6 +303,8 @@ def main() -> None:
     ap.add_argument("--org-id", required=True)
     ap.add_argument("--assessment-id", default=None,
                     help="Store results under this assessment id (single-scope results only)")
+    ap.add_argument("--cloud-account-id", default=None,
+                    help="Attach results to this existing cloud account (its scope must match)")
     ap.add_argument("--real-only", action="store_true",
                     help="Also remove this cloud's legacy demo checks/best practices/remediations.")
     ap.add_argument("--dry-run", action="store_true")
@@ -313,7 +315,12 @@ def main() -> None:
     prov = scan_providers.get(args.provider or result["provider"])
     if result["provider"] != prov.name:
         raise SystemExit(f"--provider {prov.name} does not match result provider {result['provider']}")
-    fetch_path = Path(args.fetch) if args.fetch else prov.fetch_file
+    if args.fetch:
+        fetch_path = Path(args.fetch)
+    elif len(result["scopes"]) == 1:
+        fetch_path = prov.fetch_path(result["scopes"][0])
+    else:
+        raise SystemExit("--fetch is required for a multi-scope result")
     if not fetch_path.exists():
         raise SystemExit(f"fetch JSON not found: {fetch_path}")
     fetch = json.loads(fetch_path.read_text(encoding="utf-8"))
@@ -332,10 +339,28 @@ def main() -> None:
             raise SystemExit(f"'{scope}' is not a valid {prov.label} {prov.scope_label} id")
         asm_id = args.assessment_id or assessment_id_for(prov, scope)
         print(f"\n{prov.scope_label.capitalize()}: {scope}  ->  {asm_id}")
-        ensure_cloud_account(db, prov, scope, args.user_id, args.org_id, args.dry_run)
+        if args.cloud_account_id:
+            # Attach to the user's existing account; never create or re-own one.
+            acct = db["cloud_accounts"].find_one({"id": args.cloud_account_id}, {"_id": 0})
+            if not acct:
+                raise SystemExit(f"cloud account '{args.cloud_account_id}' not found")
+            if acct.get("org_id") and acct["org_id"] != args.org_id:
+                raise SystemExit("cloud account belongs to another organization")
+            if prov.account_scope(acct) != scope:
+                raise SystemExit(f"cloud account '{args.cloud_account_id}' is for "
+                                 f"'{prov.account_scope(acct)}', not '{scope}'")
+            print(f"  [cloud_account] {args.cloud_account_id} (existing, {prov.name})")
+        else:
+            ensure_cloud_account(db, prov, scope, args.user_id, args.org_id, args.dry_run)
         a, fnd, chks, bps, rems, inv, cscores = build(prov, scope, asm_id, result["controls"], catalog,
                                              scope_services(prov, fetch, scope), args.user_id,
                                              args.org_id, fetched_at)
+        if args.cloud_account_id:
+            a["cloud_account_id"] = args.cloud_account_id
+            a["account_name"] = acct.get("account_name") or scope
+            if not args.dry_run:
+                db["cloud_accounts"].update_one({"id": args.cloud_account_id},
+                                                {"$set": {"status": "connected", "last_scan_at": NOW}})
         m = build_milestone(a)
         print(f"  [assessment] score={a['score']} pass={a['passed_checks']} fail={a['failed_checks']} "
               f"bps={a['total_best_practices']} (failed {a['failed_bps']}) resources={len(inv)}")

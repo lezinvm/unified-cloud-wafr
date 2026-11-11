@@ -12,11 +12,12 @@ from fastapi import FastAPI, Query, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 try:
     from backend.database import db, check_db_connection  # local dev (run from project root)
-    from backend import scan_runner, auth as authn, tenancy
+    from backend import scan_runner, scan_providers, auth as authn, tenancy
     from backend.targeted_check_runner import rerun_single_check
 except ModuleNotFoundError:
     from database import db, check_db_connection  # Docker (WORKDIR is /app = backend/)
     import scan_runner
+    import scan_providers
     import auth as authn
     import tenancy
     from targeted_check_runner import rerun_single_check
@@ -618,7 +619,12 @@ async def delete_assessment(assessment_id: str):
 @app.on_event("startup")
 async def _mark_interrupted_scans():
     try:
+        for prov in scan_providers.PROVIDERS.values():
+            moved = scan_providers.migrate_legacy_fetch(prov)  # old single file -> per scope
+            if moved:
+                print(f"[scan] split old {prov.name} fetch file into: {', '.join(moved)}")
         await scan_runner.mark_interrupted(db)
+        scan_runner.resume_queue(db)  # queued scans survive a restart
     except Exception as e:  # DB may be unreachable at startup; don't block boot
         print(f"[WARN] could not reset interrupted scans: {e}")
 
@@ -628,13 +634,37 @@ async def scans_enabled():
 
 @app.post("/api/scans", status_code=202)
 async def start_scan(payload: Dict[str, Any]):
-    assessment_id = str(payload.get("assessment_id") or "")
-    if not assessment_id:
-        raise HTTPException(status_code=400, detail="Missing 'assessment_id'")
+    """Queue a scan. Body: {assessment_id} to rescan, or {cloud_account_id} to
+    scan an account (its assessment is created on the first scan)."""
+    assessment_id = payload.get("assessment_id")
+    account_id = payload.get("cloud_account_id")
+    if bool(assessment_id) == bool(account_id):
+        raise HTTPException(status_code=400, detail="Send exactly one of 'assessment_id' or 'cloud_account_id'.")
+    if not isinstance(assessment_id or account_id, str):
+        raise HTTPException(status_code=400, detail="Ids must be strings.")
+    # With auth, the middleware has replaced org_id with the caller's org.
+    org_id = payload.get("org_id") if authn.AUTH_ENABLED else None
     try:
-        return await scan_runner.start_scan(db, assessment_id)
+        return await scan_runner.start_scan(db, assessment_id or None, cloud_account_id=account_id or None,
+                                            org_id=org_id)
     except scan_runner.ScanError as e:
+        status = 404 if str(e).endswith("not found.") else 409
+        raise HTTPException(status_code=status, detail=f"{e} {e.hint}".strip())
+
+@app.get("/api/cloud-accounts/{account_id}/access")
+async def cloud_account_access(account_id: str):
+    """What a scan of this account will target, and what access it needs."""
+    acct = await db["cloud_accounts"].find_one({"id": account_id}, {"_id": 0})
+    if not acct:
+        raise HTTPException(status_code=404, detail="Cloud account not found")
+    try:
+        prov = scan_providers.get(acct.get("cloud") or "")
+    except KeyError as e:
         raise HTTPException(status_code=409, detail=str(e))
+    scope = prov.account_scope(acct)
+    return {"provider": prov.name, "scope_label": prov.scope_label, "scope": scope,
+            "valid_scope": prov.valid_scope(scope), "can_scan": prov.can_scan,
+            "hint": prov.hint(scope) if prov.valid_scope(scope) else ""}
 
 @app.get("/api/scans")
 async def list_scans(request: Request, assessment_id: Optional[str] = None, limit: int = Query(default=5, le=50)):

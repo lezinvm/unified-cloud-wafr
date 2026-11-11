@@ -16,7 +16,8 @@
 #   status        containers + health through nginx
 #   logs          follow backend logs
 #   scan <id>     live scan of one assessment (any provider), same pipeline as the UI
-#   reset-data    wipe demo data, reload every provider that has a fetch file
+#   scan-account <id>  live scan of a stored cloud account (creates its assessment)
+#   reset-data    wipe demo data, reload every stored project/account fetch
 #   migrate       one-time: stop the old hand-run dev processes and container
 #
 # Env overrides: DEV_HOST, DEV_WEB_PORT (8444), DEV_API_PORT (8001), DEV_REALM,
@@ -133,22 +134,29 @@ for a in db['assessments'].find({}, {'_id': 0, 'id': 1, 'cloud': 1, 'cloud_accou
 
 reset_data() {
   [[ "$KEEP_EMAIL" =~ ^[A-Za-z0-9._%+@-]+$ ]] || { echo "invalid DEV_KEEP_EMAIL"; exit 1; }
+  # Every stored fetch (all clouds, all projects/accounts) is re-checked and
+  # reloaded under the cloud account that owns it.
   in_backend "set -e
-clouds=\$(python -c \"import scan_providers as s; print(' '.join(n for n, p in s.PROVIDERS.items() if p.fetch_file.exists()))\")
-[ -n \"\$clouds\" ] || { echo 'no fetch data yet: run a scan first'; exit 1; }
 python reset_dev_real_only.py --keep-email '$KEEP_EMAIL' --yes
-read -r uid org < <(python -c \"
-import os
+python reload_all.py --user-email '$KEEP_EMAIL'"
+}
+
+scan_account() {
+  local acct="${1:-}"
+  if [ -z "$acct" ]; then
+    echo "usage: scripts/dev-env.sh scan-account <cloud-account-id>"; echo "cloud accounts:"
+    in_backend "python -c \"
+import os, scan_providers as sp
 from pymongo import MongoClient
-u = MongoClient(os.environ['MONGO_URI'])[os.environ['DB_NAME']]['users'].find_one({'email': '$KEEP_EMAIL'})
-print(u['id'], u.get('org_id') or 'org_' + u['id'])\")
-for p in \$clouds; do
-  echo \"== \$p ==\"
-  python check_engine.py --provider \$p --out /data/run/assessment_result_\$p.json > /data/run/check_engine_\$p.log
-  sed -n '1,10p' /data/run/check_engine_\$p.log
-  python load_assessment_to_db.py --provider \$p --result /data/run/assessment_result_\$p.json \
-    --user-id \"\$uid\" --org-id \"\$org\" --real-only
-done"
+db = MongoClient(os.environ['MONGO_URI'])[os.environ['DB_NAME']]
+for a in db['cloud_accounts'].find({}, {'_id': 0}):
+    p = sp.PROVIDERS.get(str(a.get('cloud')).lower())
+    print('  ', a['id'], '(' + str(a.get('cloud')) + ', scope=' + (p.account_scope(a) if p else '?') + ', org=' + str(a.get('org_id')) + ')')\""
+    exit 1
+  fi
+  [[ "$acct" =~ ^[A-Za-z0-9._@-]+$ ]] || { echo "invalid cloud account id"; exit 1; }
+  echo "scanning account $acct (several minutes)..."
+  in_backend "python scan_runner.py --cloud-account-id '$acct'"
 }
 
 migrate() {
@@ -180,6 +188,7 @@ case "${1:-}" in
   status)     status ;;
   logs)       "${COMPOSE[@]}" logs -f --tail=100 backend ;;
   scan)       scan "${2:-}" ;;
+  scan-account) scan_account "${2:-}" ;;
   reset-data) reset_data ;;
   migrate)    migrate ;;
   *) sed -n '2,24p' "$0"; exit 1 ;;

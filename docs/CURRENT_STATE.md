@@ -17,7 +17,8 @@ Update this file whenever you change architecture, environments or rules.
 5. **Every API route needs a policy** in `backend/tenancy.py` `POLICIES` (a test fails otherwise). Identity, org and role come only from the verified token.
 6. **Results are per assessment.** Anything a scan writes carries `assessment_id`; never write tenant results into shared/global documents.
 7. **Never commit secrets or scan output:** `.env`, `deploy/**/*.env`, service-account keys, `backend/mcp_fetch/*.json`, `assessment_result*.json`, `handoff/`.
-8. **Verify before claiming done:** backend tests pass, `pnpm build` passes, `npx tsc --noEmit` shows no *new* errors (7 pre-existing, listed in §8).
+8. **Verify before claiming done:** backend tests pass, `pnpm build` passes, `tsc --noEmit` shows 0 errors.
+9. **Never assume one project/account.** No hardcoded scope ids or fallbacks; per-scope files only (§3).
 
 ---
 
@@ -42,8 +43,9 @@ Shared: host nginx (separate server blocks) and the Keycloak container `wafr-key
 ```bash
 git pull origin dev-lezin && scripts/dev-env.sh rebuild   # update + restart dev
 scripts/dev-env.sh status | logs | down
-scripts/dev-env.sh scan <assessment-id>                    # same pipeline as the UI "Scan now"
-scripts/dev-env.sh reset-data                              # wipe demo data, reload from fetch files
+scripts/dev-env.sh scan <assessment-id>                    # rescan, same pipeline as the UI "Scan now"
+scripts/dev-env.sh scan-account <cloud-account-id>         # scan any stored account (creates its assessment)
+scripts/dev-env.sh reset-data                              # wipe demo data, reload every stored project/account
 scripts/keycloak-dev-realm.sh <email> <org_id> [admin]     # create/refresh dev realm + user
 ```
 
@@ -54,14 +56,37 @@ Firewall rule `wafr-dev-access` allows :8444/:8001 from the owner's IP only.
 ## 3. Scan pipeline (real, working for GCP)
 
 ```
+verify provider verify_cmd                     quick access check (GCP: gcloud projects describe)
 fetch  backend/mcp_fetch/gcp_fetch_all.mjs   official gcloud MCP server 0.5.3, read-only, VM identity
 check  backend/check_engine.py --provider p   126 catalog controls → PASS/FAIL/UNKNOWN/NOT_APPLICABLE
 load   backend/load_assessment_to_db.py       assessment, findings, remediations, checks, best practices,
                                               inventory, milestone, all keyed by assessment_id
 ```
 
-- Started by `POST /api/scans` (UI "Scan now"; needs `SCAN_ENABLED=1`) or `python scan_runner.py --assessment-id <id>`.
-- `backend/scan_runner.py`: one scan at a time; provider/scope/owner come from the stored assessment, never the request; a fetch with fewer than 20 readable services is rejected and previous data kept.
+**Multi-cloud, multi-account.** Nothing is tied to one project. Any number of GCP projects / AWS
+accounts / Azure subscriptions, in any number of orgs:
+
+- `POST /api/scans` takes `{assessment_id}` (rescan) **or** `{cloud_account_id}` (scan an account;
+  its assessment `A-<PROVIDER>-<scope>` is created on the first scan, owned by the account's org; if
+  another org already has that id, the account id is appended). CLI: `scan_runner.py --assessment-id`
+  / `--cloud-account-id`. Needs `SCAN_ENABLED=1`.
+- Scope id comes from the stored account via the provider's `scope_of` (GCP `gcp_project`; AWS 12-digit
+  `account_identifier` or the account in `role_arn`; Azure `subscription_id`), never from the request.
+- Results attach to the user's own cloud account (`--cloud-account-id` on the loader); the loader no
+  longer creates a project-named account for UI scans.
+- Files: one fetch per scope `DATA_DIR/<provider>/<scope>.json`; per-scan temp/result files in
+  `RUN_DIR`. Old `<provider>_fetch_result.json` is split per scope at backend startup / `reset-data`.
+- **Queue:** scans run one at a time in order; others wait as `queued` (not refused). Only a second scan
+  of the same assessment is refused. Queued scans survive a restart; running ones are marked interrupted.
+- **Access check first:** if the scanner can't read the scope, the scan fails in seconds with
+  `access_hint` (the exact `gcloud projects add-iam-policy-binding … roles/viewer` +
+  `roles/iam.securityReviewer` command for the scanner SA). `GET /api/cloud-accounts/{id}/access`
+  returns scope + hint for the UI.
+- **To add a new GCP project:** grant `lens-scanner@lens-wafr-gcp.iam.gserviceaccount.com`
+  `roles/viewer` and `roles/iam.securityReviewer` on it, add the account in Settings with its project
+  id, press "Scan".
+- Targeted re-checks (`/api/checks/rerun`) fetch into a temp file and never replace the stored full fetch.
+- A fetch with fewer than 20 readable services is rejected and previous data kept.
 - Last real result for `A-GCP-lens-wafr-gcp`: 42 services readable, score 20, 33 fail / 8 pass, 42 unknown, 43 n/a, 137 resources.
 - Control catalog: `backend/seed_data/control_catalog.csv` (126 controls; columns for gcp/aws/azure checks and CIS/SOC2/ISO/HIPAA mappings).
 - Fix guidance for failing controls: `backend/remediation_guidance.py` (**authored**, not scan data; tagged `guidance_source: "authored"`).
@@ -108,7 +133,9 @@ load   backend/load_assessment_to_db.py       assessment, findings, remediations
 ## 7. Open work (priority order)
 
 1. TLS (needs a domain) · request validation (Pydantic) · prod hardening (:8000/:8081/docs public, root Dockerfile with `--reload`, Keycloak `start-dev` on H2). **On hold by owner.**
-2. Onboarding → real account validation → first scan (today a new user can't create a real assessment from the UI).
+2. UI holds one account per cloud (`configuredAccounts` in context.tsx); scanning works for every
+   account (Settings > Scan), but Dashboard/Onboarding still pick one per cloud. Refactor to a list.
+   Fetcher: Redis is fetched only in `us-central1` (fixed region in `gcp_fetch_all.mjs`).
 3. AWS, then Azure (fetchers, credentials, checks).
 4. Real scheduled scans; scan history per run.
 5. Replace or remove remaining fake features (integrations, PDF export, admin token usage, AI fix/chat).
@@ -119,11 +146,9 @@ load   backend/load_assessment_to_db.py       assessment, findings, remediations
 ## 8. Verification
 
 ```bash
-cd backend && python -m pytest tests -q          # 75 tests; needs a reachable MongoDB
+cd backend && python -m pytest tests -q          # 88 tests; needs a reachable MongoDB
 pnpm build                                       # frontend
-npx tsc --noEmit -p tsconfig.json                # 7 PRE-EXISTING errors only:
-#   context.tsx: resource_raw (x3), scheduled status type (x1)
-#   Dashboard.tsx: AssessmentStatus (x3)
+pnpm exec tsc --noEmit -p .                      # 0 errors
 ```
 
 ## 9. Corrections to older docs (`handoff/master/*`, 2026-10-16)

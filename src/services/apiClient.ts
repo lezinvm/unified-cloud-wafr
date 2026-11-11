@@ -6,15 +6,23 @@ import { OIDC_ENABLED, getAccessToken, login as oidcLogin } from './oidc';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
 
-export type ScanStage = 'fetch' | 'check' | 'load';
+export type ScanStage = 'verify' | 'fetch' | 'check' | 'load';
 export interface LiveScanStatus {
   id: string;
   assessment_id: string;
+  cloud_account_id?: string | null;
+  provider?: string;
+  /** Scope id: GCP project, AWS account or Azure subscription. */
   project: string;
   status: 'queued' | 'running' | 'done' | 'failed';
   stage: ScanStage | 'done';
-  stages: Record<ScanStage, 'pending' | 'running' | 'done' | 'failed'>;
+  /** Older scans have no 'verify' entry. */
+  stages: Partial<Record<ScanStage, 'pending' | 'running' | 'done' | 'failed'>>;
+  /** Scans waiting ahead of this one when it was queued. */
+  queue_position?: number;
   error: string | null;
+  /** What to grant the scanner identity when access is missing. */
+  access_hint?: string | null;
   log_tail: string;
   started_at: string;
   finished_at: string | null;
@@ -261,11 +269,21 @@ export const api = {
 
   // Live scans (real pipeline; backend must run with SCAN_ENABLED=1)
   scansEnabled: () => apiRequest<{ enabled: boolean }>('/scans/enabled'),
+  /** Rescan an existing assessment. */
   startScan: (assessmentId: string) =>
     apiRequest<LiveScanStatus>('/scans', {
       method: 'POST',
       body: JSON.stringify({ assessment_id: assessmentId }),
     }),
+  /** Scan a stored cloud account; its assessment is created on the first scan. */
+  startAccountScan: (cloudAccountId: string) =>
+    apiRequest<LiveScanStatus>('/scans', {
+      method: 'POST',
+      body: JSON.stringify({ cloud_account_id: cloudAccountId }),
+    }),
+  getCloudAccountAccess: (cloudAccountId: string) =>
+    apiRequest<{ provider: string; scope_label: string; scope: string; valid_scope: boolean; can_scan: boolean; hint: string }>(
+      `/cloud-accounts/${encodeURIComponent(cloudAccountId)}/access`),
   getScan: (scanId: string) => apiRequest<LiveScanStatus>(`/scans/${encodeURIComponent(scanId)}`),
   getScans: (assessmentId?: string, limit = 1) => {
     const params = new URLSearchParams({ limit: String(limit) });

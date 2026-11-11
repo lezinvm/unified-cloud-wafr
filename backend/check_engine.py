@@ -169,7 +169,15 @@ def main() -> None:
     ap.add_argument("--control", default=None, help="Run only this control_id.")
     args = ap.parse_args()
 
-    data_path = Path(args.data) if args.data else scan_providers.get(args.provider).fetch_file
+    if args.data:
+        data_path = Path(args.data)
+    else:
+        prov = scan_providers.get(args.provider)
+        stored = prov.stored_scopes()
+        if len(stored) != 1:
+            raise SystemExit(f"--data is required: {len(stored)} stored {prov.label} "
+                             f"{prov.scope_label}s ({', '.join(stored) or 'none'})")
+        data_path = prov.fetch_path(stored[0])
     out_path = Path(args.out) if args.out else HERE / f"assessment_result_{args.provider}.json"
 
     assessment = run(args.provider, Path(args.catalog), data_path, out_path, args.control)

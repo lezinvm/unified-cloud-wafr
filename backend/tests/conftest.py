@@ -7,6 +7,7 @@ Tests are skipped if it isn't available.
 """
 import os
 import sys
+import tempfile
 import time
 import uuid
 from pathlib import Path
@@ -26,6 +27,10 @@ os.environ.update({
     "DB_NAME": TEST_DB,
     "MONGO_URI": os.environ.get("MONGO_URI", "mongodb://localhost:27017"),
     "KEYCLOAK_URL": "http://127.0.0.1:1",  # never touch a real Keycloak
+    # Scan files go to a throwaway folder, never the real local fetch data.
+    "LENS_DATA_DIR": str(Path(tempfile.mkdtemp(prefix="lens-test-data-"))),
+    "LENS_RUN_DIR": str(Path(tempfile.mkdtemp(prefix="lens-test-run-"))),
+    "GCP_SCANNER_SA": "scanner@test-project.iam.gserviceaccount.com",
 })
 os.environ.pop("SCAN_ENABLED", None)
 os.environ.pop("REAL_DATA_ONLY", None)

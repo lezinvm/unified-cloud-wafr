@@ -10,6 +10,7 @@ import csv
 import json
 import os
 import sys
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -132,18 +133,9 @@ def load_control_catalog() -> Dict[str, Dict[str, Any]]:
     return catalog
 
 
-async def run_targeted_fetch(scope: str, services: List[str], fetch_file: Path) -> None:
-    """Run gcp_fetch_all.mjs with --services to fetch only required resources."""
-    cmd = [
-        "node",
-        str(FETCH_DIR / "gcp_fetch_all.mjs"),
-        "--project",
-        scope,
-        "--services",
-        ",".join(services),
-        "--out",
-        str(fetch_file),
-    ]
+async def run_targeted_fetch(prov: Any, scope: str, services: List[str], fetch_file: Path) -> None:
+    """Run the provider's fetcher for only the services this check needs."""
+    cmd = prov.fetch_cmd(scope, fetch_file, services)
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         cwd=str(FETCH_DIR),
@@ -171,8 +163,12 @@ async def rerun_single_check(
     user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Execute live check rerun against real cloud infrastructure."""
-    from backend import scan_providers
-    from backend.checks import get_provider
+    try:
+        from backend import scan_providers
+        from backend.checks import get_provider
+    except ModuleNotFoundError:
+        import scan_providers
+        from checks import get_provider
 
     asm = await db["assessments"].find_one({"id": assessment_id}, {"_id": 0})
     if not asm:
@@ -181,8 +177,12 @@ async def rerun_single_check(
     prov_name = (asm.get("cloud") or "gcp").lower()
     prov = scan_providers.get(prov_name)
     provider_registry = get_provider(prov_name)
+    if not prov.can_scan:
+        raise ValueError(f"Live re-checks are not available for {prov.label} yet.")
     acct = await db["cloud_accounts"].find_one({"id": asm.get("cloud_account_id")}, {"_id": 0}) or {}
-    scope = acct.get(prov.account_scope_field) or acct.get("account_identifier") or asm.get("accountId") or "lens-wafr-gcp"
+    scope = prov.account_scope(acct) or asm.get("account_identifier") or ""
+    if not prov.valid_scope(scope):
+        raise ValueError(f"Assessment has no valid {prov.label} {prov.scope_label} id (got '{scope}').")
 
     catalog = load_control_catalog()
     ctrl = catalog.get(check_id.upper()) or {}
@@ -191,16 +191,24 @@ async def rerun_single_check(
 
     # 1. Fetch targeted live data from the cloud
     services_to_fetch = get_services_for_check(check_id)
-    fetch_file = prov.fetch_file
-    fetch_file.parent.mkdir(parents=True, exist_ok=True)
-    await run_targeted_fetch(scope, services_to_fetch, fetch_file)
-
-    # 2. Run the real check against freshly fetched data
-    if not fetch_file.exists():
-        raise RuntimeError("Fetch output file missing after live fetch.")
-
-    with open(fetch_file, encoding="utf-8") as f:
-        fetched_data = json.load(f)
+    # Partial fetch goes to its own temp file: it must never replace the
+    # stored full fetch of this scope.
+    try:
+        from backend.scan_runner import RUN_DIR
+    except ModuleNotFoundError:
+        from scan_runner import RUN_DIR
+    RUN_DIR.mkdir(parents=True, exist_ok=True)
+    fetch_file = RUN_DIR / f"recheck-{uuid.uuid4().hex[:10]}.json"
+    try:
+        await run_targeted_fetch(prov, scope, services_to_fetch, fetch_file)
+        # 2. Run the real check against freshly fetched data
+        if not fetch_file.exists():
+            raise RuntimeError("Fetch output file missing after live fetch.")
+        with open(fetch_file, encoding="utf-8") as f:
+            fetched_data = json.load(f)
+    finally:
+        if fetch_file.exists():
+            fetch_file.unlink()
 
     scope_data = (fetched_data.get(prov.scope_key) or {}).get(scope) or {}
     live_services = scope_data.get("services", {})

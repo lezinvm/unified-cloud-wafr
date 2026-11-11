@@ -20,6 +20,26 @@ import { api, type LiveScanStatus } from './services/apiClient';
 import { REAL_DATA_ONLY } from './config/realData';
 import { OIDC_ENABLED, logout as oidcLogout } from './services/oidc';
 
+/** Static pillar shells filled with one assessment's pillar data from the API.
+ *  Real-data-only builds never fall back to the sample scores/best practices. */
+function mergePillars(dbPillars: any[]): PillarData[] {
+  return PILLARS_DATA.map(staticPillar => {
+    const dbP = dbPillars.find((p: any) => p.id === staticPillar.id);
+    if (!dbP) {
+      return REAL_DATA_ONLY ? { ...staticPillar, score: 0, bestPractices: [] } : staticPillar;
+    }
+    const fallbackBps = REAL_DATA_ONLY ? [] : staticPillar.bestPractices || [];
+    return {
+      ...staticPillar,
+      label: dbP.label || staticPillar.label,
+      short: dbP.short || staticPillar.short,
+      score: typeof dbP.score === 'number' ? dbP.score : REAL_DATA_ONLY ? 0 : staticPillar.score,
+      color: dbP.color || staticPillar.color,
+      bestPractices: Array.isArray(dbP.bestPractices) && dbP.bestPractices.length > 0 ? dbP.bestPractices : fallbackBps,
+    };
+  });
+}
+
 
 export type Cloud = 'aws' | 'azure' | 'gcp';
 export type Theme = 'light' | 'dark';
@@ -254,6 +274,8 @@ interface AppState {
   /** Live scan in progress or last finished (real-data-only builds). */
   activeScan: LiveScanStatus | null;
   startLiveScan: (assessmentId: string) => Promise<void>;
+  /** Scan a stored cloud account (any cloud/project); creates its assessment on first scan. */
+  startAccountScan: (cloudAccountId: string) => Promise<void>;
 }
 
 export interface RepoConfig {
@@ -747,12 +769,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
     tick();
   };
 
+  const watchNewScan = async (s: LiveScanStatus) => {
+    setActiveScan(s);
+    const ahead = s.queue_position ?? 0;
+    showToast(
+      ahead > 0 ? 'Scan queued' : 'Live scan started', 'info',
+      ahead > 0
+        ? `${s.project}: ${ahead} scan${ahead === 1 ? '' : 's'} ahead. It starts automatically.`
+        : `Scanning ${s.project}. This takes a few minutes.`);
+    pollScan(s.id);
+    // A first scan of an account creates its assessment: show it right away.
+    if (!assessments.some(a => a.id === s.assessment_id)) {
+      await refreshFromDb();
+      setSelectedAssessmentId(s.assessment_id);
+    }
+  };
+
   const startLiveScan = async (assessmentId: string) => {
     try {
-      const s = await api.startScan(assessmentId);
-      setActiveScan(s);
-      showToast('Live scan started', 'info', `Scanning ${s.project}. This takes a few minutes.`);
-      pollScan(s.id);
+      await watchNewScan(await api.startScan(assessmentId));
+    } catch (err: any) {
+      showToast('Could not start scan', 'info', err?.message || String(err));
+    }
+  };
+
+  const startAccountScan = async (cloudAccountId: string) => {
+    try {
+      await watchNewScan(await api.startAccountScan(cloudAccountId));
     } catch (err: any) {
       showToast('Could not start scan', 'info', err?.message || String(err));
     }
@@ -1008,6 +1051,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
           // threw whenever there were no assessments and skipped this whole sync.
           const firstAccountCloud = Array.isArray(dbAccounts) ? dbAccounts[0]?.cloud : undefined;
           const detectedCloud = ((dbAssessments?.[0]?.cloud || firstAccountCloud || cloud || 'aws') as string).toLowerCase();
+          // Pillars of the selected assessment (falls back to the first one).
+          const pillarSource = Array.isArray(dbAssessments)
+            ? dbAssessments.find((a: any) => a.id === selectedAssessmentId) || dbAssessments[0]
+            : undefined;
           const [
             dbSchedules,
             dbPillars,
@@ -1020,7 +1067,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             dbJiraTickets,
           ] = await Promise.all([
             api.getScheduledAssessments(userOrgId, currentUserId),
-            api.getPillars(detectedCloud, dbAssessments?.[0]?.id),
+            api.getPillars(pillarSource?.cloud || detectedCloud, pillarSource?.id),
             api.getComplianceFrameworks(),
             api.getIntegrations(userOrgId),
             api.getAlertLogs(),
@@ -1067,21 +1114,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           }
 
           if (Array.isArray(dbPillars) && dbPillars.length > 0) {
-            const mergedPillars: PillarData[] = PILLARS_DATA.map(staticPillar => {
-              const dbP = dbPillars.find((p: any) => p.id === staticPillar.id);
-              if (dbP) {
-                return {
-                  ...staticPillar,
-                  label: dbP.label || staticPillar.label,
-                  short: dbP.short || staticPillar.short,
-                  score: typeof dbP.score === 'number' ? dbP.score : staticPillar.score,
-                  color: dbP.color || staticPillar.color,
-                  bestPractices: Array.isArray(dbP.bestPractices) && dbP.bestPractices.length > 0 ? dbP.bestPractices : staticPillar.bestPractices || [],
-                };
-              }
-              return staticPillar;
-            });
-            setPillars(mergedPillars);
+            setPillars(mergePillars(dbPillars));
           }
 
           {
@@ -1524,6 +1557,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const currentAssessment: AssessmentInfo | null =
     assessments.find((a) => a.id === selectedAssessmentId) || assessments[0] || null;
 
+  // Pillars belong to one assessment (one project/account): reload them when
+  // the selection changes so another project's pillars never linger.
+  useEffect(() => {
+    const aid = currentAssessment?.id;
+    if (!aid) return;
+    let cancelled = false;
+    api.getPillars(currentAssessment.cloud, aid).then(dbPillars => {
+      if (cancelled) return;
+      if (Array.isArray(dbPillars) && dbPillars.length > 0) setPillars(mergePillars(dbPillars));
+      else if (REAL_DATA_ONLY) setPillars(mergePillars([]));
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [currentAssessment?.id]);
+
   const currentMilestones: AssessmentMilestone[] = currentAssessment
     ? milestones.filter((m) => m.assessmentId === currentAssessment.id)
     : [];
@@ -1759,7 +1806,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
         void startLiveScan(existing.id);
         return { isRerun: true, assessment: existing };
       }
-      showToast('New assessments are created by the scanner, not from here.', 'info');
+      // New: scan the matching stored cloud account; the backend creates the
+      // assessment from the real results.
+      const want = config.accountId.toLowerCase();
+      const acct = cloudAccounts.find((a: any) =>
+        (a.cloud || '').toLowerCase() === config.cloud.toLowerCase() &&
+        [a.id, a.account_identifier, a.gcp_project, a.subscription_id]
+          .some((v: any) => v && String(v).toLowerCase() === want));
+      if (acct) {
+        void startAccountScan(acct.id);
+      } else {
+        showToast('Add this cloud account first', 'info',
+          'Save the account in Settings > Cloud accounts, then start the scan.');
+      }
       return { isRerun: false, assessment: assessments[0] };
     }
 
@@ -2114,6 +2173,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         refreshFromDb,
         activeScan,
         startLiveScan,
+        startAccountScan,
       }}
     >
       {children}

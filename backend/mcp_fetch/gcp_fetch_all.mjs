@@ -13,6 +13,7 @@
  *   node gcp_fetch_all.mjs [--project P]   # single project (skips discovery)
  *   node gcp_fetch_all.mjs --all           # every visible project
  *   node gcp_fetch_all.mjs --out file.json
+ *   node gcp_fetch_all.mjs --project P --services a,b   # only these services (re-checks)
  */
 import { spawn } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
@@ -328,28 +329,16 @@ async function main() {
     console.log(`Found ${projects.length} project(s): ${projects.join(', ') || '(none)'}`);
   }
 
-  // Load existing OUT file if present so partial / single-service updates merge seamlessly
-  let existingResult = { fetchedAt: new Date().toISOString(), projectCount: 0, projects: {} };
-  try {
-    if (existsSync(OUT)) {
-      existingResult = JSON.parse(readFileSync(OUT, 'utf8'));
-    }
-  } catch {}
-
-  const result = {
-    ...existingResult,
-    fetchedAt: new Date().toISOString(),
-    projectCount: projects.length || existingResult.projectCount || 1,
-    projects: { ...(existingResult.projects || {}) },
-  };
+  // Always a fresh result: a fetch reports only what was read now. Callers
+  // write to their own file (one per scope / per re-check), never merge.
+  const result = { fetchedAt: new Date().toISOString(), projectCount: projects.length, projects: {} };
 
   // Concurrency: run up to N service fetches at once per project to cut wall time
   // (each gcloud call cold-starts the CLI, so serial is very slow).
   const CONCURRENCY = 6;
 
   for (const project of projects) {
-    const existingServices = (existingResult.projects && existingResult.projects[project]?.services) || {};
-    const pres = { services: { ...existingServices } };
+    const pres = { services: {} };
     const queue = ONLY_SERVICES
       ? FETCH_PLAN.filter(entry => ONLY_SERVICES.includes(entry.key))
       : [...FETCH_PLAN];

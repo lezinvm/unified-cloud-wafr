@@ -70,6 +70,7 @@ POLICIES: list[Rule] = [
     R("GET", "/api/cloud-accounts", USER),
     R("POST", "/api/cloud-accounts", USER, body_id_owner="cloud_account"),
     R("DELETE", "/api/cloud-accounts/{account_id}", USER, path_owner=("cloud_account", "account_id")),
+    R("GET", "/api/cloud-accounts/{account_id}/access", USER, path_owner=("cloud_account", "account_id")),
 
     R("GET", "/api/assessments", USER),
     R("GET", "/api/assessments/{assessment_id}", USER, path_owner=("assessment", "assessment_id")),
@@ -95,7 +96,9 @@ POLICIES: list[Rule] = [
 
     R("GET", "/api/scans/enabled", USER),
     R("GET", "/api/scans", USER),
-    R("POST", "/api/scans", USER, require_assessment=True),
+    # assessment_id or cloud_account_id; both are ownership-checked above and
+    # the endpoint requires exactly one and that it exists.
+    R("POST", "/api/scans", USER),
     R("GET", "/api/scans/{scan_id}", USER, path_owner=("scan", "scan_id")),
 
     R("GET", "/api/scheduled-assessments", USER),
