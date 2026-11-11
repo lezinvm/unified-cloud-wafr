@@ -150,7 +150,7 @@ export const api = {
     const query = params.toString();
     return apiRequest<any[]>(query ? `/remediations/status?${query}` : '/remediations/status');
   },
-  saveRemediationStatus: (payload: { key?: string; assessment_id?: string; check_id?: string; status: string; note?: string; user_id?: string }) =>
+  saveRemediationStatus: (payload: { key?: string; assessment_id?: string; check_id?: string; resource_raw?: string; status: string; note?: string; user_id?: string }) =>
     apiRequest<any>('/remediations/status', {
       method: 'POST',
       body: JSON.stringify(payload),

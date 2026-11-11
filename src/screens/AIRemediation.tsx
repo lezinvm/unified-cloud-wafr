@@ -417,113 +417,177 @@ export function AIRemediation() {
     });
   };
 
-  const handleRerunResourceCheck = (checkId: string, arn: string) => {
-
-    if (REAL_DATA_ONLY) { showToast('Not available here: this action only simulates a result. Results come only from the scanner.', 'info'); return; }
+  const handleRerunResourceCheck = async (checkId: string, arn: string) => {
     setVerifyingResourceKeys(prev => ({ ...prev, [arn]: true }));
     const targetAssessment = activeAssessmentId || selectedAssessmentId || 'A-001';
-    api.rerunCheck({
-      check_id: checkId,
-      assessment_id: targetAssessment,
-      resource_arn: arn,
-      user_id: currentUser?.id,
-      status: 'fixed',
-    }).catch(err => console.warn('Could not rerun check in DB:', err));
+    const info = parseResourceInfo(arn);
 
-    setTimeout(() => {
+    try {
+      const res = await api.rerunCheck({
+        check_id: checkId,
+        assessment_id: targetAssessment,
+        resource_arn: arn,
+        user_id: currentUser?.id,
+      });
+
       setVerifyingResourceKeys(prev => ({ ...prev, [arn]: false }));
-      setSolvedResourceArns(prev => ({ ...prev, [arn]: true }));
-      setResourceRemediationStatus(checkId, arn, 'fixed');
-      const info = parseResourceInfo(arn);
-      setVerifiedResourceResults(prev => ({
-        ...prev,
-        [arn]: {
-          passed: true,
-          message: `${info.shortName} telemetry re-scanned: WAFR configuration rules verified compliant.`,
-          timestamp: 'Just now',
-        },
-      }));
-      showToast(
-        `Check Passed: ${info.shortName} Verified`,
-        'success',
-        'Resource configuration verified compliant and synced across DB.'
-      );
-    }, 850);
+
+      if (res?.passed) {
+        setSolvedResourceArns(prev => ({ ...prev, [arn]: true }));
+        setResourceRemediationStatus(checkId, arn, 'fixed');
+        setVerifiedResourceResults(prev => ({
+          ...prev,
+          [arn]: {
+            passed: true,
+            message: res.message || `${info.shortName} telemetry re-scanned: WAFR configuration rules verified compliant.`,
+            timestamp: 'Just now',
+          },
+        }));
+        showToast(
+          `Check Passed: ${info.shortName} Verified`,
+          'success',
+          res.evidence || 'Resource configuration verified compliant and synced across DB.'
+        );
+      } else {
+        setSolvedResourceArns(prev => {
+          const next = { ...prev };
+          delete next[arn];
+          return next;
+        });
+        setResourceRemediationStatus(checkId, arn, 'pending');
+        setVerifiedResourceResults(prev => ({
+          ...prev,
+          [arn]: {
+            passed: false,
+            message: res?.evidence || res?.message || `${info.shortName} is still non-compliant in live cloud.`,
+            timestamp: 'Just now',
+          },
+        }));
+        showToast(
+          `Check Still Failing: ${info.shortName}`,
+          'info',
+          res?.evidence || 'Resource is still non-compliant in live cloud.'
+        );
+      }
+    } catch (err: any) {
+      setVerifyingResourceKeys(prev => ({ ...prev, [arn]: false }));
+      showToast('Rerun Check Failed', 'info', err?.message || 'Could not verify resource in live cloud.');
+    }
   };
 
-  const handleRerunFindingCheck = (checkId: string) => {
-
-    if (REAL_DATA_ONLY) { showToast('Not available here: this action only simulates a result. Results come only from the scanner.', 'info'); return; }
+  const handleRerunFindingCheck = async (checkId: string) => {
     setVerifyingFindingCheck(true);
     setCheckRerunFeedback(null);
     const targetAssessment = activeAssessmentId || selectedAssessmentId || 'A-001';
-    api.rerunCheck({
-      check_id: checkId,
-      assessment_id: targetAssessment,
-      user_id: currentUser?.id,
-      status: 'fixed',
-    }).catch(err => console.warn('Could not rerun finding check in DB:', err));
+    const resources = checkData.resources || [];
 
-    setTimeout(() => {
+    try {
+      const res = await api.rerunCheck({
+        check_id: checkId,
+        assessment_id: targetAssessment,
+        user_id: currentUser?.id,
+      });
+
       setVerifyingFindingCheck(false);
-      const resources = checkData.resources || [];
-      resources.forEach(r => {
-        setResourceRemediationStatus(checkId, r, 'fixed');
-      });
-      setSolvedResourceArns(prev => {
-        const next = { ...prev };
+
+      if (res?.passed) {
         resources.forEach(r => {
-          next[r] = true;
+          setResourceRemediationStatus(checkId, r, 'fixed');
         });
-        return next;
-      });
-      markCheckSolved(checkId, true);
-      setCheckRerunFeedback({
-        checkId,
-        passed: true,
-        message: `Check ${checkId} verified! All ${resources.length} impacted resources passed telemetry inspection.`,
-      });
-      showToast(
-        `Check ${checkId} Rerun Passed`,
-        'success',
-        'All resources verified compliant and updated in DB.'
-      );
-    }, 1000);
+        setSolvedResourceArns(prev => {
+          const next = { ...prev };
+          resources.forEach(r => {
+            next[r] = true;
+          });
+          return next;
+        });
+        markCheckSolved(checkId, true);
+        setCheckRerunFeedback({
+          checkId,
+          passed: true,
+          message: res.message || `Check ${checkId} verified! All ${resources.length} impacted resources passed telemetry inspection.`,
+        });
+        showToast(
+          `Check ${checkId} Rerun Passed`,
+          'success',
+          res.evidence || 'All resources verified compliant and updated in DB.'
+        );
+      } else {
+        markCheckSolved(checkId, false);
+        setCheckRerunFeedback({
+          checkId,
+          passed: false,
+          message: res?.evidence || res?.message || `Check ${checkId} still failing: Live cloud resources are still non-compliant.`,
+        });
+        showToast(
+          `Check ${checkId} Still Failing`,
+          'info',
+          res?.evidence || 'Non-compliant configuration detected in live cloud.'
+        );
+      }
+    } catch (err: any) {
+      setVerifyingFindingCheck(false);
+      showToast('Rerun Check Failed', 'info', err?.message || 'Could not verify check in live cloud.');
+    }
   };
 
-  const handleRerunModalResource = () => {
-
-    if (REAL_DATA_ONLY) { showToast('Not available here: this action only simulates a result. Results come only from the scanner.', 'info'); return; }
+  const handleRerunModalResource = async () => {
     if (!activeResourceArn) return;
     setVerifyingModalResource(true);
     const targetAssessment = activeAssessmentId || selectedAssessmentId || 'A-001';
-    api.rerunCheck({
-      check_id: checkData.id,
-      assessment_id: targetAssessment,
-      resource_arn: activeResourceArn,
-      user_id: currentUser?.id,
-      status: 'fixed',
-    }).catch(err => console.warn('Could not rerun check in DB:', err));
+    const info = activeResourceInfo;
 
-    setTimeout(() => {
+    try {
+      const res = await api.rerunCheck({
+        check_id: checkData.id,
+        assessment_id: targetAssessment,
+        resource_arn: activeResourceArn,
+        user_id: currentUser?.id,
+      });
+
       setVerifyingModalResource(false);
-      setSolvedResourceArns(prev => ({ ...prev, [activeResourceArn]: true }));
-      setResourceRemediationStatus(checkData.id, activeResourceArn, 'fixed');
-      const info = activeResourceInfo;
-      setVerifiedResourceResults(prev => ({
-        ...prev,
-        [activeResourceArn]: {
-          passed: true,
-          message: `${info.shortName} telemetry re-scanned: Configuration verified compliant.`,
-          timestamp: 'Just now',
-        },
-      }));
-      showToast(
-        `Check Passed: ${info.shortName} Verified`,
-        'success',
-        'Resource verified compliant and updated in DB.'
-      );
-    }, 850);
+
+      if (res?.passed) {
+        setSolvedResourceArns(prev => ({ ...prev, [activeResourceArn]: true }));
+        setResourceRemediationStatus(checkData.id, activeResourceArn, 'fixed');
+        setVerifiedResourceResults(prev => ({
+          ...prev,
+          [activeResourceArn]: {
+            passed: true,
+            message: res.message || `${info.shortName} telemetry re-scanned: Configuration verified compliant.`,
+            timestamp: 'Just now',
+          },
+        }));
+        showToast(
+          `Check Passed: ${info.shortName} Verified`,
+          'success',
+          res.evidence || 'Resource verified compliant and updated in DB.'
+        );
+      } else {
+        setSolvedResourceArns(prev => {
+          const next = { ...prev };
+          delete next[activeResourceArn];
+          return next;
+        });
+        setResourceRemediationStatus(checkData.id, activeResourceArn, 'pending');
+        setVerifiedResourceResults(prev => ({
+          ...prev,
+          [activeResourceArn]: {
+            passed: false,
+            message: res?.evidence || res?.message || `${info.shortName} is still non-compliant in live cloud.`,
+            timestamp: 'Just now',
+          },
+        }));
+        showToast(
+          `Check Still Failing: ${info.shortName}`,
+          'info',
+          res?.evidence || 'Resource is still non-compliant in live cloud.'
+        );
+      }
+    } catch (err: any) {
+      setVerifyingModalResource(false);
+      showToast('Rerun Check Failed', 'info', err?.message || 'Could not verify resource in live cloud.');
+    }
   };
 
   const handleCopyCli = () => {
@@ -1318,11 +1382,23 @@ export function AIRemediation() {
 
                 {checkRerunFeedback && checkRerunFeedback.checkId === checkData.id && (
                   <div
-                    className="p-3 rounded-xl border flex items-center gap-2.5 text-xs font-semibold bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400 animate-fadeIn"
+                    className={`p-3 rounded-xl border flex items-center gap-2.5 text-xs font-semibold animate-fadeIn ${
+                      checkRerunFeedback.passed
+                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
+                        : 'bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400'
+                    }`}
                   >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                      <polyline points="20 6 9 17 4 12" />
-                    </svg>
+                    {checkRerunFeedback.passed ? (
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    ) : (
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                        <circle cx="12" cy="12" r="10" />
+                        <line x1="15" y1="9" x2="9" y2="15" />
+                        <line x1="9" y1="9" x2="15" y2="15" />
+                      </svg>
+                    )}
                     <span>{checkRerunFeedback.message}</span>
                   </div>
                 )}
@@ -1501,6 +1577,11 @@ export function AIRemediation() {
                               {verResult && isResSolved && (
                                 <div className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium mt-0.5 flex items-center gap-1">
                                   <span>✓ Live check verified: Compliant with rules</span>
+                                </div>
+                              )}
+                              {verResult && !verResult.passed && !isResSolved && (
+                                <div className="text-[11px] text-rose-600 dark:text-rose-400 font-medium mt-0.5 flex items-center gap-1">
+                                  <span>✕ Live check failed: {verResult.message}</span>
                                 </div>
                               )}
                             </div>
@@ -1850,6 +1931,30 @@ export function AIRemediation() {
                   </button>
                 </div>
               </div>
+
+              {/* Live Verification Result Banner inside Fix Modal */}
+              {verifiedResourceResults[activeResourceArn] && (
+                <div
+                  className={`px-6 py-2.5 border-b text-xs flex items-center gap-2 font-medium ${
+                    verifiedResourceResults[activeResourceArn].passed
+                      ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+                      : 'bg-rose-500/10 border-rose-500/20 text-rose-600 dark:text-rose-400'
+                  }`}
+                >
+                  {verifiedResourceResults[activeResourceArn].passed ? (
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                  ) : (
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <circle cx="12" cy="12" r="10" />
+                      <line x1="15" y1="9" x2="9" y2="15" />
+                      <line x1="9" y1="9" x2="15" y2="15" />
+                    </svg>
+                  )}
+                  <span>{verifiedResourceResults[activeResourceArn].message}</span>
+                </div>
+              )}
 
               {/* 3 Tabs Header Bar */}
               <div

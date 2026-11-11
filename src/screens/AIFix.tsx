@@ -139,69 +139,107 @@ export function AIFix() {
   const [cantFixTargetResource, setCantFixTargetResource] = useState<string | null>(null);
   const [cantFixNote, setCantFixNote] = useState('');
 
-  const handleRerunResourceCheck = (checkId: string, arn: string) => {
-    if (REAL_DATA_ONLY) { showToast('Not available here: this action only simulates a result. Results come only from the scanner.', 'info'); return; }
+  const handleRerunResourceCheck = async (checkId: string, arn: string) => {
     setVerifyingResourceKeys(prev => ({ ...prev, [arn]: true }));
     const targetAssessment = selectedAssessmentId || currentAssessment?.id || 'A-001';
-    api.rerunCheck({
-      check_id: checkId,
-      assessment_id: targetAssessment,
-      resource_arn: arn,
-      user_id: currentUser?.id,
-      status: 'fixed',
-    }).catch(err => console.warn('Could not rerun check on backend:', err));
+    const parts = arn.split(':');
+    const short = parts[parts.length - 1] || arn;
 
-    setTimeout(() => {
+    try {
+      const res = await api.rerunCheck({
+        check_id: checkId,
+        assessment_id: targetAssessment,
+        resource_arn: arn,
+        user_id: currentUser?.id,
+      });
+
       setVerifyingResourceKeys(prev => ({ ...prev, [arn]: false }));
-      setResourceRemediationStatus(checkId, arn, 'fixed');
-      const parts = arn.split(':');
-      const short = parts[parts.length - 1] || arn;
-      setVerifiedResourceResults(prev => ({
-        ...prev,
-        [arn]: {
-          passed: true,
-          message: `${short} telemetry re-scanned: Configuration verified compliant.`,
-          timestamp: 'Just now',
-        },
-      }));
-      showToast(
-        `Check Passed: ${short} Verified`,
-        'success',
-        'Resource verified compliant and updated in DB.'
-      );
-    }, 850);
+
+      if (res?.passed) {
+        setResourceRemediationStatus(checkId, arn, 'fixed');
+        setVerifiedResourceResults(prev => ({
+          ...prev,
+          [arn]: {
+            passed: true,
+            message: res.message || `${short} telemetry re-scanned: Configuration verified compliant.`,
+            timestamp: 'Just now',
+          },
+        }));
+        showToast(
+          `Check Passed: ${short} Verified`,
+          'success',
+          res.evidence || 'Resource verified compliant and updated in DB.'
+        );
+      } else {
+        // Not fixed! Keep as failing/pending
+        setResourceRemediationStatus(checkId, arn, 'pending');
+        setVerifiedResourceResults(prev => ({
+          ...prev,
+          [arn]: {
+            passed: false,
+            message: res?.evidence || res?.message || `${short} is still non-compliant in live cloud.`,
+            timestamp: 'Just now',
+          },
+        }));
+        showToast(
+          `Check Still Failing: ${short}`,
+          'info',
+          res?.evidence || 'Resource is still non-compliant in live cloud.'
+        );
+      }
+    } catch (err: any) {
+      setVerifyingResourceKeys(prev => ({ ...prev, [arn]: false }));
+      showToast('Rerun Check Failed', 'info', err?.message || 'Could not verify resource in live cloud.');
+    }
   };
 
-  const handleRerunFindingCheck = (checkId: string) => {
-    if (REAL_DATA_ONLY) { showToast('Not available here: this action only simulates a result. Results come only from the scanner.', 'info'); return; }
+  const handleRerunFindingCheck = async (checkId: string) => {
     setVerifyingFindingCheck(true);
     setCheckRerunFeedback(null);
     const targetAssessment = selectedAssessmentId || currentAssessment?.id || 'A-001';
-    api.rerunCheck({
-      check_id: checkId,
-      assessment_id: targetAssessment,
-      user_id: currentUser?.id,
-      status: 'fixed',
-    }).catch(err => console.warn('Could not rerun check on backend:', err));
 
-    setTimeout(() => {
+    try {
+      const res = await api.rerunCheck({
+        check_id: checkId,
+        assessment_id: targetAssessment,
+        user_id: currentUser?.id,
+      });
+
       setVerifyingFindingCheck(false);
       const resources = checkData.resources || [];
-      resources.forEach(r => {
-        setResourceRemediationStatus(checkId, r, 'fixed');
-      });
-      markCheckSolved(checkId, true);
-      setCheckRerunFeedback({
-        checkId,
-        passed: true,
-        message: `Check ${checkId} verified! All ${resources.length} resources passed live telemetry validation.`,
-      });
-      showToast(
-        `Check ${checkId} Rerun Passed`,
-        'success',
-        'All resources verified compliant and updated in DB.'
-      );
-    }, 1000);
+
+      if (res?.passed) {
+        resources.forEach(r => {
+          setResourceRemediationStatus(checkId, r, 'fixed');
+        });
+        markCheckSolved(checkId, true);
+        setCheckRerunFeedback({
+          checkId,
+          passed: true,
+          message: res.message || `Check ${checkId} verified! All ${resources.length} resources passed live telemetry validation.`,
+        });
+        showToast(
+          `Check ${checkId} Rerun Passed`,
+          'success',
+          res.evidence || 'All resources verified compliant and updated in DB.'
+        );
+      } else {
+        markCheckSolved(checkId, false);
+        setCheckRerunFeedback({
+          checkId,
+          passed: false,
+          message: res?.evidence || res?.message || `Check ${checkId} still failing: Live cloud resources are still non-compliant.`,
+        });
+        showToast(
+          `Check ${checkId} Still Failing`,
+          'info',
+          res?.evidence || 'Non-compliant configuration detected in live cloud.'
+        );
+      }
+    } catch (err: any) {
+      setVerifyingFindingCheck(false);
+      showToast('Rerun Check Failed', 'info', err?.message || 'Could not verify check in live cloud.');
+    }
   };
 
   useEffect(() => {
@@ -485,11 +523,23 @@ export function AIFix() {
 
             {checkRerunFeedback && checkRerunFeedback.checkId === checkData.id && (
               <div
-                className="p-3 rounded-xl border flex items-center gap-2.5 text-xs font-semibold bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400 animate-fadeIn"
+                className={`p-3 rounded-xl border flex items-center gap-2.5 text-xs font-semibold animate-fadeIn ${
+                  checkRerunFeedback.passed
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
+                    : 'bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400'
+                }`}
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                  <polyline points="20 6 9 17 4 12" />
-                </svg>
+                {checkRerunFeedback.passed ? (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                ) : (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="15" y1="9" x2="9" y2="15" />
+                    <line x1="9" y1="9" x2="15" y2="15" />
+                  </svg>
+                )}
                 <span>{checkRerunFeedback.message}</span>
               </div>
             )}
@@ -571,6 +621,11 @@ export function AIFix() {
                           {verResult && isFixed && (
                             <span className="text-[10px] font-sans text-emerald-600 dark:text-emerald-400 font-medium mt-0.5">
                               ✓ Live telemetry verified compliant
+                            </span>
+                          )}
+                          {verResult && !verResult.passed && !isFixed && (
+                            <span className="text-[10px] font-sans text-rose-600 dark:text-rose-400 font-medium mt-0.5">
+                              ✕ Live check failed: {verResult.message}
                             </span>
                           )}
                         </div>

@@ -1942,7 +1942,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setScheduledAssessments((prev) =>
       prev.map((s) => {
         if (s.id === id) {
-          const nextStatus = s.status === 'active' ? 'paused' : 'active';
+          const nextStatus: 'active' | 'paused' = s.status === 'active' ? 'paused' : 'active';
           const updated = {
             ...s,
             status: nextStatus,

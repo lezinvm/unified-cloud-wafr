@@ -13,11 +13,13 @@ from fastapi.middleware.cors import CORSMiddleware
 try:
     from backend.database import db, check_db_connection  # local dev (run from project root)
     from backend import scan_runner, auth as authn, tenancy
+    from backend.targeted_check_runner import rerun_single_check
 except ModuleNotFoundError:
     from database import db, check_db_connection  # Docker (WORKDIR is /app = backend/)
     import scan_runner
     import auth as authn
     import tenancy
+    from targeted_check_runner import rerun_single_check
 
 _auth_problems = authn.config_problems()
 if _auth_problems:
@@ -737,100 +739,31 @@ async def rerun_assessment(assessment_id: str):
 
 @app.post("/api/checks/rerun")
 async def rerun_check(payload: Dict[str, Any]):
-    if REAL_DATA_ONLY:
-        # Marks findings as passing without re-checking the cloud.
-        raise HTTPException(status_code=409, detail=REAL_DATA_ONLY_MSG)
     check_id = payload.get("check_id")
     assessment_id = payload.get("assessment_id") or "A-001"
     resource_arn = payload.get("resource_arn")
     user_id = payload.get("user_id") or "usr-01"
-    status = payload.get("status") or "fixed"
-    note = payload.get("note") or "Telemetry verified compliant"
-    now_iso = datetime.now(timezone.utc).isoformat()
 
     if not check_id:
         raise HTTPException(status_code=400, detail="Missing 'check_id'")
 
-    # 1. Update wafr_db.remediation_statuses
-    status_key = f"{assessment_id}::{check_id}::{resource_arn or '__check_level__'}"
-    await db["remediation_statuses"].update_one(
-        {"key": status_key},
-        {
-            "$set": {
-                "key": status_key,
-                "assessment_id": assessment_id,
-                "check_id": check_id,
-                "resource_raw": resource_arn or "__check_level__",
-                "status": status,
-                "note": note,
-                "user_id": user_id,
-                "updated_at": now_iso
-            }
-        },
-        upsert=True
-    )
-
-    # 2. Update wafr_db.findings
-    finding_query = {"assessment_id": assessment_id, "check_id": check_id}
-    finding = await db["findings"].find_one(finding_query)
-    if finding:
-        await db["findings"].update_one(
-            finding_query,
-            {"$set": {"status": "pass" if status == "fixed" else "fail", "updated_at": now_iso}}
+    try:
+        result = await rerun_single_check(
+            db=db,
+            assessment_id=assessment_id,
+            check_id=check_id,
+            resource_arn=resource_arn,
+            user_id=user_id,
         )
-
-    # 3. Update wafr_db.checks
-    await db["checks"].update_one(
-        {"id": check_id},
-        {"$set": {"status": "pass" if status == "fixed" else "fail"}}
-    )
-
-    # 4. Recalculate wafr_db.assessments metrics
-    assessment = await db["assessments"].find_one({"id": assessment_id})
-    if assessment:
-        findings_cursor = db["findings"].find({"assessment_id": assessment_id})
-        all_findings = await findings_cursor.to_list(200)
-
-        failing_count = sum(1 for f in all_findings if f.get("status") == "fail")
-        total_checks = assessment.get("total_checks", 46)
-        passed_count = max(0, total_checks - failing_count)
-        new_score = min(100, max(50, round((passed_count / total_checks) * 100)))
-
-        await db["assessments"].update_one(
-            {"id": assessment_id},
-            {
-                "$set": {
-                    "score": new_score,
-                    "passed_checks": passed_count,
-                    "failed_checks": failing_count,
-                    "high_risks": max(0, assessment.get("high_risks", 3) - 1) if status == "fixed" else assessment.get("high_risks", 3),
-                    "updated_at": now_iso
-                }
-            }
-        )
-
-    # 5. Insert audit log in wafr_db.alert_logs
-    alert_id = f"ALT-{int(time.time() * 1000) % 100000}"
-    await db["alert_logs"].insert_one({
-        "id": alert_id,
-        "service": "wafr",
-        "title": f"Check {check_id} Re-verified (Passed)",
-        "details": f"Configuration rule verification succeeded for {resource_arn or 'all impacted resources'} in assessment {assessment_id}.",
-        "severity": "info",
-        "status": "delivered",
-        "timestamp": "Just now",
-        "created_at": now_iso
-    })
-
-    return {
-        "status": "success",
-        "check_id": check_id,
-        "assessment_id": assessment_id,
-        "resource_arn": resource_arn,
-        "verified": True,
-        "finding_status": "pass" if status == "fixed" else "fail",
-        "timestamp": now_iso
-    }
+        return {
+            "status": "success",
+            "check_id": check_id,
+            "assessment_id": assessment_id,
+            "resource_arn": resource_arn,
+            **result,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Targeted check rerun failed: {str(e)}")
 
 @app.post("/api/cloud-accounts")
 async def create_cloud_account(payload: Dict[str, Any]):

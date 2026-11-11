@@ -23,27 +23,8 @@ import {
   type CheckRemediationData,
 } from '../data/remediationData';
 import { PrintableWAFRReport } from '../components/PrintableWAFRReport';
-
-/* ── Best Practice Code Formatter ────────────────────────────────────────── */
-export function formatBpCode(raw: string): string {
-  if (!raw) return '';
-  // Convert long assessment-embedded IDs like "BP-A-GCP-lens-wafr-gcp-security-IAM" to "BP-SEC-IAM"
-  const m = raw.match(/BP-A-[A-Za-z0-9]+-(?:.*?)-(security|reliability|cost|operations|performance|sustainability)-([A-Za-z0-9]+)/i);
-  if (m) {
-    const pillarShort = m[1].slice(0, 3).toUpperCase();
-    const domain = m[2].toUpperCase();
-    return `BP-${pillarShort}-${domain}`;
-  }
-  if (raw.startsWith('BP-A-')) {
-    const parts = raw.split('-');
-    if (parts.length >= 3) {
-      const domain = parts[parts.length - 1];
-      const p = parts[parts.length - 2];
-      return `BP-${p.slice(0, 3).toUpperCase()}-${domain.toUpperCase()}`;
-    }
-  }
-  return raw;
-}
+import { formatBpCode } from '../utils/formatBpCode';
+export { formatBpCode };
 
 /* ── Info Tooltip Component ──────────────────────────────────────────────── */
 

@@ -24,6 +24,8 @@ function argVal(flag, def) {
 }
 const SINGLE_PROJECT = argVal('--project', null);
 const OUT = argVal('--out', 'gcp_fetch_result.json');
+const RAW_SERVICES = argVal('--services', null);
+const ONLY_SERVICES = RAW_SERVICES ? RAW_SERVICES.split(',').map(s => s.trim()).filter(Boolean) : null;
 
 const GCLOUD_BIN = process.env.LOCALAPPDATA
   ? process.env.LOCALAPPDATA + '\\Google\\Cloud SDK\\google-cloud-sdk\\bin'
@@ -326,16 +328,33 @@ async function main() {
     console.log(`Found ${projects.length} project(s): ${projects.join(', ') || '(none)'}`);
   }
 
-  const result = { fetchedAt: new Date().toISOString(), projectCount: projects.length, projects: {} };
+  // Load existing OUT file if present so partial / single-service updates merge seamlessly
+  let existingResult = { fetchedAt: new Date().toISOString(), projectCount: 0, projects: {} };
+  try {
+    if (existsSync(OUT)) {
+      existingResult = JSON.parse(readFileSync(OUT, 'utf8'));
+    }
+  } catch {}
+
+  const result = {
+    ...existingResult,
+    fetchedAt: new Date().toISOString(),
+    projectCount: projects.length || existingResult.projectCount || 1,
+    projects: { ...(existingResult.projects || {}) },
+  };
 
   // Concurrency: run up to N service fetches at once per project to cut wall time
   // (each gcloud call cold-starts the CLI, so serial is very slow).
   const CONCURRENCY = 6;
 
   for (const project of projects) {
-    console.log(`\n=== PROJECT: ${project} (${FETCH_PLAN.length} services) ===`);
-    const pres = { services: {} };
-    const queue = [...FETCH_PLAN];
+    const existingServices = (existingResult.projects && existingResult.projects[project]?.services) || {};
+    const pres = { services: { ...existingServices } };
+    const queue = ONLY_SERVICES
+      ? FETCH_PLAN.filter(entry => ONLY_SERVICES.includes(entry.key))
+      : [...FETCH_PLAN];
+
+    console.log(`\n=== PROJECT: ${project} (${queue.length} target services) ===`);
     async function worker() {
       while (queue.length) {
         const entry = queue.shift();
@@ -353,59 +372,71 @@ async function main() {
     await Promise.all(Array.from({ length: CONCURRENCY }, worker));
 
     // KMS needs per-location discovery; run it separately (serial, bounded).
-    try {
-      const kms = await fetchKms(project);
-      pres.services['kms_crypto_keys'] = kms;
-      console.log(`  • kms_crypto_keys: OK (${kms.count})`);
-    } catch (e) {
-      pres.services['kms_crypto_keys'] = { ok: false, error: String(e) };
-      console.log('  • kms_crypto_keys: ERROR');
+    if (!ONLY_SERVICES || ONLY_SERVICES.includes('kms_crypto_keys')) {
+      try {
+        const kms = await fetchKms(project);
+        pres.services['kms_crypto_keys'] = kms;
+        console.log(`  • kms_crypto_keys: OK (${kms.count})`);
+      } catch (e) {
+        pres.services['kms_crypto_keys'] = { ok: false, error: String(e) };
+        console.log('  • kms_crypto_keys: ERROR');
+      }
     }
 
     // Sub-resource fetches to eliminate UNKNOWN checks:
     // 1. Service Account Keys (for 90-day key age checks)
-    try {
-      const saKeys = await fetchSaKeys(project, pres.services['iam_service_accounts']?.data);
-      pres.services['iam_service_account_keys'] = saKeys;
-      console.log(`  • iam_service_account_keys: OK (${saKeys.count})`);
-    } catch (e) {
-      pres.services['iam_service_account_keys'] = { ok: false, error: String(e) };
+    if (!ONLY_SERVICES || ONLY_SERVICES.includes('iam_service_account_keys') || ONLY_SERVICES.includes('iam_service_accounts')) {
+      try {
+        const saKeys = await fetchSaKeys(project, pres.services['iam_service_accounts']?.data);
+        pres.services['iam_service_account_keys'] = saKeys;
+        console.log(`  • iam_service_account_keys: OK (${saKeys.count})`);
+      } catch (e) {
+        pres.services['iam_service_account_keys'] = { ok: false, error: String(e) };
+      }
     }
 
     // 2. Storage Buckets Detailed (encryption, logging, retention)
-    try {
-      const bucketDetails = await fetchStorageBucketDetails(project, pres.services['storage_buckets']?.data);
-      pres.services['storage_buckets_detailed'] = bucketDetails;
-      console.log(`  • storage_buckets_detailed: OK (${bucketDetails.count})`);
-    } catch (e) {
-      pres.services['storage_buckets_detailed'] = { ok: false, error: String(e) };
+    if (!ONLY_SERVICES || ONLY_SERVICES.includes('storage_buckets') || ONLY_SERVICES.includes('storage_buckets_detailed')) {
+      try {
+        const bucketDetails = await fetchStorageBucketDetails(project, pres.services['storage_buckets']?.data);
+        pres.services['storage_buckets_detailed'] = bucketDetails;
+        console.log(`  • storage_buckets_detailed: OK (${bucketDetails.count})`);
+      } catch (e) {
+        pres.services['storage_buckets_detailed'] = { ok: false, error: String(e) };
+      }
     }
 
     // 3. SQL Backups (automated backups check)
-    try {
-      const sqlBk = await fetchSqlBackups(project, pres.services['sql_instances']?.data);
-      pres.services['sql_backups'] = sqlBk;
-      console.log(`  • sql_backups: OK (${sqlBk.count})`);
-    } catch (e) {
-      pres.services['sql_backups'] = { ok: false, error: String(e) };
+    if (!ONLY_SERVICES || ONLY_SERVICES.includes('sql_instances') || ONLY_SERVICES.includes('sql_backups')) {
+      try {
+        const sqlBk = await fetchSqlBackups(project, pres.services['sql_instances']?.data);
+        pres.services['sql_backups'] = sqlBk;
+        console.log(`  • sql_backups: OK (${sqlBk.count})`);
+      } catch (e) {
+        pres.services['sql_backups'] = { ok: false, error: String(e) };
+      }
     }
 
     // 4. Logging Buckets (CMEK and retention)
-    try {
-      const logBk = await fetchLoggingBuckets(project);
-      pres.services['logging_buckets'] = logBk;
-      console.log(`  • logging_buckets: OK (${logBk.count})`);
-    } catch (e) {
-      pres.services['logging_buckets'] = { ok: false, error: String(e) };
+    if (!ONLY_SERVICES || ONLY_SERVICES.includes('logging_buckets')) {
+      try {
+        const logBk = await fetchLoggingBuckets(project);
+        pres.services['logging_buckets'] = logBk;
+        console.log(`  • logging_buckets: OK (${logBk.count})`);
+      } catch (e) {
+        pres.services['logging_buckets'] = { ok: false, error: String(e) };
+      }
     }
 
     // 5. PubSub Topics Detailed (CMEK and IAM)
-    try {
-      const psDetails = await fetchPubsubDetails(project, pres.services['pubsub_topics']?.data);
-      pres.services['pubsub_topics_detailed'] = psDetails;
-      console.log(`  • pubsub_topics_detailed: OK (${psDetails.count})`);
-    } catch (e) {
-      pres.services['pubsub_topics_detailed'] = { ok: false, error: String(e) };
+    if (!ONLY_SERVICES || ONLY_SERVICES.includes('pubsub_topics') || ONLY_SERVICES.includes('pubsub_topics_detailed')) {
+      try {
+        const psDetails = await fetchPubsubDetails(project, pres.services['pubsub_topics']?.data);
+        pres.services['pubsub_topics_detailed'] = psDetails;
+        console.log(`  • pubsub_topics_detailed: OK (${psDetails.count})`);
+      } catch (e) {
+        pres.services['pubsub_topics_detailed'] = { ok: false, error: String(e) };
+      }
     }
 
     result.projects[project] = pres;

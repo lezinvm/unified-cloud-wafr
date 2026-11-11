@@ -27,6 +27,8 @@ interface CloudStatItem {
 
 /* ── Sub-components ──────────────────────────────────────────────────────────── */
 
+type AssessmentStatus = 'completed' | 'running' | 'failed';
+
 function StatCard({ value, label, color, T }: { value: string; label: string; color?: string; T: Tokens }) {
   return (
     <div className="flex flex-col gap-1.5 p-5"

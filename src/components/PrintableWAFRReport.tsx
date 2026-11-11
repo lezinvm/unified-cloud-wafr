@@ -2,6 +2,7 @@ import React from 'react';
 import { AssessmentInfo } from '../data/assessmentData';
 import { PillarData, BestPractice } from '../data/wafrData';
 import { CheckRemediationData } from '../data/remediationData';
+import { formatBpCode } from '../utils/formatBpCode';
 
 export interface PrintableWAFRReportProps {
   assessment: AssessmentInfo | null;
@@ -110,7 +111,7 @@ export function PrintableWAFRReport({
 
       return {
         id: bp.id,
-        code: bp.id,
+        code: formatBpCode(bp.id),
         number: idx + 1,
         title: bp.title,
         risk,

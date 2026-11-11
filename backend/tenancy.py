@@ -76,7 +76,7 @@ POLICIES: list[Rule] = [
     R("POST", "/api/assessments", OFF),  # assessments are created by the scanner
     R("DELETE", "/api/assessments/{assessment_id}", USER, path_owner=("assessment", "assessment_id")),
     R("POST", "/api/assessments/{assessment_id}/rerun", OFF),  # fabricated scores
-    R("POST", "/api/checks/rerun", OFF),  # marks findings passed without checking
+    R("POST", "/api/checks/rerun", USER, require_assessment=True),  # live targeted check re-evaluation
 
     R("GET", "/api/findings", USER),
     R("POST", "/api/findings", USER, body_id_owner="finding", require_assessment=True),

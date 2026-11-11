@@ -7,6 +7,7 @@ import { PILLARS_DATA, BestPractice, PillarData } from '../data/wafrData';
 import { JiraTicketModal } from '../components/JiraTicketModal';
 import { SlackAlertModal } from '../components/SlackAlertModal';
 import { SlackLogo, JiraLogo } from '../components/IntegrationLogos';
+import { formatBpCode } from '../utils/formatBpCode';
 
 /* ── Info Tooltip Component ──────────────────────────────────────────────── */
 
@@ -583,7 +584,7 @@ export function PillarDetail() {
                                 border: `1px solid ${isDark ? 'rgba(59,130,246,0.3)' : '#BFDBFE'}`,
                               }}
                             >
-                              {bp.id}
+                              {formatBpCode(bp.id)}
                             </span>
                             <h3 className="text-sm font-semibold truncate" style={{ color: T.text }}>
                               {bp.title}
@@ -645,7 +646,7 @@ export function PillarDetail() {
                       >
                         <div className="flex items-center justify-between text-xs font-semibold tracking-wide uppercase mb-1" style={{ color: T.textSub }}>
                           <div className="flex items-center gap-1.5">
-                            <span>Checks for {bp.id}</span>
+                            <span>Checks for {formatBpCode(bp.id)}</span>
                             <span>({bp.checks.length} Total: {bp.checks.filter(c => c.status === 'pass').length} Passed, {failingChecks.length} Failed)</span>
                           </div>
                         </div>
