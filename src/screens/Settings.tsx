@@ -564,7 +564,7 @@ function EditCloudConfigModal({
                     required
                     value={formData.gcpProject || ''}
                     onChange={e => setFormData({ ...formData, gcpProject: e.target.value })}
-                    placeholder="acme-gcp-prod-9941"
+                    placeholder="lens-wafr-gcp"
                     className="w-full px-3 py-2 rounded-xl font-mono text-xs outline-none"
                     style={{ backgroundColor: isDark ? '#111B2E' : '#FFFFFF', border: `1px solid ${T.border}`, color: T.text }}
                   />
@@ -578,7 +578,7 @@ function EditCloudConfigModal({
                     required
                     value={formData.saEmail || ''}
                     onChange={e => setFormData({ ...formData, saEmail: e.target.value })}
-                    placeholder="wafr-scanner@acme-gcp-prod.iam.gserviceaccount.com"
+                    placeholder={formData.gcpProject ? `lens-scanner@${formData.gcpProject}.iam.gserviceaccount.com` : 'lens-scanner@lens-wafr-gcp.iam.gserviceaccount.com'}
                     className="w-full px-3 py-2 rounded-xl font-mono text-xs outline-none"
                     style={{ backgroundColor: isDark ? '#111B2E' : '#FFFFFF', border: `1px solid ${T.border}`, color: T.text }}
                   />
@@ -754,40 +754,44 @@ function CloudConfigPanel({ T, isDark }: { T: Tokens; isDark: boolean }) {
     setIsCreating(true);
   };
 
-  const handleSave = (saved: CloudConfigItem) => {
-    if (isCreating) {
-      setConfigs(prev => [...prev, saved]);
-      showToast(`Added cloud configuration "${saved.name || saved.cloud}" successfully.`);
-    } else {
-      setConfigs(prev => prev.map(c => (c.id === saved.id ? saved : c)));
-      showToast(`Updated configuration "${saved.name}" successfully.`);
-    }
-
+  const handleSave = async (saved: CloudConfigItem) => {
     const userOrg = currentUser.orgId || `org_${currentUser.id}`;
 
-    // Persist to MongoDB scoped to current user & organization
-    api.saveCloudAccount({
-      id: saved.id,
-      org_id: userOrg,
-      user_id: currentUser.id,
-      cloud: saved.cloud.toLowerCase(),
-      account_name: saved.name,
-      account_identifier: saved.id,
-      auth_type: saved.authType,
-      role_arn: saved.roleArn,
-      external_id: saved.externalId,
-      tenant_id: saved.tenantId,
-      client_id: saved.clientId,
-      gcp_project: saved.gcpProject,
-      sa_email: saved.saEmail,
-    }).then(() => {
-      refreshFromDb();
+    try {
+      await api.saveCloudAccount({
+        id: saved.id,
+        org_id: userOrg,
+        user_id: currentUser.id,
+        cloud: saved.cloud.toLowerCase(),
+        account_name: saved.name,
+        account_identifier: saved.id,
+        auth_type: saved.authType,
+        role_arn: saved.roleArn,
+        external_id: saved.externalId,
+        tenant_id: saved.tenantId,
+        client_id: saved.clientId,
+        gcp_project: saved.gcpProject,
+        sa_email: saved.saEmail,
+      });
+
+      if (isCreating) {
+        setConfigs(prev => [...prev, saved]);
+        showToast(`Added cloud configuration "${saved.name || saved.cloud}" successfully.`);
+      } else {
+        setConfigs(prev => prev.map(c => (c.id === saved.id ? saved : c)));
+        showToast(`Updated configuration "${saved.name}" successfully.`);
+      }
+
+      await refreshFromDb();
       if (saved.cloud.toLowerCase() === 'aws') {
         setConfiguredAccount({ cloud: 'aws', name: saved.name, id: saved.id });
       }
-    }).catch(err => console.warn('Could not persist cloud account to MongoDB:', err));
-
-    setEditingConfig(null);
+    } catch (err: any) {
+      console.warn('Could not persist cloud account to MongoDB:', err);
+      showToast(err?.message || 'Failed to persist cloud account to MongoDB.');
+    } finally {
+      setEditingConfig(null);
+    }
   };
 
   const handleSyncNow = (id: string, name: string) => {

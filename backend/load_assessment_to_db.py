@@ -103,6 +103,8 @@ def ensure_cloud_account(db, prov, scope, user_id, org_id, dry):
         "status": "connected", "is_active": True, "is_global": False,
         "user_id": user_id, "org_id": org_id, "source": "live-scan", "updated_at": NOW,
     }
+    if prov.name == "gcp":
+        doc["sa_email"] = os.getenv("GCP_SCANNER_SA") or f"lens-scanner@{scope}.iam.gserviceaccount.com"
     if not dry:
         db["cloud_accounts"].update_one({"id": scope}, {"$set": doc, "$setOnInsert": {"created_at": NOW}},
                                         upsert=True)
