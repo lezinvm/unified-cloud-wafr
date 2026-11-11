@@ -29,6 +29,10 @@ export interface AssessmentInfo {
   isRerun?: boolean;
   /** Real inventory count from a live scan; absent for other assessments. */
   resourcesScanned?: number;
+  environment?: 'prod' | 'pre-prod' | 'dev' | string;
+  regions?: string[];
+  cloud_account_id?: string;
+  account_identifier?: string;
 }
 
 export interface AssessmentMilestone {

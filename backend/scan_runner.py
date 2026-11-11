@@ -197,6 +197,30 @@ async def create_assessment(db, cloud_account_id: str, spec: dict | None,
     s = validate_spec(prov, spec)
     if not acct.get("user_id") or not acct.get("org_id"):
         raise ScanError("Cloud account has no owner (user_id/org_id).")
+
+    # If an assessment with the same account, same environment, and same regions already exists,
+    # reject duplicate creation and instruct the user to rerun the existing assessment.
+    existing_query = {
+        "$or": [
+            {"cloud_account_id": cloud_account_id},
+            {"account_identifier": scope},
+            {"accountId": scope},
+        ],
+    }
+    existing_list = await db["assessments"].find(existing_query).to_list(100)
+    target_regions = sorted(s["regions"] or [])
+    for ex in existing_list:
+        ex_env = ex.get("environment") or "prod"
+        if ex_env != s["environment"]:
+            continue
+        ex_regions = sorted(ex.get("regions") or ([ex["region"]] if ex.get("region") and ex["region"] not in ("all", "multi-region") else []))
+        if ex_regions == target_regions or (len(target_regions) == 1 and ex.get("region") == target_regions[0]):
+            raise ScanError(
+                f"An assessment for this account in {ENVIRONMENTS[s['environment']]} ({region_label(s['regions'])}) "
+                f"already exists ({ex.get('name') or ex['id']}). You can rerun that assessment instead.",
+                hint=ex["id"]
+            )
+
     aid = f"A-{prov.name.upper()}-{scope}-{uuid.uuid4().hex[:6]}"
     name = s["name"] or f"{acct.get('account_name') or scope} — {ENVIRONMENTS[s['environment']]} — {region_label(s['regions'])}"
     await db["assessments"].insert_one({

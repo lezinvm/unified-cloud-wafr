@@ -140,6 +140,33 @@ def test_bad_environment_or_region_creates_nothing(mongo, fake_gcp, adb):
     assert mongo["assessments"].count_documents({"cloud_account_id": "cfg-v"}) == 0
 
 
+def test_duplicate_assessment_rejected_and_rerun_suggested(mongo, fake_gcp, adb):
+    import scan_runner
+    _account(mongo, "cfg-dup", "dup-proj")
+
+    async def go():
+        db = adb()
+        # First assessment: dev in us-central1 succeeds
+        await _new(db, "cfg-dup", environment="dev", regions=["us-central1"])
+        assert mongo["assessments"].count_documents({"cloud_account_id": "cfg-dup"}) == 1
+
+        # Duplicate creation with same account, environment, and regions must fail
+        with pytest.raises(scan_runner.ScanError) as excinfo:
+            await _new(db, "cfg-dup", environment="dev", regions=["us-central1"])
+        assert "already exists" in str(excinfo.value)
+        assert excinfo.value.hint  # contains the existing assessment id for rerun
+
+        # Different environment (prod) for same account and region succeeds
+        await _new(db, "cfg-dup", environment="prod", regions=["us-central1"])
+        assert mongo["assessments"].count_documents({"cloud_account_id": "cfg-dup"}) == 2
+
+        # Different region (europe-west1) for same account and environment succeeds
+        await _new(db, "cfg-dup", environment="prod", regions=["europe-west1"])
+        assert mongo["assessments"].count_documents({"cloud_account_id": "cfg-dup"}) == 3
+
+    asyncio.run(go())
+
+
 def test_gcp_region_of_items():
     import scan_providers as sp
     gcp = sp.get("gcp")

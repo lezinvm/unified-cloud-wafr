@@ -1,7 +1,6 @@
-import { useState, useEffect } from 'react';
-import { REAL_DATA_ONLY } from '../config/realData';
+import { useState, useEffect, useMemo } from 'react';
 import { useApp, Cloud } from '../context';
-import { NewAssessmentReal } from './NewAssessmentReal';
+import { AssessmentInfo } from '../data/assessmentData';
 import { AwsWordmark, AzureMark, GcpMark, CloudifyOpsSymbol } from '../components/CloudLogo';
 import { INITIAL_ORG_QUESTIONS } from '../data/questionnaireData';
 import { AccountCredentialsModal } from '../components/AccountCredentialsModal';
@@ -474,6 +473,8 @@ function Step1({
   setSelectedRegion,
   assessmentName,
   setAssessmentName,
+  accounts,
+  existingDuplicate,
   onNext,
 }: {
   selectedCloud: Cloud;
@@ -485,6 +486,8 @@ function Step1({
   setSelectedRegion: (id: string) => void;
   assessmentName: string;
   setAssessmentName: (name: string) => void;
+  accounts: { id: string; name: string; num: string; env: string; resources: string }[];
+  existingDuplicate: AssessmentInfo | null;
   onNext: () => void;
 }) {
   const { go, theme, isCloudConfigured, getConfiguredAccount, setConfiguredAccount } = useApp();
@@ -498,20 +501,9 @@ function Step1({
   const [showCredsModal, setShowCredsModal] = useState(false);
 
   const cloudObj = CLOUD_OPTIONS.find(c => c.id === selectedCloud) || CLOUD_OPTIONS[0];
-  const isConfigured = isCloudConfigured(selectedCloud);
+  const isConfigured = accounts.length > 0 || isCloudConfigured(selectedCloud);
   const cloudAccount = getConfiguredAccount(selectedCloud);
 
-  const accounts = isConfigured && cloudAccount ? [
-    {
-      id: 'acc-configured',
-      name: cloudAccount.name,
-      num: cloudAccount.id,
-      env: 'Production',
-      resources: 'Connected Account',
-    }
-  ] : [];
-
-  const rawAccounts = CLOUD_ACCOUNTS[selectedCloud] || CLOUD_ACCOUNTS.aws;
   const regions = CLOUD_REGIONS[selectedCloud] || CLOUD_REGIONS.aws;
   const activeAccount = accounts.find(a => a.id === selectedAccount) || accounts[0] || {
     id: 'acc-none',
@@ -942,6 +934,28 @@ function Step1({
           )}
         </div>
       </div>
+
+      {/* ── DUPLICATE ASSESSMENT WARNING BANNER ── */}
+      {existingDuplicate && (
+        <div className="rounded-2xl p-4 border border-blue-200 bg-blue-50/90 flex items-start gap-3 text-xs text-blue-900 shadow-xs">
+          <div className="w-8 h-8 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center shrink-0">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="23 4 23 10 17 10" />
+              <polyline points="1 20 1 14 7 14" />
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+            </svg>
+          </div>
+          <div className="flex-1">
+            <div className="font-bold text-sm text-blue-950">Assessment Already Exists for this Scope</div>
+            <p className="mt-0.5 text-blue-800">
+              An assessment for account <strong>{activeAccount.name}</strong> in <strong>{accountType.toUpperCase()}</strong> ({selectedRegion}) already exists: <strong>{existingDuplicate.name}</strong> ({existingDuplicate.id}).
+            </p>
+            <p className="mt-1 text-blue-700 font-medium">
+              Duplicate assessments for the same account, environment, and region are disallowed. Proceeding to Step 3 will allow you to <strong>Rerun</strong> this assessment to refresh its findings and score.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* ── 4. AUTHENTICATION CREDENTIALS (PRE-CONFIGURED & VIEW ONLY) ── */}
       <div className="bg-white rounded-2xl p-5 flex flex-col gap-4 border border-gray-100 shadow-sm">
@@ -1800,8 +1814,12 @@ function Step3({
   selectedRegion,
   assessmentName,
   questions,
+  accObj,
+  existingDuplicate,
+  isSubmitting,
   onBack,
   onStart,
+  onRerun,
   onSchedule,
 }: {
   selectedCloud: Cloud;
@@ -1810,28 +1828,17 @@ function Step3({
   selectedRegion: string;
   assessmentName: string;
   questions: QuestionnaireItem[];
+  accObj: { id: string; name: string; num: string; env: string; resources: string };
+  existingDuplicate: AssessmentInfo | null;
+  isSubmitting: boolean;
   onBack: () => void;
   onStart: () => void;
+  onRerun: () => void;
   onSchedule: () => void;
 }) {
-  const { isCloudConfigured, getConfiguredAccount } = useApp();
   const [retention, setRetention] = useState('90');
 
   const cloudObj = CLOUD_OPTIONS.find(c => c.id === selectedCloud) || CLOUD_OPTIONS[0];
-  const cloudAccount = getConfiguredAccount(selectedCloud);
-  const accObj = cloudAccount ? {
-    id: 'acc-configured',
-    name: cloudAccount.name,
-    num: cloudAccount.id,
-    env: 'Production',
-    resources: 'Connected Account',
-  } : {
-    id: 'acc-none',
-    name: `${cloudObj.short} Account`,
-    num: '—',
-    env: 'Production',
-    resources: 'Connected Account',
-  };
   const regions = CLOUD_REGIONS[selectedCloud] || CLOUD_REGIONS.aws;
   const regObj = regions.find(r => r.id === selectedRegion) || regions[0];
 
@@ -1887,6 +1894,28 @@ function Step3({
           >
             ← Review Answers
           </button>
+        </div>
+      )}
+
+      {/* Duplicate Partition Notice */}
+      {existingDuplicate && (
+        <div className="p-4 rounded-2xl bg-blue-50 border border-blue-200 text-blue-900 flex items-start gap-3 text-xs shadow-xs">
+          <div className="w-8 h-8 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center shrink-0">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="23 4 23 10 17 10" />
+              <polyline points="1 20 1 14 7 14" />
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+            </svg>
+          </div>
+          <div className="flex-1">
+            <div className="font-bold text-sm text-blue-950">Duplicate Partition: Rerun Existing Assessment</div>
+            <p className="mt-0.5 text-blue-800">
+              An assessment with this exact scope (<strong>{accObj?.name}</strong>, <strong>{accountType.toUpperCase()}</strong>, <strong>{selectedRegion}</strong>) already exists as <strong>{existingDuplicate.name}</strong> ({existingDuplicate.id}).
+            </p>
+            <p className="mt-1 text-blue-700 font-medium">
+              Per partition rules, duplicate assessments cannot be created for the same account, environment, and region. Click <strong>Rerun Assessment</strong> below to refresh its resources, run updated check evaluations, and compute fresh pillar scores.
+            </p>
+          </div>
         </div>
       )}
 
@@ -1979,17 +2008,35 @@ function Step3({
             <span>Schedule Recurring</span>
           </button>
 
-          <button
-            type="button"
-            onClick={onStart}
-            className="flex items-center gap-2 px-8 py-3 rounded-full text-sm font-bold shadow-lg transition-all text-white cursor-pointer hover:opacity-95 hover:scale-[1.02] active:scale-100"
-            style={{ background: 'linear-gradient(135deg, #2563EB, #22C55E)' }}
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
-              <polygon points="5 3 19 12 5 21 5 3"/>
-            </svg>
-            <span>Start Assessment</span>
-          </button>
+          {existingDuplicate ? (
+            <button
+              type="button"
+              onClick={onRerun}
+              disabled={isSubmitting}
+              className="flex items-center gap-2 px-8 py-3 rounded-full text-sm font-bold shadow-lg transition-all text-white cursor-pointer hover:opacity-95 hover:scale-[1.02] active:scale-100 disabled:opacity-50"
+              style={{ background: 'linear-gradient(135deg, #2563EB, #0284C7)' }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="23 4 23 10 17 10" />
+                <polyline points="1 20 1 14 7 14" />
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+              </svg>
+              <span>{isSubmitting ? 'Starting Rerun…' : 'Rerun Assessment'}</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onStart}
+              disabled={isSubmitting}
+              className="flex items-center gap-2 px-8 py-3 rounded-full text-sm font-bold shadow-lg transition-all text-white cursor-pointer hover:opacity-95 hover:scale-[1.02] active:scale-100 disabled:opacity-50"
+              style={{ background: 'linear-gradient(135deg, #2563EB, #22C55E)' }}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+                <polygon points="5 3 19 12 5 21 5 3"/>
+              </svg>
+              <span>{isSubmitting ? 'Starting Assessment…' : 'Start Assessment'}</span>
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -1998,16 +2045,32 @@ function Step3({
 
 /* ── Main Wizard Component ── */
 export function Wizard() {
-  // Build-time constant, so this never changes hook order. Real builds use the
-  // real form (account + environment + regions -> real scan).
-  if (REAL_DATA_ONLY) return <NewAssessmentReal />;
   return <WizardInner />;
 }
 
 function WizardInner() {
-  const { go, cloud, setWizardStep, wizardStep: globalStep, orgQuestions, isCloudConfigured, getConfiguredAccount, runOrUpdateAssessment } = useApp();
+  const {
+    go,
+    cloud,
+    setWizardStep,
+    wizardStep: globalStep,
+    orgQuestions,
+    isCloudConfigured,
+    getConfiguredAccount,
+    runOrUpdateAssessment,
+    cloudAccounts,
+    startAccountScan,
+    startLiveScan,
+    assessments,
+    selectAssessment,
+    showToast,
+    newAssessmentAccountId,
+    setNewAssessmentAccountId,
+  } = useApp();
+
   const [step, setStep] = useState<1 | 2 | 3>(globalStep <= 3 ? (globalStep as 1 | 2 | 3) : 1);
   const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Form State
   const [selectedCloud, setSelectedCloud] = useState<Cloud>(cloud || 'aws');
@@ -2021,6 +2084,19 @@ function WizardInner() {
       return org ? { ...org } : q;
     });
   });
+
+  // Preselection from newAssessmentAccountId
+  useEffect(() => {
+    if (newAssessmentAccountId && Array.isArray(cloudAccounts)) {
+      const target = cloudAccounts.find(a => a.id === newAssessmentAccountId);
+      if (target) {
+        if (target.cloud) setSelectedCloud(target.cloud as Cloud);
+        setSelectedAccount(target.id);
+        if (target.environment) setAccountType(target.environment);
+      }
+      setNewAssessmentAccountId(null);
+    }
+  }, [newAssessmentAccountId, cloudAccounts]);
 
   // Sync orgQuestions if they change in AppContext
   useEffect(() => {
@@ -2063,15 +2139,118 @@ function WizardInner() {
     setWizardStep(n);
   };
 
+  // Connected accounts for selected cloud
+  const rawCloudAccounts = Array.isArray(cloudAccounts) ? cloudAccounts : [];
+  const matchingCloudAccounts = useMemo(() => {
+    return rawCloudAccounts.filter(
+      a => (a.cloud || '').toLowerCase() === selectedCloud.toLowerCase()
+    );
+  }, [rawCloudAccounts, selectedCloud]);
+
+  const formattedRealAccounts = useMemo(() => {
+    return matchingCloudAccounts.map(a => ({
+      id: a.id,
+      name: a.account_name || a.id,
+      num: a.gcp_project || a.account_identifier || a.subscription_id || a.id,
+      env: a.environment === 'dev' ? 'Development' : a.environment === 'pre-prod' ? 'Staging' : 'Production',
+      resources: a.resource_count ? `${a.resource_count} resources` : 'Connected Account',
+      raw: a,
+    }));
+  }, [matchingCloudAccounts]);
+
   const rawAccounts = CLOUD_ACCOUNTS[selectedCloud] || CLOUD_ACCOUNTS.aws;
   const cloudAccount = getConfiguredAccount(selectedCloud);
   const userAccount = cloudAccount ? {
     id: 'acc-configured',
     name: cloudAccount.name,
     num: cloudAccount.id,
+    env: 'Production',
+    resources: 'Connected Account',
   } : null;
-  const accountsList = userAccount ? [userAccount, ...rawAccounts] : rawAccounts;
+
+  const accountsList = formattedRealAccounts.length > 0
+    ? formattedRealAccounts
+    : userAccount
+    ? [userAccount, ...rawAccounts]
+    : rawAccounts;
+
+  useEffect(() => {
+    if (accountsList.length > 0 && !accountsList.some(a => a.id === selectedAccount)) {
+      setSelectedAccount(accountsList[0].id);
+    }
+  }, [accountsList, selectedAccount]);
+
   const accObj = accountsList.find(a => a.id === selectedAccount) || accountsList[0];
+  const targetScope = accObj?.num || selectedAccount;
+
+  // Duplicate assessment check across existing assessments
+  const existingDuplicate = useMemo(() => {
+    if (!assessments || assessments.length === 0) return null;
+    return assessments.find(a => {
+      const cMatch = (a.cloud || '').toLowerCase() === selectedCloud.toLowerCase();
+      if (!cMatch) return false;
+
+      const aMatch =
+        a.cloud_account_id === selectedAccount ||
+        a.cloud_account_id === accObj?.id ||
+        a.accountId === targetScope ||
+        a.accountId === selectedAccount ||
+        a.account_identifier === targetScope ||
+        a.account_identifier === selectedAccount ||
+        (accObj?.name && a.accountName?.toLowerCase() === accObj.name.toLowerCase());
+      if (!aMatch) return false;
+
+      const envA = (a.environment || 'prod').toLowerCase();
+      const envB = accountType.toLowerCase();
+      if (envA !== envB) return false;
+
+      const regA = a.regions && a.regions.length > 0 ? a.regions : a.region ? [a.region] : [];
+      return (
+        regA.includes(selectedRegion) ||
+        regA.includes('all') ||
+        regA.length === 0 ||
+        (a.region && a.region.toLowerCase() === selectedRegion.toLowerCase())
+      );
+    }) || null;
+  }, [assessments, selectedCloud, selectedAccount, accObj, targetScope, accountType, selectedRegion]);
+
+  const handleRerun = async () => {
+    if (!existingDuplicate) return;
+    setIsSubmitting(true);
+    selectAssessment(existingDuplicate.id, 'live-scan');
+    showToast(`Rerunning assessment: ${existingDuplicate.name}`, 'info');
+    await startLiveScan(existingDuplicate.id);
+    setIsSubmitting(false);
+    go('live-scan');
+  };
+
+  const handleStart = async () => {
+    setIsSubmitting(true);
+    const realAcc = matchingCloudAccounts.find(a => a.id === selectedAccount || a.id === accObj?.id);
+    if (realAcc) {
+      const ok = await startAccountScan(realAcc.id, {
+        name: assessmentName.trim() || undefined,
+        environment: accountType,
+        regions: selectedRegion ? [selectedRegion] : [],
+      });
+      setIsSubmitting(false);
+      if (ok) {
+        go('live-scan');
+        return;
+      }
+    } else {
+      runOrUpdateAssessment({
+        cloud: selectedCloud,
+        accountId: accObj?.num || '124890123456',
+        accountName: accObj?.name || 'Primary Account',
+        region: selectedRegion || 'us-east-1',
+        name: assessmentName || `${selectedCloud.toUpperCase()} Production Review`,
+        environment: accountType,
+      });
+      setIsSubmitting(false);
+      go('live-scan');
+    }
+  };
 
   return (
     <div className="flex flex-col h-screen bg-gray-50">
@@ -2113,6 +2292,8 @@ function WizardInner() {
             setSelectedRegion={setSelectedRegion}
             assessmentName={assessmentName}
             setAssessmentName={setAssessmentName}
+            accounts={accountsList}
+            existingDuplicate={existingDuplicate}
             onNext={advance}
           />
         )}
@@ -2132,18 +2313,13 @@ function WizardInner() {
             selectedRegion={selectedRegion}
             assessmentName={assessmentName}
             questions={questions}
+            accObj={accObj}
+            existingDuplicate={existingDuplicate}
+            isSubmitting={isSubmitting}
             onBack={back}
             onSchedule={() => setIsScheduleModalOpen(true)}
-            onStart={() => {
-              runOrUpdateAssessment({
-                cloud: selectedCloud,
-                accountId: accObj?.num || '124890123456',
-                accountName: accObj?.name || 'Primary Account',
-                region: selectedRegion || 'us-east-1',
-                name: assessmentName || `${selectedCloud.toUpperCase()} Production Review`,
-              });
-              go('live-scan');
-            }}
+            onStart={handleStart}
+            onRerun={handleRerun}
           />
         )}
       </div>

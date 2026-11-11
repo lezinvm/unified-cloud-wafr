@@ -154,6 +154,7 @@ interface AppState {
     accountName?: string;
     region: string;
     name?: string;
+    environment?: 'prod' | 'pre-prod' | 'dev';
   }) => { isRerun: boolean; assessment: AssessmentInfo };
   completeAssessment: (id: string, score?: number) => void;
   deleteAssessment: (id: string) => Promise<void>;
@@ -954,6 +955,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
               region: a.region || acc.default_region || defaultReg,
               cloud: itemCloud,
               status: mappedStatus,
+              environment: a.environment || 'prod',
+              regions: Array.isArray(a.regions) ? a.regions : a.region ? [a.region] : [],
+              cloud_account_id: a.cloud_account_id || acc.id,
+              account_identifier: a.account_identifier || acc.account_identifier || acc.id,
               score: n(a.score),
               lastRun: rawStatus === 'running' ? 'In progress' : (a.last_run_at ? 'Recently' : '—'),
               checks: totalChecksVal,
@@ -1795,15 +1800,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
     accountName?: string;
     region: string;
     name?: string;
+    environment?: 'prod' | 'pre-prod' | 'dev';
   }): { isRerun: boolean; assessment: AssessmentInfo } => {
     // If it was a new user, they now have created an assessment
     setIsNewUser(false);
 
+    const targetEnv = (config.environment || 'prod').toLowerCase();
     const existingIndex = assessments.findIndex((a) =>
       a.cloud.toLowerCase() === config.cloud.toLowerCase() &&
       (a.accountId.toLowerCase() === config.accountId.toLowerCase() ||
        (config.accountName && a.accountName.toLowerCase() === config.accountName.toLowerCase())) &&
-      a.region.toLowerCase() === config.region.toLowerCase()
+      (a.region.toLowerCase() === config.region.toLowerCase() || (a.regions && a.regions.includes(config.region))) &&
+      ((a.environment || 'prod').toLowerCase() === targetEnv)
     );
     // Real-data-only: never invent scores. A re-run of an existing assessment
     // starts the real scan pipeline; new assessments must come from the scanner.
