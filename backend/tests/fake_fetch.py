@@ -20,8 +20,11 @@ services["firewall_rules"]["data"] = [{
 }]
 # One VM in each of two regions, for region-filtered assessments.
 services["compute_instances"]["data"] = [
+    # The US VM has a public IP (CMP-02 fails) unless the scope says "closed".
     {"name": f"vm-us-{scope}", "zone": f"projects/{scope}/zones/us-central1-a",
-     "networkInterfaces": [{"accessConfigs": []}], "serviceAccounts": [], "metadata": {}},
+     "networkInterfaces": [{"accessConfigs": [] if "closed" in scope else
+                            [{"type": "ONE_TO_ONE_NAT", "natIP": "203.0.113.10"}]}],
+     "serviceAccounts": [], "metadata": {}},
     {"name": f"vm-eu-{scope}", "zone": f"projects/{scope}/zones/europe-west1-b",
      "networkInterfaces": [{"accessConfigs": []}], "serviceAccounts": [], "metadata": {}},
 ]

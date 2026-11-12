@@ -386,3 +386,90 @@ def test_verify_account_runs_real_access_check(mongo, fake_gcp, adb):
 def test_api_verify_is_tenant_scoped(client, mongo):
     _account(mongo, "cfg-vb", "org-b-proj", org="org_b", user="user-b")
     assert client.post("/api/cloud-accounts/cfg-vb/verify", headers=A()).status_code == 404
+
+
+# ---- live re-check must never invent a fix ------------------------------------
+
+def _use_fetch(monkeypatch, fetch_cmd):
+    """Point every copy of the registry (scan_providers / backend.scan_providers)
+    at the same test data folder and fetch command."""
+    import importlib
+    import scan_providers
+    for mod_name in ("scan_providers", "backend.scan_providers"):
+        try:
+            mod = importlib.import_module(mod_name)
+        except ModuleNotFoundError:
+            continue
+        monkeypatch.setattr(mod, "DATA_DIR", scan_providers.DATA_DIR)
+        monkeypatch.setitem(mod.PROVIDERS, "gcp",
+                            dataclasses.replace(mod.GCP, fetch_cmd=fetch_cmd, verify_cmd=_verify))
+
+
+def _recheck_setup(mongo, fake_gcp, adb, monkeypatch, fetch_cmd):
+    _use_fetch(monkeypatch, fetch_cmd)
+    _account(mongo, "cfg-ip", "ip-proj")
+    s = asyncio.run(_new(adb(), "cfg-ip"))
+    aid = mongo["scans"].find_one({"id": s["id"]})["assessment_id"]
+    assert mongo["checks"].find_one({"assessment_id": aid, "id": "CMP-02"})["status"] == "fail"
+    return aid
+
+
+def _blocked_fetch(scope, out, services=None):
+    """Fetch where every requested service is blocked (like a failed gcloud call)."""
+    body = {k: {"ok": False, "error": "PERMISSION_DENIED", "data": None} for k in (services or [])}
+    return [sys.executable, "-c",
+            f"import json; json.dump({{'projects': {{{scope!r}: {{'services': {body!r}}}}}}}, open({str(out)!r}, 'w'))"]
+
+
+def test_recheck_with_unreadable_data_changes_nothing(mongo, fake_gcp, adb, monkeypatch):
+    import targeted_check_runner as tcr
+    aid = _recheck_setup(mongo, fake_gcp, adb, monkeypatch, _fake_fetch)
+    _use_fetch(monkeypatch, _blocked_fetch)  # the re-check's fetch now reads nothing
+    score = mongo["assessments"].find_one({"id": aid})["score"]
+    for res in ("vm-us-ip-proj", None):
+        out = asyncio.run(tcr.rerun_single_check(adb(), aid, "CMP-02", resource_arn=res))
+        assert out["passed"] is False and out["status"] == "unverified", out
+    assert mongo["checks"].find_one({"assessment_id": aid, "id": "CMP-02"})["status"] == "fail"
+    assert mongo["remediation_statuses"].count_documents({"assessment_id": aid}) == 0
+    assert mongo["assessments"].find_one({"id": aid})["score"] == score
+
+
+def test_recheck_still_failing_and_unknown_resource(mongo, fake_gcp, adb, monkeypatch):
+    import targeted_check_runner as tcr
+    aid = _recheck_setup(mongo, fake_gcp, adb, monkeypatch, _fake_fetch)
+    out = asyncio.run(tcr.rerun_single_check(adb(), aid, "NET-01", resource_arn="fw-ip-proj"))
+    assert out["passed"] is False and out["status"] == "fail"
+    out = asyncio.run(tcr.rerun_single_check(adb(), aid, "NET-01", resource_arn="no-such-rule"))
+    assert out["status"] == "unverified"
+    # "fw" must not match "fw-ip-proj" by substring.
+    out = asyncio.run(tcr.rerun_single_check(adb(), aid, "NET-01", resource_arn="fw"))
+    assert out["status"] == "unverified"
+
+
+def test_recheck_really_fixed_updates_honestly(mongo, fake_gcp, adb, monkeypatch, tmp_path):
+    import targeted_check_runner as tcr
+    aid = _recheck_setup(mongo, fake_gcp, adb, monkeypatch, _fake_fetch)
+    # The user really fixes the VM: the live cloud now shows it without a public IP.
+    # (fake_fetch: a scope with "closed" has private VMs and SSH restricted.)
+    _account(mongo, "cfg-fixed", "closed-later")
+    mongo["assessments"].update_one({"id": aid}, {"$set": {"cloud_account_id": "cfg-fixed",
+                                                            "account_identifier": "closed-later"}})
+    out = asyncio.run(tcr.rerun_single_check(adb(), aid, "CMP-02", resource_arn="vm-us-closed-later"))
+    assert out["passed"] is True and out["status"] == "fixed", out
+    a = mongo["assessments"].find_one({"id": aid})
+    assert mongo["checks"].find_one({"assessment_id": aid, "id": "CMP-02"})["status"] == "pass"
+    assert a["score"] == round(a["passed_checks"] / (a["passed_checks"] + a["failed_checks"]) * 100)
+
+
+def test_full_scan_clears_marks_from_rechecks(mongo, fake_gcp, adb):
+    import scan_runner
+    _account(mongo, "cfg-clr", "clear-proj")
+    s = asyncio.run(_new(adb(), "cfg-clr"))
+    aid = mongo["scans"].find_one({"id": s["id"]})["assessment_id"]
+    mongo["remediation_statuses"].insert_many([
+        {"key": "k1", "assessment_id": aid, "check_id": "CMP-02", "status": "fixed",
+         "note": "Live verification passed: Resource compliant."},
+        {"key": "k2", "assessment_id": aid, "check_id": "CMP-02", "status": "cant_fix", "note": "Accepted risk"},
+    ])
+    asyncio.run(scan_runner.start_scan(adb(), aid, background=False, require_enabled=False))
+    assert [d["key"] for d in mongo["remediation_statuses"].find({"assessment_id": aid})] == ["k2"]

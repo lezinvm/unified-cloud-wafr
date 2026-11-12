@@ -109,7 +109,16 @@ accounts / Azure subscriptions, in any number of orgs:
   id, press "New assessment", pick environment + regions.
 - **Fetch memory:** every gcloud call is a ~100 MB process; the fetcher caps calls in flight
   (`GCP_FETCH_CONCURRENCY`, default 4, dev 3). Dev backend `mem_limit: 1g`.
-- Targeted re-checks (`/api/checks/rerun`) fetch into a temp file and never replace the stored full fetch.
+- Targeted re-checks (`/api/checks/rerun`, `backend/targeted_check_runner.py`) fetch into a temp file
+  and never replace the stored full fetch. Rules (fixed after a false "Fixed" bug):
+  - services fetched = exactly the keys the check functions read (`services_read_by`, traced on the
+    last full fetch; derived keys pull their parent list). The old hand map missed 73 of 126 controls.
+  - any needed service not read OK, resource not found, or UNKNOWN result -> `status: "unverified"`,
+    **nothing written**. Missing data is never "fixed".
+  - resource match is exact (name or last path segment), not substring.
+  - "fixed" only when the resource (or, check-level, every resource) is PASS in fresh data; the check
+    flips to pass only when no resource fails; score recomputed as passed/(passed+failed) from `checks`.
+  - a full scan clears pass/fail marks left by re-checks (`source: live-recheck`); manual marks stay.
 - A fetch with fewer than 20 readable services is rejected and previous data kept.
 - Last real result for `A-GCP-lens-wafr-gcp`: 42 services readable, score 20, 33 fail / 8 pass, 42 unknown, 43 n/a, 137 resources.
 - Control catalog: `backend/seed_data/control_catalog.csv` (126 controls; columns for gcp/aws/azure checks and CIS/SOC2/ISO/HIPAA mappings).
@@ -170,7 +179,7 @@ accounts / Azure subscriptions, in any number of orgs:
 ## 8. Verification
 
 ```bash
-cd backend && python -m pytest tests -q          # 96 tests; needs a reachable MongoDB
+cd backend && python -m pytest tests -q          # 100 tests; needs a reachable MongoDB
 pnpm build                                       # frontend
 pnpm exec tsc --noEmit -p .                      # 0 errors
 ```

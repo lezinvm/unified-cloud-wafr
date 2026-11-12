@@ -103,7 +103,55 @@ CHECK_SERVICES_MAP: Dict[str, List[str]] = {
 }
 
 
+# Sub-resource keys the fetcher builds from a parent list; asking for the
+# child alone would return an empty (and falsely "compliant") list.
+DERIVED_FROM = {
+    "iam_service_account_keys": "iam_service_accounts",
+    "storage_buckets_detailed": "storage_buckets",
+    "sql_backups": "sql_instances",
+    "pubsub_topics_detailed": "pubsub_topics",
+}
+
+
+class _ReadTracker(dict):
+    """Services dict that records every key a check function reads."""
+
+    def __init__(self, data: dict):
+        super().__init__(data)
+        self.read: set = set()
+
+    def get(self, key, default=None):
+        self.read.add(key)
+        return super().get(key, default)
+
+    def __getitem__(self, key):
+        self.read.add(key)
+        return super().__getitem__(key)
+
+    def __contains__(self, key):
+        self.read.add(key)
+        return super().__contains__(key)
+
+
+def services_read_by(fns: list, sample_services: dict) -> List[str]:
+    """Exact service keys the check functions read, found by running them on
+    the last full fetch of this scope (and on empty data, for early exits)."""
+    keys: set = set()
+    for data in (sample_services or {}, {}):
+        for fn in fns:
+            t = _ReadTracker(data)
+            try:
+                fn(t)
+            except Exception:  # noqa: BLE001 - only the keys read matter here
+                pass
+            keys |= t.read
+    keys |= {DERIVED_FROM[k] for k in keys if k in DERIVED_FROM}
+    return sorted(keys)
+
+
 def get_services_for_check(check_id: str) -> List[str]:
+    """Legacy hand-written map. Not used for re-checks any more (it missed most
+    controls); kept for reference."""
     cid = check_id.strip().upper()
     if cid in CHECK_SERVICES_MAP:
         return CHECK_SERVICES_MAP[cid]
@@ -189,8 +237,20 @@ async def rerun_single_check(
     tokens_str = ctrl.get(provider_registry.catalog_column, "") if provider_registry else ctrl.get(f"{prov_name}_checks", "")
     tokens = [t.strip() for t in tokens_str.split(";") if t.strip()]
 
-    # 1. Fetch targeted live data from the cloud
-    services_to_fetch = get_services_for_check(check_id)
+    fns = [f for f in (provider_registry.get(t) for t in tokens) if f]
+    if not fns:
+        return _unverified(f"No automated {prov.label} check exists for {check_id}; it can't be re-checked.")
+
+    # 1. Fetch exactly the services these check functions read.
+    sample = {}
+    try:
+        stored = json.loads(prov.fetch_path(scope).read_text(encoding="utf-8"))
+        sample = ((stored.get(prov.scope_key) or {}).get(scope) or {}).get("services", {})
+    except (OSError, ValueError):
+        pass
+    services_to_fetch = services_read_by(fns, sample)
+    if not services_to_fetch:
+        return _unverified(f"Could not tell which cloud data {check_id} needs. Run a full scan.")
     # Partial fetch goes to its own temp file: it must never replace the
     # stored full fetch of this scope.
     try:
@@ -216,125 +276,91 @@ async def rerun_single_check(
     scope_data = (fetched_data.get(prov.scope_key) or {}).get(scope) or {}
     live_services = scope_data.get("services", {})
 
-    provider_registry = get_provider(prov_name)
-    raw_results = []
-    for tok in tokens:
-        fn = provider_registry.get(tok)
-        if fn:
-            raw_results.extend(fn(live_services))
 
-    # Evaluate verdict
     now_iso = datetime.now(timezone.utc).isoformat()
-    failing_results = [r for r in raw_results if r.get("status") == "FAIL"]
-    passing_results = [r for r in raw_results if r.get("status") == "PASS"]
+    who = user_id or asm.get("user_id")
 
-    # Check if a specific resource was targeted
-    passed = False
-    evidence = ""
+    # ---- Guard 1: the fresh data must really have been read. ----------------
+    # A service that is missing or blocked returns no items, and "no items"
+    # must never be read as "fixed".
+    unread = [k for k in services_to_fetch
+              if not (isinstance(live_services.get(k), dict) and live_services[k].get("ok"))]
+    if unread:
+        return _unverified(f"Could not read {', '.join(unread)} from the cloud just now, so nothing was "
+                           f"changed. Try again, or run a full scan.")
+
+    # ---- Run the real check functions on the fresh data. --------------------
+    results = []
+    for fn in fns:
+        results.extend(fn(live_services))
+
+    def same(a: str, b: str) -> bool:
+        a, b = (a or "").strip().lower(), (b or "").strip().lower()
+        return bool(a) and (a == b or a.rsplit("/", 1)[-1] == b.rsplit("/", 1)[-1])
+
+    fails = [r for r in results if r.get("status") == "FAIL"]
+    unknown = [r for r in results if r.get("status") not in ("PASS", "FAIL")]
 
     if resource_arn:
-        target_norm = resource_arn.lower().strip()
-        matching_fail = [r for r in failing_results if target_norm in r.get("resource", "").lower() or r.get("resource", "").lower() in target_norm]
-        matching_pass = [r for r in passing_results if target_norm in r.get("resource", "").lower() or r.get("resource", "").lower() in target_norm]
+        mine = [r for r in results if same(r.get("resource", ""), resource_arn)]
+        if not mine:
+            return _unverified(f"'{resource_arn}' was not found in the live data. If you deleted it, "
+                               f"run a full scan to confirm.")
+        if any(r.get("status") == "FAIL" for r in mine):
+            ev = next(r for r in mine if r.get("status") == "FAIL").get("evidence", "")
+            await _status(db, assessment_id, check_id, resource_arn, "fail", f"Live re-check: still failing. {ev}", who, now_iso)
+            return {"passed": False, "status": "fail", "evidence": ev, "message": f"Still failing: {ev}"}
+        if any(r.get("status") != "PASS" for r in mine):
+            return _unverified(f"The live data isn't enough to judge '{resource_arn}'.")
+        ev = mine[0].get("evidence", "")
+        await _status(db, assessment_id, check_id, resource_arn, "fixed", f"Live re-check passed: {ev}", who, now_iso)
+        out = {"passed": True, "status": "fixed", "evidence": ev, "message": f"Verified in the live cloud: {ev}"}
+        if not fails and not unknown:  # the last failing resource of this check was fixed
+            out["updated_score"] = await _mark_check_passed(db, assessment_id, check_id, now_iso)
+        return out
 
-        if matching_fail:
-            passed = False
-            evidence = matching_fail[0].get("evidence", "Resource failed compliance check.")
-        elif matching_pass or len(failing_results) == 0:
-            passed = True
-            evidence = matching_pass[0].get("evidence", "Resource verified compliant in live cloud.") if matching_pass else "Resource compliant."
-        else:
-            passed = False
-            evidence = "Resource state could not be verified compliant."
-    else:
-        # Check-level rerun across all impacted resources
-        if len(failing_results) == 0 and (len(passing_results) > 0 or len(raw_results) == 0):
-            passed = True
-            evidence = "All resources verified compliant per live cloud scan."
-        else:
-            passed = False
-            evidence = "; ".join(r.get("evidence", "") for r in failing_results[:3]) or "Unmet security configuration requirements detected."
+    # Check-level re-check: every resource must pass.
+    if not results:
+        return _unverified("No resources for this check were found in the live data. Run a full scan to confirm.")
+    if fails:
+        ev = "; ".join(r.get("evidence", "") for r in fails[:3])
+        await _status(db, assessment_id, check_id, None, "fail", f"Live re-check: still failing. {ev}", who, now_iso)
+        return {"passed": False, "status": "fail", "evidence": ev,
+                "message": f"{len(fails)} resource(s) still failing: {ev}"}
+    if unknown:
+        return _unverified("The live data isn't enough to judge every resource of this check.")
+    await _status(db, assessment_id, check_id, None, "fixed", "Live re-check passed: all resources compliant.", who, now_iso)
+    return {"passed": True, "status": "fixed", "evidence": "All resources compliant.",
+            "message": f"Verified in the live cloud: all {len(results)} resource(s) compliant.",
+            "updated_score": await _mark_check_passed(db, assessment_id, check_id, now_iso)}
 
-    # 3. Update database based on REAL result
-    status_key = f"{assessment_id}::{check_id}::{resource_arn or '__check_level__'}"
-    if passed:
-        # Mark remediation status as fixed
-        await db["remediation_statuses"].update_one(
-            {"key": status_key},
-            {
-                "$set": {
-                    "key": status_key,
-                    "assessment_id": assessment_id,
-                    "check_id": check_id,
-                    "resource_raw": resource_arn or "__check_level__",
-                    "status": "fixed",
-                    "note": f"Live verification passed: {evidence}",
-                    "user_id": user_id or asm.get("user_id", "usr-01"),
-                    "updated_at": now_iso,
-                }
-            },
-            upsert=True,
-        )
 
-        # If overall check has no more failing resources, update finding and check records
-        if len(failing_results) == 0:
-            await db["findings"].update_one(
-                {"assessment_id": assessment_id, "check_id": check_id},
-                {"$set": {"status": "pass", "description": evidence, "updated_at": now_iso}},
-            )
-            await db["checks"].update_one(
-                {"assessment_id": assessment_id, "id": check_id},
-                {"$set": {"status": "pass", "description": evidence}},
-            )
+def _unverified(msg: str) -> Dict[str, Any]:
+    """Could not decide from live data: nothing is changed in the database."""
+    return {"passed": False, "status": "unverified", "evidence": msg, "message": msg}
 
-        # Recalculate assessment metrics
-        all_findings = await db["findings"].find({"assessment_id": assessment_id}).to_list(300)
-        failing_count = sum(1 for f in all_findings if f.get("status") == "fail")
-        total_checks = asm.get("total_checks", len(all_findings) or 46)
-        passed_count = max(0, total_checks - failing_count)
-        new_score = min(100, max(50, round((passed_count / max(1, total_checks)) * 100)))
 
-        await db["assessments"].update_one(
-            {"id": assessment_id},
-            {
-                "$set": {
-                    "score": new_score,
-                    "passed_checks": passed_count,
-                    "failed_checks": failing_count,
-                    "updated_at": now_iso,
-                }
-            },
-        )
+async def _status(db, assessment_id, check_id, resource, status, note, user_id, now_iso) -> None:
+    raw = resource or "__check_level__"
+    key = f"{assessment_id}::{check_id}::{raw}"
+    await db["remediation_statuses"].update_one({"key": key}, {"$set": {
+        "key": key, "assessment_id": assessment_id, "check_id": check_id, "resource_raw": raw,
+        "status": status, "note": note, "source": "live-recheck", "user_id": user_id, "updated_at": now_iso,
+    }}, upsert=True)
 
-        return {
-            "passed": True,
-            "status": "fixed",
-            "evidence": evidence,
-            "message": f"Live check passed: {evidence}",
-            "updated_score": new_score,
-        }
-    else:
-        # DO NOT mark as fixed! Keep as failing
-        await db["remediation_statuses"].update_one(
-            {"key": status_key},
-            {
-                "$set": {
-                    "key": status_key,
-                    "assessment_id": assessment_id,
-                    "check_id": check_id,
-                    "resource_raw": resource_arn or "__check_level__",
-                    "status": "fail",
-                    "note": f"Live check verified non-compliant: {evidence}",
-                    "user_id": user_id or asm.get("user_id", "usr-01"),
-                    "updated_at": now_iso,
-                }
-            },
-            upsert=True,
-        )
 
-        return {
-            "passed": False,
-            "status": "fail",
-            "evidence": evidence,
-            "message": f"Live check still failing: {evidence}",
-        }
+async def _mark_check_passed(db, assessment_id: str, check_id: str, now_iso: str) -> int:
+    """Every resource of the check now passes in the live cloud: record it and
+    recompute the score with the scan's formula (passed / (passed + failed))."""
+    note = "Verified compliant by a live re-check."
+    await db["findings"].update_one({"assessment_id": assessment_id, "check_id": check_id},
+                                    {"$set": {"status": "pass", "description": note, "updated_at": now_iso}})
+    await db["checks"].update_one({"assessment_id": assessment_id, "id": check_id},
+                                  {"$set": {"status": "pass", "description": note}})
+    checks = await db["checks"].find({"assessment_id": assessment_id}, {"_id": 0, "status": 1}).to_list(1000)
+    passed = sum(1 for c in checks if c.get("status") == "pass")
+    failed = sum(1 for c in checks if c.get("status") == "fail")
+    score = round(passed / (passed + failed) * 100) if passed + failed else 0
+    await db["assessments"].update_one({"id": assessment_id}, {"$set": {
+        "score": score, "passed_checks": passed, "failed_checks": failed, "updated_at": now_iso}})
+    return score

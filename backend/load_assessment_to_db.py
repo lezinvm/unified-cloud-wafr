@@ -386,6 +386,14 @@ def main() -> None:
                            ("assessment_compliance_scores", cscores)):
             replace(db, coll, asm_id, docs)
         db["milestones"].update_one({"id": m["id"]}, {"$set": m}, upsert=True)
+        # A full scan is newer than any earlier live re-check: drop pass/fail
+        # marks those re-checks left (manual "ignored"/"can't fix" marks stay).
+        cleared = db["remediation_statuses"].delete_many({"assessment_id": asm_id, "$or": [
+            {"source": "live-recheck"},
+            {"note": {"$regex": "^Live (verification passed|check verified)"}},  # older re-check marks
+        ]}).deleted_count
+        if cleared:
+            print(f"  [statuses] cleared {cleared} mark(s) from earlier live re-checks")
 
     if args.real_only and not args.dry_run:
         legacy = {"$or": [{"assessment_id": {"$exists": False}}, {"assessment_id": None}]}
