@@ -1,6 +1,9 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useApp, Cloud } from '../context';
 import { AssessmentInfo } from '../data/assessmentData';
+import { REAL_DATA_ONLY } from '../config/realData';
+import { api } from '../services/apiClient';
+import { RegionPicker, regionsLabel } from '../components/RegionPicker';
 import { AwsWordmark, AzureMark, GcpMark, CloudifyOpsSymbol } from '../components/CloudLogo';
 import { INITIAL_ORG_QUESTIONS } from '../data/questionnaireData';
 import { AccountCredentialsModal } from '../components/AccountCredentialsModal';
@@ -475,8 +478,12 @@ function Step1({
   setAssessmentName,
   accounts,
   existingDuplicate,
+  regionSel,
+  setRegionSel,
   onNext,
 }: {
+  regionSel: string[];
+  setRegionSel: (r: string[]) => void;
   selectedCloud: Cloud;
   selectedAccount: string;
   setSelectedAccount: (id: string) => void;
@@ -514,8 +521,22 @@ function Step1({
   };
   const activeRegion = regions.find(r => r.id === selectedRegion) || regions[0];
 
-  const handleTest = () => {
+  const [testMsg, setTestMsg] = useState<{ ok: boolean; message: string; hint: string } | null>(null);
+  useEffect(() => { setTestState('idle'); setTestMsg(null); }, [selectedAccount]);
+
+  const handleTest = async () => {
     setTestState('testing');
+    if (REAL_DATA_ONLY) {
+      // Real check: the scanner identity must be able to read this account now.
+      try {
+        const r = await api.verifyCloudAccount(activeAccount.id);
+        setTestMsg(r);
+      } catch (e: any) {
+        setTestMsg({ ok: false, message: e?.message || String(e), hint: '' });
+      }
+      setTestState('idle');
+      return;
+    }
     setTimeout(() => setTestState('ok'), 1200);
   };
 
@@ -607,7 +628,7 @@ function Step1({
           type="text"
           value={assessmentName}
           onChange={e => setAssessmentName(e.target.value)}
-          placeholder={`e.g. ${cloudObj.short} Production — ${activeRegion.id} Full Review`}
+          placeholder={`e.g. ${cloudObj.short} Production — ${REAL_DATA_ONLY ? regionsLabel(regionSel) : activeRegion.id} Full Review`}
         />
       </div>
 
@@ -816,8 +837,17 @@ function Step1({
           <label className="font-semibold text-sm text-gray-900">
             3. Select Region <span className="text-red-400">*</span>
           </label>
-          <span className="text-[11px] text-blue-600 font-medium">Single region only</span>
+          <span className="text-[11px] text-blue-600 font-medium">
+            {REAL_DATA_ONLY ? regionsLabel(regionSel) : 'Single region only'}
+          </span>
         </div>
+        {REAL_DATA_ONLY ? (
+          <RegionPicker
+            cloudAccountId={accounts.some(a => a.id === activeAccount.id) ? activeAccount.id : null}
+            value={regionSel}
+            onChange={setRegionSel}
+          />
+        ) : (<>
         <p className="text-xs text-gray-500">
           Reviews evaluate architecture and technical resources within one designated {cloudObj.short} region per review run.
         </p>
@@ -933,6 +963,7 @@ function Step1({
             </>
           )}
         </div>
+        </>)}
       </div>
 
       {/* ── DUPLICATE ASSESSMENT WARNING BANNER ── */}
@@ -948,7 +979,7 @@ function Step1({
           <div className="flex-1">
             <div className="font-bold text-sm text-blue-950">Assessment Already Exists for this Scope</div>
             <p className="mt-0.5 text-blue-800">
-              An assessment for account <strong>{activeAccount.name}</strong> in <strong>{accountType.toUpperCase()}</strong> ({selectedRegion}) already exists: <strong>{existingDuplicate.name}</strong> ({existingDuplicate.id}).
+              An assessment for account <strong>{activeAccount.name}</strong> in <strong>{accountType.toUpperCase()}</strong> ({REAL_DATA_ONLY ? regionsLabel(regionSel) : selectedRegion}) already exists: <strong>{existingDuplicate.name}</strong> ({existingDuplicate.id}).
             </p>
             <p className="mt-1 text-blue-700 font-medium">
               Duplicate assessments for the same account, environment, and region are disallowed. Proceeding to Step 3 will allow you to <strong>Rerun</strong> this assessment to refresh its findings and score.
@@ -1099,7 +1130,17 @@ function Step1({
             )}
             <span>{testState === 'testing' ? 'Testing…' : 'Test connection'}</span>
           </button>
-          {testState === 'ok' && (
+          {REAL_DATA_ONLY && testMsg && (
+            <div role="status" className={`text-xs font-medium flex flex-col gap-1 ${testMsg.ok ? 'text-emerald-600' : 'text-rose-600'}`}>
+              <span>{testMsg.ok ? '✓ ' : '✕ '}{testMsg.message}</span>
+              {testMsg.hint && (
+                <code className="block p-2 rounded-lg bg-gray-50 border border-gray-200 text-[11px] text-gray-700 whitespace-pre-wrap break-all select-all">
+                  {testMsg.hint}
+                </code>
+              )}
+            </div>
+          )}
+          {!REAL_DATA_ONLY && testState === 'ok' && (
             <span className="flex items-center gap-1.5 text-xs text-emerald-600 font-medium">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="20 6 9 17 4 12"/>
@@ -1817,6 +1858,7 @@ function Step3({
   accObj,
   existingDuplicate,
   isSubmitting,
+  regionSel,
   onBack,
   onStart,
   onRerun,
@@ -1831,6 +1873,7 @@ function Step3({
   accObj: { id: string; name: string; num: string; env: string; resources: string };
   existingDuplicate: AssessmentInfo | null;
   isSubmitting: boolean;
+  regionSel: string[];
   onBack: () => void;
   onStart: () => void;
   onRerun: () => void;
@@ -1857,7 +1900,9 @@ function Step3({
     ['Cloud Provider', `${cloudObj.label} (${cloudObj.short})`],
     ['Account Scope', `${accObj.name} (ID: ${accObj.num}) · 1 ${selectedCloud === 'azure' ? 'Subscription' : selectedCloud === 'gcp' ? 'Project' : 'Account'}`],
     ['Account Environment', accountType === 'prod' ? 'Production (Prod)' : accountType === 'pre-prod' ? 'Pre-Production (Staging / QA)' : 'Development (Dev / Sandbox)'],
-    ['Target Region', `${regObj.id} (${regObj.name}) · 1 Region`],
+    ['Target Region', REAL_DATA_ONLY
+      ? `${regionsLabel(regionSel)}${regionSel.length ? ` · ${regionSel.length} Region${regionSel.length === 1 ? '' : 's'}` : ''} · account-wide settings always included`
+      : `${regObj.id} (${regObj.name}) · 1 Region`],
     ['Account Questionnaire', `${accountAnswered} of ${accountQuestions.length} answered`],
     ['Account Manual Checks', `${verifiedAccountChecks} of ${allAccountManualChecks.length} checks verified`],
     ['Organization Questionnaire', `${orgAnswered} of ${orgQuestions.length} answered`],
@@ -1910,7 +1955,7 @@ function Step3({
           <div className="flex-1">
             <div className="font-bold text-sm text-blue-950">Duplicate Partition: Rerun Existing Assessment</div>
             <p className="mt-0.5 text-blue-800">
-              An assessment with this exact scope (<strong>{accObj?.name}</strong>, <strong>{accountType.toUpperCase()}</strong>, <strong>{selectedRegion}</strong>) already exists as <strong>{existingDuplicate.name}</strong> ({existingDuplicate.id}).
+              An assessment with this exact scope (<strong>{accObj?.name}</strong>, <strong>{accountType.toUpperCase()}</strong>, <strong>{REAL_DATA_ONLY ? regionsLabel(regionSel) : selectedRegion}</strong>) already exists as <strong>{existingDuplicate.name}</strong> ({existingDuplicate.id}).
             </p>
             <p className="mt-1 text-blue-700 font-medium">
               Per partition rules, duplicate assessments cannot be created for the same account, environment, and region. Click <strong>Rerun Assessment</strong> below to refresh its resources, run updated check evaluations, and compute fresh pillar scores.
@@ -1978,7 +2023,7 @@ function Step3({
         <div>
           <div className="text-sm font-semibold text-gray-800">Estimated duration: ~6 minutes</div>
           <div className="text-xs text-gray-500">
-            Scanning {regObj.id} resources on {accObj.name} [{accountType.toUpperCase()}] · Read-only access · Zero workload disruption
+            Scanning {REAL_DATA_ONLY ? regionsLabel(regionSel) : regObj.id} resources on {accObj.name} [{accountType.toUpperCase()}] · Read-only access · Zero workload disruption
           </div>
         </div>
       </div>
@@ -2043,6 +2088,16 @@ function Step3({
   );
 }
 
+/** Region set of a stored assessment, sorted ([] = all regions). Mirrors
+ *  backend scan_runner.stored_regions: older assessments only have a label. */
+const ALL_REGION_LABELS = ['', 'all', 'all regions', 'global', 'multi-region'];
+function storedRegions(a: AssessmentInfo): string[] {
+  const raw = Array.isArray(a.regions) && a.regions.length > 0
+    ? a.regions
+    : (a.region || '').split(',');
+  return raw.map(r => r.trim().toLowerCase()).filter(r => !ALL_REGION_LABELS.includes(r)).sort();
+}
+
 /* ── Main Wizard Component ── */
 export function Wizard() {
   return <WizardInner />;
@@ -2078,6 +2133,8 @@ function WizardInner() {
   const [selectedAccount, setSelectedAccount] = useState('acc-aws-01');
   const [accountType, setAccountType] = useState<'prod' | 'pre-prod' | 'dev'>('prod');
   const [selectedRegion, setSelectedRegion] = useState('us-east-1');
+  // Real-data-only builds: region set of the new assessment ([] = all regions).
+  const [regionSel, setRegionSel] = useState<string[]>([]);
   const [questions, setQuestions] = useState<QuestionnaireItem[]>(() => {
     return INITIAL_QUESTIONS.map(q => {
       const org = orgQuestions?.find(o => o.id === q.id);
@@ -2168,7 +2225,8 @@ function WizardInner() {
     resources: 'Connected Account',
   } : null;
 
-  const accountsList = formattedRealAccounts.length > 0
+  // Real-data-only: only the user's real accounts, never demo ones.
+  const accountsList = REAL_DATA_ONLY || formattedRealAccounts.length > 0
     ? formattedRealAccounts
     : userAccount
     ? [userAccount, ...rawAccounts]
@@ -2197,12 +2255,19 @@ function WizardInner() {
         a.accountId === selectedAccount ||
         a.account_identifier === targetScope ||
         a.account_identifier === selectedAccount ||
-        (accObj?.name && a.accountName?.toLowerCase() === accObj.name.toLowerCase());
+        // Names aren't unique; real builds match by id only (like the backend).
+        (!REAL_DATA_ONLY && accObj?.name && a.accountName?.toLowerCase() === accObj.name.toLowerCase());
       if (!aMatch) return false;
 
       const envA = (a.environment || 'prod').toLowerCase();
       const envB = accountType.toLowerCase();
       if (envA !== envB) return false;
+
+      if (REAL_DATA_ONLY) {
+        // Same rule as the backend: identical region set ([] = all regions;
+        // older assessments labelled "global"/"All regions" are all regions).
+        return storedRegions(a).join(',') === [...regionSel].sort().join(',');
+      }
 
       const regA = a.regions && a.regions.length > 0 ? a.regions : a.region ? [a.region] : [];
       return (
@@ -2212,7 +2277,7 @@ function WizardInner() {
         (a.region && a.region.toLowerCase() === selectedRegion.toLowerCase())
       );
     }) || null;
-  }, [assessments, selectedCloud, selectedAccount, accObj, targetScope, accountType, selectedRegion]);
+  }, [assessments, selectedCloud, selectedAccount, accObj, targetScope, accountType, selectedRegion, regionSel]);
 
   const handleRerun = async () => {
     if (!existingDuplicate) return;
@@ -2231,13 +2296,16 @@ function WizardInner() {
       const ok = await startAccountScan(realAcc.id, {
         name: assessmentName.trim() || undefined,
         environment: accountType,
-        regions: selectedRegion ? [selectedRegion] : [],
+        regions: REAL_DATA_ONLY ? regionSel : selectedRegion ? [selectedRegion] : [],
       });
       setIsSubmitting(false);
       if (ok) {
         go('live-scan');
         return;
       }
+    } else if (REAL_DATA_ONLY) {
+      setIsSubmitting(false);
+      showToast('Add a cloud account first', 'info', 'Save it in Settings > Cloud accounts, then start the assessment.');
     } else {
       runOrUpdateAssessment({
         cloud: selectedCloud,
@@ -2290,6 +2358,8 @@ function WizardInner() {
             setAccountType={setAccountType}
             selectedRegion={selectedRegion}
             setSelectedRegion={setSelectedRegion}
+            regionSel={regionSel}
+            setRegionSel={setRegionSel}
             assessmentName={assessmentName}
             setAssessmentName={setAssessmentName}
             accounts={accountsList}
@@ -2316,6 +2386,7 @@ function WizardInner() {
             accObj={accObj}
             existingDuplicate={existingDuplicate}
             isSubmitting={isSubmitting}
+            regionSel={regionSel}
             onBack={back}
             onSchedule={() => setIsScheduleModalOpen(true)}
             onStart={handleStart}

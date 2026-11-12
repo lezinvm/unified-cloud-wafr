@@ -371,3 +371,18 @@ def test_targeted_recheck_has_no_project_fallback(mongo, adb):
                                      "org_id": "org_a", "user_id": "user-a"})
     with pytest.raises(ValueError, match="no valid"):
         asyncio.run(targeted_check_runner.rerun_single_check(adb(), "A-noscope", "NET-01"))
+
+
+def test_verify_account_runs_real_access_check(mongo, fake_gcp, adb):
+    import scan_runner
+    _account(mongo, "cfg-ok", "readable-proj")
+    _account(mongo, "cfg-no", "noaccess-proj2")
+    ok = asyncio.run(scan_runner.verify_account(adb(), "cfg-ok"))
+    no = asyncio.run(scan_runner.verify_account(adb(), "cfg-no"))
+    assert ok["ok"] is True and ok["scope"] == "readable-proj"
+    assert no["ok"] is False and "roles/viewer" in no["hint"]
+
+
+def test_api_verify_is_tenant_scoped(client, mongo):
+    _account(mongo, "cfg-vb", "org-b-proj", org="org_b", user="user-b")
+    assert client.post("/api/cloud-accounts/cfg-vb/verify", headers=A()).status_code == 404

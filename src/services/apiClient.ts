@@ -302,6 +302,10 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ cloud_account_id: cloudAccountId, ...spec }),
     }),
+  /** Real connection test (runs the scanner's access check now). */
+  verifyCloudAccount: (cloudAccountId: string) =>
+    apiRequest<{ ok: boolean; scope: string; message: string; hint: string }>(
+      `/cloud-accounts/${encodeURIComponent(cloudAccountId)}/verify`, { method: 'POST' }),
   getCloudAccountAccess: (cloudAccountId: string) =>
     apiRequest<CloudAccountAccess>(`/cloud-accounts/${encodeURIComponent(cloudAccountId)}/access`),
   getScan: (scanId: string) => apiRequest<LiveScanStatus>(`/scans/${encodeURIComponent(scanId)}`),

@@ -653,6 +653,14 @@ async def start_scan(payload: Dict[str, Any]):
         status = 404 if str(e).endswith("not found.") else 409
         raise HTTPException(status_code=status, detail=f"{e} {e.hint}".strip())
 
+@app.post("/api/cloud-accounts/{account_id}/verify")
+async def verify_cloud_account(account_id: str):
+    """Real connection test: can the scanner identity read this account now?"""
+    try:
+        return await scan_runner.verify_account(db, account_id)
+    except scan_runner.ScanError as e:
+        raise HTTPException(status_code=404 if str(e).endswith("not found.") else 409, detail=str(e))
+
 @app.get("/api/cloud-accounts/{account_id}/access")
 async def cloud_account_access(account_id: str):
     """What a scan of this account will target, and what access it needs."""

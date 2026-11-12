@@ -71,6 +71,7 @@ POLICIES: list[Rule] = [
     R("POST", "/api/cloud-accounts", USER, body_id_owner="cloud_account"),
     R("DELETE", "/api/cloud-accounts/{account_id}", USER, path_owner=("cloud_account", "account_id")),
     R("GET", "/api/cloud-accounts/{account_id}/access", USER, path_owner=("cloud_account", "account_id")),
+    R("POST", "/api/cloud-accounts/{account_id}/verify", USER, path_owner=("cloud_account", "account_id")),
 
     R("GET", "/api/assessments", USER),
     R("GET", "/api/assessments/{assessment_id}", USER, path_owner=("assessment", "assessment_id")),

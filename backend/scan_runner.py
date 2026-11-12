@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import io
 import json
 import os
 import re
@@ -206,6 +207,26 @@ async def find_duplicate(db, org_id: str, cloud_account_id: str, scope: str, clo
         if (a.get("environment") or "prod") == environment and stored_regions(a) == sorted(regions):
             return a
     return None
+
+
+async def verify_account(db, cloud_account_id: str) -> dict:
+    """Real 'Test connection': run the provider's access check now (read-only,
+    seconds). Same check as the scan's first stage."""
+    acct = await db["cloud_accounts"].find_one({"id": cloud_account_id}, {"_id": 0})
+    if not acct:
+        raise ScanError("Cloud account not found.")
+    prov = _provider(acct.get("cloud") or "")
+    scope = _scope(prov, acct)
+    if not prov.verify_cmd:
+        return {"ok": False, "scope": scope, "message": f"No access check for {prov.label} yet.", "hint": ""}
+    log = io.StringIO()
+    try:
+        await _run(prov.verify_cmd(scope), BACKEND, log, VERIFY_TIMEOUT_S)
+    except ScanError as e:
+        return {"ok": False, "scope": scope, "hint": prov.hint(scope),
+                "message": f"The scanner cannot read {prov.label} {prov.scope_label} '{scope}' ({e})."}
+    return {"ok": True, "scope": scope, "hint": "",
+            "message": f"Read access to {prov.label} {prov.scope_label} '{scope}' confirmed."}
 
 
 async def create_assessment(db, cloud_account_id: str, spec: dict | None,

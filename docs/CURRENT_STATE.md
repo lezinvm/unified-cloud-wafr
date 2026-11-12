@@ -77,9 +77,12 @@ accounts / Azure subscriptions, in any number of orgs:
   without `environment` count as prod; region label `global`/`All regions` = all regions
   (`scan_runner.find_duplicate`, `stored_regions`). Another org on the same project is independent
   and is never revealed.
-- **UI:** the 3-step `Wizard` (Antigravity `29312cf`) is used in all builds; in real-only builds it
-  lists the user's real accounts, warns about duplicates and offers "Rerun Assessment", and starts
-  `startAccountScan` with one region. `src/screens/NewAssessmentReal.tsx` (account + environment +
+- **UI:** the 3-step `Wizard` (Antigravity `29312cf`) is used in all builds. In real-only builds it
+  lists only the user's real accounts (no demo fallback), uses `src/components/RegionPicker.tsx`
+  (All regions or several; list from the backend plus regions seen in the last scan, with resource
+  counts), "Test connection" calls `POST /api/cloud-accounts/{id}/verify` (the scanner's real access
+  check; shows the grant command on failure), warns about duplicates (exact region set, by account
+  id) and offers "Rerun Assessment", then starts `startAccountScan`. `src/screens/NewAssessmentReal.tsx` (account + environment +
   all/many regions) exists but is no longer routed. Settings > account > "New assessment" opens the wizard.
 - **Regions.** The fetch always covers the whole scope (stored once per scope). Each scan checks a
   copy filtered to the assessment's regions (`ScanProvider.filter_regions`). Items with no region
@@ -167,7 +170,7 @@ accounts / Azure subscriptions, in any number of orgs:
 ## 8. Verification
 
 ```bash
-cd backend && python -m pytest tests -q          # 94 tests; needs a reachable MongoDB
+cd backend && python -m pytest tests -q          # 96 tests; needs a reachable MongoDB
 pnpm build                                       # frontend
 pnpm exec tsc --noEmit -p .                      # 0 errors
 ```
