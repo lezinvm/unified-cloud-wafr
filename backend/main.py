@@ -466,6 +466,11 @@ async def get_remediation_statuses(request: Request, assessment_id: Optional[str
 
 @app.post("/api/remediations/status")
 async def save_remediation_status(payload: Dict[str, Any]):
+    # Real data: "fixed"/"fail" come only from a live re-check or a scan
+    # (written server-side). Users can still mark "ignored" (cant_fix) or reset.
+    if REAL_DATA_ONLY and payload.get("status") not in ("cant_fix", "pending"):
+        raise HTTPException(status_code=409, detail="A resource is marked fixed only when a live re-check "
+                                                    "or a scan verifies it in the cloud.")
     key = payload.get("key") or f"{payload.get('assessment_id')}::{payload.get('check_id')}"
     payload["key"] = key
     payload["updated_at"] = datetime.now(timezone.utc).isoformat()

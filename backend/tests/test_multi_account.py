@@ -459,6 +459,22 @@ def test_recheck_really_fixed_updates_honestly(mongo, fake_gcp, adb, monkeypatch
     a = mongo["assessments"].find_one({"id": aid})
     assert mongo["checks"].find_one({"assessment_id": aid, "id": "CMP-02"})["status"] == "pass"
     assert a["score"] == round(a["passed_checks"] / (a["passed_checks"] + a["failed_checks"]) * 100)
+    # Everything a scan computes follows: compliance, pillar scores, remediation flag.
+    verdicts = [c["verdict"] for d in mongo["assessment_compliance_scores"].find({"assessment_id": aid})
+                for r in d["requirements"] for c in r["controls"] if c["control_id"] == "CMP-02"]
+    assert verdicts and set(verdicts) == {"PASS"}
+    sec = [c for c in mongo["checks"].find({"assessment_id": aid, "pillar_id": "security"})]
+    assert a["pillar_scores"]["security"] == round(sum(c["status"] == "pass" for c in sec) / len(sec) * 100)
+    assert mongo["remediations"].find_one({"assessment_id": aid, "check_id": "CMP-02"})["resolved"] is True
+
+
+def test_browser_cannot_claim_fixed_in_real_data_mode(client, monkeypatch):
+    import main
+    monkeypatch.setattr(main, "REAL_DATA_ONLY", True)
+    body = {"assessment_id": "A-1", "check_id": "NET-01", "resource_raw": "fw", "status": "fixed"}
+    assert client.post("/api/remediations/status", json=body, headers=A()).status_code == 409
+    body["status"] = "cant_fix"  # "Ignored" stays a user decision
+    assert client.post("/api/remediations/status", json=body, headers=A()).status_code == 200
 
 
 def test_full_scan_clears_marks_from_rechecks(mongo, fake_gcp, adb):

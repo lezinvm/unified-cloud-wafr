@@ -350,17 +350,76 @@ async def _status(db, assessment_id, check_id, resource, status, note, user_id, 
 
 
 async def _mark_check_passed(db, assessment_id: str, check_id: str, now_iso: str) -> int:
-    """Every resource of the check now passes in the live cloud: record it and
-    recompute the score with the scan's formula (passed / (passed + failed))."""
+    """Every resource of the check now passes in the live cloud."""
+    await _status(db, assessment_id, check_id, None, "fixed",
+                  "Live re-check passed: all resources compliant.", None, now_iso)
+    return await apply_verified_fix(db, assessment_id, check_id, now_iso)
+
+
+async def apply_verified_fix(db, assessment_id: str, check_id: str, now_iso: str) -> int:
+    """Record a control that a live re-check verified as passing, and recompute
+    every number a full scan produces, with the same formulas as the loader:
+    score, pass/fail counts, pillar scores, best practices, compliance.
+    Same code for every cloud and lens (all of them derive from control verdicts)."""
+    try:
+        from backend import compliance, scan_providers
+        from backend.load_assessment_to_db import PILLAR_IDS, PILLAR_ALIASES, compliance_summary
+    except ModuleNotFoundError:
+        import compliance
+        import scan_providers
+        from load_assessment_to_db import PILLAR_IDS, PILLAR_ALIASES, compliance_summary
+
     note = "Verified compliant by a live re-check."
-    await db["findings"].update_one({"assessment_id": assessment_id, "check_id": check_id},
+    q = {"assessment_id": assessment_id}
+    await db["findings"].update_one({**q, "check_id": check_id},
                                     {"$set": {"status": "pass", "description": note, "updated_at": now_iso}})
-    await db["checks"].update_one({"assessment_id": assessment_id, "id": check_id},
-                                  {"$set": {"status": "pass", "description": note}})
-    checks = await db["checks"].find({"assessment_id": assessment_id}, {"_id": 0, "status": 1}).to_list(1000)
+    await db["checks"].update_one({**q, "id": check_id}, {"$set": {"status": "pass", "description": note}})
+    # Kept (the page showing it stays valid) but flagged; the next scan drops it.
+    await db["remediations"].update_many({**q, "check_id": check_id},
+                                         {"$set": {"resolved": True, "resolved_at": now_iso}})
+
+    checks = await db["checks"].find(q, {"_id": 0, "status": 1, "pillar_id": 1,
+                                         "best_practice_id": 1}).to_list(2000)
     passed = sum(1 for c in checks if c.get("status") == "pass")
     failed = sum(1 for c in checks if c.get("status") == "fail")
     score = round(passed / (passed + failed) * 100) if passed + failed else 0
-    await db["assessments"].update_one({"id": assessment_id}, {"$set": {
-        "score": score, "passed_checks": passed, "failed_checks": failed, "updated_at": now_iso}})
+
+    pillar_scores = {}
+    for p in PILLAR_IDS:
+        mine = [c for c in checks if c.get("pillar_id") == p]
+        ok = sum(1 for c in mine if c.get("status") == "pass")
+        pillar_scores[p] = round(ok / len(mine) * 100) if mine else 0
+    for full, alias in PILLAR_ALIASES.items():
+        pillar_scores[alias] = pillar_scores[full]
+
+    # A best practice passes when all its checks pass.
+    by_bp: dict = {}
+    for c in checks:
+        by_bp.setdefault(c.get("best_practice_id"), []).append(c.get("status"))
+    for bp_id, sts in by_bp.items():
+        if bp_id:
+            await db["best_practices"].update_one(
+                {**q, "id": bp_id}, {"$set": {"status": "fail" if "fail" in sts else "pass"}})
+    bps = await db["best_practices"].find(q, {"_id": 0, "status": 1}).to_list(1000)
+    failed_bps = sum(1 for b in bps if b.get("status") == "fail")
+
+    a = await db["assessments"].find_one({"id": assessment_id}, {"_id": 0}) or {}
+    update = {"score": score, "passed_checks": passed, "failed_checks": failed,
+              "pillar_scores": pillar_scores, "passed_bps": len(bps) - failed_bps,
+              "failed_bps": failed_bps, "status": "FAIL" if failed else "COMPLETED", "updated_at": now_iso}
+
+    # Compliance: same control verdicts -> same scoring as the scan.
+    results = a.get("control_results")
+    if isinstance(results, list) and results:
+        for r in results:
+            if r.get("control_id") == check_id:
+                r["verdict"], r["failing_resources"] = "PASS", 0
+        prov = scan_providers.get(a.get("cloud") or "")
+        scores = compliance.build_scores(prov.name, prov.label, assessment_id, results, now_iso)
+        await db["assessment_compliance_scores"].delete_many(q)
+        if scores:
+            await db["assessment_compliance_scores"].insert_many([dict(s) for s in scores])
+        update["control_results"] = results
+        update["compliance_summary"] = compliance_summary(scores)
+    await db["assessments"].update_one({"id": assessment_id}, {"$set": update})
     return score

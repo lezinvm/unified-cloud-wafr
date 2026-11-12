@@ -119,6 +119,11 @@ accounts / Azure subscriptions, in any number of orgs:
   - "fixed" only when the resource (or, check-level, every resource) is PASS in fresh data; the check
     flips to pass only when no resource fails; score recomputed as passed/(passed+failed) from `checks`.
   - a full scan clears pass/fail marks left by re-checks (`source: live-recheck`); manual marks stay.
+  - a verified fix recomputes everything a scan does (`apply_verified_fix`): score, pass/fail
+    counts, pillar scores, best practices, compliance (from `assessments.control_results`, stored by
+    the loader). Same code for every cloud and every lens (all derive from control verdicts).
+  - real-data mode: `POST /api/remediations/status` refuses `fixed`/`fail` from the browser (409);
+    only `cant_fix` (Ignored) and `pending` are user choices. The manual "Mark solved" button is off.
 - A fetch with fewer than 20 readable services is rejected and previous data kept.
 - Last real result for `A-GCP-lens-wafr-gcp`: 42 services readable, score 20, 33 fail / 8 pass, 42 unknown, 43 n/a, 137 resources.
 - Control catalog: `backend/seed_data/control_catalog.csv` (126 controls; columns for gcp/aws/azure checks and CIS/SOC2/ISO/HIPAA mappings).
@@ -179,7 +184,7 @@ accounts / Azure subscriptions, in any number of orgs:
 ## 8. Verification
 
 ```bash
-cd backend && python -m pytest tests -q          # 100 tests; needs a reachable MongoDB
+cd backend && python -m pytest tests -q          # 101 tests; needs a reachable MongoDB
 pnpm build                                       # frontend
 pnpm exec tsc --noEmit -p .                      # 0 errors
 ```

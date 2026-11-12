@@ -1463,6 +1463,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ...prev,
       [key]: { status, note },
     }));
+    // Real data: "fixed" is written by the backend after a live re-check
+    // verified it; the browser never claims it.
+    if (REAL_DATA_ONLY && status === 'fixed') return;
 
     api.saveRemediationStatus({
       assessment_id: selectedAssessmentId || 'default',
@@ -1532,6 +1535,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const toggleCheckSolved = (id: string) => {
+    if (REAL_DATA_ONLY) {
+      showToast('Use Rerun Check', 'info', 'A check is marked fixed only when a live re-check or scan verifies it.');
+      return;
+    }
     const assessmentKey = selectedAssessmentId || 'default';
     const key = `${assessmentKey}::${id}`;
     const newSolved = !solvedCheckIds[key];
@@ -1556,6 +1563,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ...prev,
       [key]: solved,
     }));
+    // Real data: the backend records verified results itself.
+    if (REAL_DATA_ONLY) return;
 
     api.saveRemediationStatus({
       assessment_id: selectedAssessmentId || 'default',

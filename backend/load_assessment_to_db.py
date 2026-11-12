@@ -256,10 +256,16 @@ def build(prov, scope, asm_id, controls, catalog, services, user_id, org_id, fet
         c.pop("_domain", None)
     scores = compliance.build_scores(prov.name, prov.label, asm_id, control_results,
                                      fetched_at or NOW)
-    assessment["compliance_summary"] = {
-        s["framework_id"]: {"score": s["score"], "coverage": s["coverage"],
-                            "failed": s["failed"], "total": s["total_requirements"]} for s in scores}
+    assessment["compliance_summary"] = compliance_summary(scores)
+    # Every control's verdict, so a verified live re-check can recompute
+    # compliance exactly like a scan (targeted_check_runner.apply_verified_fix).
+    assessment["control_results"] = control_results
     return assessment, findings, checks, best_practices, remediations, inventory, scores
+
+
+def compliance_summary(scores: list[dict]) -> dict:
+    return {s["framework_id"]: {"score": s["score"], "coverage": s["coverage"],
+                                "failed": s["failed"], "total": s["total_requirements"]} for s in scores}
 
 
 def build_inventory(prov, scope, asm_id, services):
