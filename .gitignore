@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+
+# Cloud credentials & keys
+*.key
+*.pem
+credentials.json
+.aws/
+.azure/
+
+# MCP fetch output snapshots
+mcp_fetch/*_result.json
+mcp_fetch/*_all_projects.json
+*_result.json
