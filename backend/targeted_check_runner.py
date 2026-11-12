@@ -233,7 +233,15 @@ async def rerun_single_check(
         raise ValueError(f"Assessment has no valid {prov.label} {prov.scope_label} id (got '{scope}').")
 
     catalog = load_control_catalog()
-    ctrl = catalog.get(check_id.upper()) or {}
+    # The UI may send a remediation/finding id (REM-<assessment>-CMP-02) instead
+    # of the control id (CMP-02). Statuses stay keyed by what the UI sent (so
+    # its screens match); the check itself runs by control id.
+    ui_id = check_id
+    control_id = await resolve_control_id(db, assessment_id, check_id, catalog)
+    if not control_id:
+        return _unverified(f"'{check_id}' is not a known check of this assessment.")
+    check_id = control_id
+    ctrl = catalog.get(check_id) or {}
     tokens_str = ctrl.get(provider_registry.catalog_column, "") if provider_registry else ctrl.get(f"{prov_name}_checks", "")
     tokens = [t.strip() for t in tokens_str.split(";") if t.strip()]
 
@@ -308,15 +316,15 @@ async def rerun_single_check(
                                f"run a full scan to confirm.")
         if any(r.get("status") == "FAIL" for r in mine):
             ev = next(r for r in mine if r.get("status") == "FAIL").get("evidence", "")
-            await _status(db, assessment_id, check_id, resource_arn, "fail", f"Live re-check: still failing. {ev}", who, now_iso)
+            await _status(db, assessment_id, ui_id, resource_arn, "fail", f"Live re-check: still failing. {ev}", who, now_iso)
             return {"passed": False, "status": "fail", "evidence": ev, "message": f"Still failing: {ev}"}
         if any(r.get("status") != "PASS" for r in mine):
             return _unverified(f"The live data isn't enough to judge '{resource_arn}'.")
         ev = mine[0].get("evidence", "")
-        await _status(db, assessment_id, check_id, resource_arn, "fixed", f"Live re-check passed: {ev}", who, now_iso)
+        await _status(db, assessment_id, ui_id, resource_arn, "fixed", f"Live re-check passed: {ev}", who, now_iso)
         out = {"passed": True, "status": "fixed", "evidence": ev, "message": f"Verified in the live cloud: {ev}"}
         if not fails and not unknown:  # the last failing resource of this check was fixed
-            out["updated_score"] = await _mark_check_passed(db, assessment_id, check_id, now_iso)
+            out["updated_score"] = await _mark_check_passed(db, assessment_id, ui_id, check_id, now_iso)
         return out
 
     # Check-level re-check: every resource must pass.
@@ -324,15 +332,15 @@ async def rerun_single_check(
         return _unverified("No resources for this check were found in the live data. Run a full scan to confirm.")
     if fails:
         ev = "; ".join(r.get("evidence", "") for r in fails[:3])
-        await _status(db, assessment_id, check_id, None, "fail", f"Live re-check: still failing. {ev}", who, now_iso)
+        await _status(db, assessment_id, ui_id, None, "fail", f"Live re-check: still failing. {ev}", who, now_iso)
         return {"passed": False, "status": "fail", "evidence": ev,
                 "message": f"{len(fails)} resource(s) still failing: {ev}"}
     if unknown:
         return _unverified("The live data isn't enough to judge every resource of this check.")
-    await _status(db, assessment_id, check_id, None, "fixed", "Live re-check passed: all resources compliant.", who, now_iso)
+    await _status(db, assessment_id, ui_id, None, "fixed", "Live re-check passed: all resources compliant.", who, now_iso)
     return {"passed": True, "status": "fixed", "evidence": "All resources compliant.",
             "message": f"Verified in the live cloud: all {len(results)} resource(s) compliant.",
-            "updated_score": await _mark_check_passed(db, assessment_id, check_id, now_iso)}
+            "updated_score": await _mark_check_passed(db, assessment_id, ui_id, check_id, now_iso)}
 
 
 def _unverified(msg: str) -> Dict[str, Any]:
@@ -349,11 +357,27 @@ async def _status(db, assessment_id, check_id, resource, status, note, user_id, 
     }}, upsert=True)
 
 
-async def _mark_check_passed(db, assessment_id: str, check_id: str, now_iso: str) -> int:
+async def _mark_check_passed(db, assessment_id: str, ui_id: str, check_id: str, now_iso: str) -> int:
     """Every resource of the check now passes in the live cloud."""
-    await _status(db, assessment_id, check_id, None, "fixed",
+    await _status(db, assessment_id, ui_id, None, "fixed",
                   "Live re-check passed: all resources compliant.", None, now_iso)
     return await apply_verified_fix(db, assessment_id, check_id, now_iso)
+
+
+async def resolve_control_id(db, assessment_id: str, given: str, catalog: dict) -> Optional[str]:
+    """Control id (e.g. CMP-02) for a control, remediation or finding id."""
+    gid = (given or "").strip()
+    if gid.upper() in catalog:
+        return gid.upper()
+    for coll in ("remediations", "findings"):
+        doc = await db[coll].find_one({"id": gid, "assessment_id": assessment_id}, {"_id": 0, "check_id": 1})
+        if doc and str(doc.get("check_id", "")).upper() in catalog:
+            return str(doc["check_id"]).upper()
+    # Id pattern REM-/FND-<assessment>-<CONTROL>: the control is the tail.
+    for cid in sorted(catalog, key=len, reverse=True):
+        if gid.upper().endswith("-" + cid):
+            return cid
+    return None
 
 
 async def apply_verified_fix(db, assessment_id: str, check_id: str, now_iso: str) -> int:

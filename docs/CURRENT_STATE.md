@@ -184,7 +184,7 @@ accounts / Azure subscriptions, in any number of orgs:
 ## 8. Verification
 
 ```bash
-cd backend && python -m pytest tests -q          # 101 tests; needs a reachable MongoDB
+cd backend && python -m pytest tests -q          # 102 tests; needs a reachable MongoDB
 pnpm build                                       # frontend
 pnpm exec tsc --noEmit -p .                      # 0 errors
 ```

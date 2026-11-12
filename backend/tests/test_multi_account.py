@@ -489,3 +489,17 @@ def test_full_scan_clears_marks_from_rechecks(mongo, fake_gcp, adb):
     ])
     asyncio.run(scan_runner.start_scan(adb(), aid, background=False, require_enabled=False))
     assert [d["key"] for d in mongo["remediation_statuses"].find({"assessment_id": aid})] == ["k2"]
+
+
+def test_recheck_accepts_remediation_id_from_ui(mongo, fake_gcp, adb, monkeypatch):
+    import targeted_check_runner as tcr
+    aid = _recheck_setup(mongo, fake_gcp, adb, monkeypatch, _fake_fetch)
+    rem_id = mongo["remediations"].find_one({"assessment_id": aid, "check_id": "CMP-02"})["id"]
+    assert rem_id.startswith("REM-") and rem_id != "CMP-02"
+    out = asyncio.run(tcr.rerun_single_check(adb(), aid, rem_id, resource_arn="vm-us-ip-proj"))
+    assert out["status"] == "fail", out  # really evaluated (VM still has a public IP)
+    st = mongo["remediation_statuses"].find_one({"assessment_id": aid})
+    assert st["check_id"] == rem_id  # keyed the way the UI reads it
+    assert tcr.rerun_single_check  # unknown ids are refused, not "fixed"
+    out = asyncio.run(tcr.rerun_single_check(adb(), aid, "REM-nothing-XYZ-99"))
+    assert out["status"] == "unverified"
